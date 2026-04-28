@@ -1,10 +1,89 @@
 -- ============================================================================
 -- Migration 005 — Tasks, assignments, late submissions, and RLS hardening.
--- Idempotent: safe to re-run.
+--
+-- This script is fully idempotent and self-healing. If scripts 001/002/003
+-- have not yet been run, the helper functions and updated_at trigger function
+-- will be created here too so the policies below compile.
+--
+-- Run order if starting from a blank database:
+--   001_init_schema.sql
+--   002_helper_functions.sql
+--   003_rls_policies.sql
+--   004_seed_demo_data.sql        (optional)
+--   005_tasks_and_late_submissions.sql   <-- this file
+--
+-- Postgres notes baked into this file:
+--   * `ALTER TYPE ... ADD VALUE` cannot run inside a transaction or DO block,
+--     so those statements are bare. `IF NOT EXISTS` makes them safe to re-run.
+--   * Trigger function in script 002 is named `public.touch_updated_at()`.
 -- ============================================================================
 
+
 -- ---------------------------------------------------------------------------
--- 1. New enums for tasks and assignments
+-- 0. Pre-flight: make sure helper functions exist. If 002 was already run
+--    these are no-ops; if it wasn't, the policies below will still compile.
+-- ---------------------------------------------------------------------------
+create or replace function public.current_user_role()
+returns user_role
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select role from public.profiles where id = auth.uid();
+$$;
+
+create or replace function public.current_user_team()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select team_id from public.profiles where id = auth.uid();
+$$;
+
+create or replace function public.is_manager_of(target_team uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.teams t
+    where t.id = target_team
+      and t.manager_id = auth.uid()
+  )
+  or (select role from public.profiles where id = auth.uid()) = 'main_admin';
+$$;
+
+create or replace function public.is_main_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    (select role from public.profiles where id = auth.uid()) = 'main_admin',
+    false
+  );
+$$;
+
+create or replace function public.touch_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end $$;
+
+
+-- ---------------------------------------------------------------------------
+-- 1. New enum: task_assignment_status
 -- ---------------------------------------------------------------------------
 do $$
 begin
@@ -18,29 +97,17 @@ begin
   end if;
 end $$;
 
--- Extend submission_status with new "late_submitted" and "missed" so the
--- submissions row mirrors assignment progression. submission_status is
--- referenced by RLS and pipeline code; we add values without removing any.
-do $$
-begin
-  if not exists (
-    select 1 from pg_enum e
-    join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'submission_status' and e.enumlabel = 'late_submitted'
-  ) then
-    alter type public.submission_status add value if not exists 'late_submitted';
-  end if;
-  if not exists (
-    select 1 from pg_enum e
-    join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'submission_status' and e.enumlabel = 'missed'
-  ) then
-    alter type public.submission_status add value if not exists 'missed';
-  end if;
-end $$;
+-- ---------------------------------------------------------------------------
+-- 2. Extend submission_status with late_submitted and missed.
+--    These ALTERs MUST be top-level statements (Postgres forbids them inside
+--    a transaction). Each is idempotent thanks to IF NOT EXISTS.
+-- ---------------------------------------------------------------------------
+alter type public.submission_status add value if not exists 'late_submitted';
+alter type public.submission_status add value if not exists 'missed';
+
 
 -- ---------------------------------------------------------------------------
--- 2. tasks and task_assignments tables
+-- 3. tasks and task_assignments tables
 -- ---------------------------------------------------------------------------
 create table if not exists public.tasks (
   id uuid primary key default gen_random_uuid(),
@@ -76,8 +143,9 @@ create index if not exists idx_task_assignments_assignee
 create index if not exists idx_task_assignments_task
   on public.task_assignments (task_id);
 
+
 -- ---------------------------------------------------------------------------
--- 3. submissions: task & late tracking columns
+-- 4. submissions: task & late tracking columns
 -- ---------------------------------------------------------------------------
 alter table public.submissions
   add column if not exists task_id uuid references public.tasks(id) on delete set null,
@@ -88,25 +156,30 @@ alter table public.submissions
   add column if not exists is_late boolean not null default false;
 
 create index if not exists idx_submissions_task on public.submissions (task_id);
-create index if not exists idx_submissions_assignment on public.submissions (task_assignment_id);
+create index if not exists idx_submissions_assignment
+  on public.submissions (task_assignment_id);
 
--- updated_at trigger reuse for new tables.
+
+-- ---------------------------------------------------------------------------
+-- 5. updated_at triggers (uses public.touch_updated_at from script 002)
+-- ---------------------------------------------------------------------------
 do $$
 begin
   if not exists (select 1 from pg_trigger where tgname = 'tasks_set_updated_at') then
     create trigger tasks_set_updated_at
       before update on public.tasks
-      for each row execute function public.set_updated_at();
+      for each row execute function public.touch_updated_at();
   end if;
   if not exists (select 1 from pg_trigger where tgname = 'task_assignments_set_updated_at') then
     create trigger task_assignments_set_updated_at
       before update on public.task_assignments
-      for each row execute function public.set_updated_at();
+      for each row execute function public.touch_updated_at();
   end if;
 end $$;
 
+
 -- ---------------------------------------------------------------------------
--- 4. Enable RLS + policies for tasks / task_assignments
+-- 6. Enable RLS + policies for tasks / task_assignments
 -- ---------------------------------------------------------------------------
 alter table public.tasks enable row level security;
 alter table public.task_assignments enable row level security;
@@ -133,7 +206,7 @@ drop policy if exists task_assignments_select on public.task_assignments;
 drop policy if exists task_assignments_member_self on public.task_assignments;
 drop policy if exists task_assignments_manager_write on public.task_assignments;
 
--- Members see only their own; managers see all in their team; admins see all.
+-- Members see their own; managers see all in their team; admins see all.
 create policy task_assignments_select on public.task_assignments for select using (
   public.current_user_role() = 'main_admin'
   or assignee_id = (select auth.uid())
@@ -168,10 +241,11 @@ create policy task_assignments_manager_write on public.task_assignments for all 
   )
 );
 
+
 -- ---------------------------------------------------------------------------
--- 5. RLS hardening: tighten manager write on announcements + materials so
---    managers cannot post global (team_id IS NULL) rows. Also add explicit
---    deny policies for service-role-only tables to make intent unambiguous.
+-- 7. RLS hardening: tighten manager write on announcements + materials so
+--    managers cannot post global (team_id IS NULL) rows. Add explicit deny
+--    policies for service-role-only tables to make intent unambiguous.
 -- ---------------------------------------------------------------------------
 drop policy if exists announcements_manager_write on public.announcements;
 create policy announcements_manager_write on public.announcements for all using (
@@ -220,8 +294,9 @@ drop policy if exists report_snapshots_no_client_write on public.report_snapshot
 create policy report_snapshots_no_client_write on public.report_snapshots for all
   using (false) with check (false);
 
+
 -- ---------------------------------------------------------------------------
--- 6. Helper: bulk-create assignments for a task targeting a team (or list).
+-- 8. Helper: bulk-create assignments for a task targeting a team.
 -- ---------------------------------------------------------------------------
 create or replace function public.assign_task_to_team(
   p_task_id uuid,
@@ -234,8 +309,8 @@ as $$
 declare
   inserted integer;
 begin
-  -- only managers of the team or main_admin can call this; the action
-  -- already checks, but defense in depth.
+  -- Only managers of the team or main_admin can call this. The Server Action
+  -- already checks; this is defense in depth.
   if not (
     public.current_user_role() = 'main_admin'
     or (public.current_user_role() = 'manager' and public.is_manager_of(p_team_id))

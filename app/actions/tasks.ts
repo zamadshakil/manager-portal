@@ -93,11 +93,14 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
     const rows =
       members?.map((m) => ({ task_id: task.id, assignee_id: (m as { id: string }).id })) ?? []
     if (rows.length > 0) {
-      const { count } = await admin
+      const { data: inserted, error: insertErr } = await admin
         .from("task_assignments")
-        .insert(rows, { count: "exact" })
-        .select("id", { count: "exact", head: true })
-      assignedCount = count ?? rows.length
+        .insert(rows)
+        .select("id")
+      if (insertErr) {
+        return { ok: false, error: insertErr.message }
+      }
+      assignedCount = inserted?.length ?? 0
     }
   } else {
     const ids = formData.getAll("assignee_ids").map((v) => String(v)).filter(Boolean)
