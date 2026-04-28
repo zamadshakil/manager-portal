@@ -4,6 +4,7 @@ import type { ActivityLogEntry } from "@/lib/types"
 
 interface ActivityLogProps {
   rows: (ActivityLogEntry & { actor_email?: string | null; actor_name?: string | null })[]
+  expanded?: boolean
 }
 
 function actionLabel(entry: ActivityLogEntry): string {
@@ -23,7 +24,8 @@ function actionLabel(entry: ActivityLogEntry): string {
   return map[entry.action] ?? entry.action.replace(/[._]/g, " ")
 }
 
-export function ActivityLog({ rows }: ActivityLogProps) {
+export function ActivityLog({ rows, expanded = false }: ActivityLogProps) {
+  void expanded
   return (
     <section
       aria-labelledby="activity-heading"

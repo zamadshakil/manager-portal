@@ -18,7 +18,13 @@ export interface ParseResult {
 }
 
 async function parsePdf(buf: Buffer): Promise<ParseResult> {
-  const mod = (await import("pdf-parse")) as unknown as {
+  // Import the inner module directly: pdf-parse's index.js eagerly reads a
+  // local test fixture during dev builds which crashes serverless runtimes.
+  // The submodule has no published .d.ts so we cast through `unknown`.
+  const mod = (await import(
+    /* webpackIgnore: true */
+    "pdf-parse/lib/pdf-parse.js" as string
+  )) as unknown as {
     default: (b: Buffer) => Promise<{ text: string; numpages: number }>
   }
   const result = await mod.default(buf)

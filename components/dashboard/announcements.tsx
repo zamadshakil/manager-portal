@@ -1,6 +1,8 @@
 import { Megaphone } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatRelative } from "@/lib/format"
+import { DeleteIconButton } from "@/components/dashboard/delete-icon-button"
+import { deleteAnnouncement } from "@/app/actions/announcements"
 import type { Announcement, AnnouncementPriority } from "@/lib/types"
 
 const priorityStyle: Record<AnnouncementPriority, string> = {
@@ -13,9 +15,11 @@ const priorityStyle: Record<AnnouncementPriority, string> = {
 interface AnnouncementsProps {
   rows: Announcement[]
   emptyHint?: string
+  canDelete?: boolean
+  showAll?: boolean
 }
 
-export function Announcements({ rows, emptyHint }: AnnouncementsProps) {
+export function Announcements({ rows, emptyHint, canDelete = false }: AnnouncementsProps) {
   return (
     <section
       aria-labelledby="announcements-heading"
@@ -56,6 +60,14 @@ export function Announcements({ rows, emptyHint }: AnnouncementsProps) {
                 <span className="ml-auto text-[11px] text-muted-foreground">
                   {formatRelative(a.created_at)}
                 </span>
+                {canDelete ? (
+                  <DeleteIconButton
+                    id={a.id}
+                    action={deleteAnnouncement}
+                    confirmText="Delete this announcement?"
+                    label="Delete announcement"
+                  />
+                ) : null}
               </div>
               <h3 className="mt-2 text-[14px] font-semibold leading-snug">{a.title}</h3>
               <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground whitespace-pre-line">

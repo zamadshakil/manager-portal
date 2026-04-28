@@ -1,13 +1,16 @@
 import { FolderOpen, Download } from "lucide-react"
 import { fileIconLabel, formatBytes, formatRelative } from "@/lib/format"
+import { DeleteIconButton } from "@/components/dashboard/delete-icon-button"
+import { deleteMaterial } from "@/app/actions/materials"
 import type { Material } from "@/lib/types"
 
 interface MaterialsProps {
   rows: Material[]
   emptyHint?: string
+  canDelete?: boolean
 }
 
-export function Materials({ rows, emptyHint }: MaterialsProps) {
+export function Materials({ rows, emptyHint, canDelete = false }: MaterialsProps) {
   return (
     <section
       aria-labelledby="materials-heading"
@@ -63,15 +66,25 @@ export function Materials({ rows, emptyHint }: MaterialsProps) {
                     {formatBytes(m.size_bytes)} · {formatRelative(m.created_at)}
                   </p>
                 </div>
-                <a
-                  href={m.blob_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`Download ${m.title}`}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <Download className="h-4 w-4" aria-hidden="true" />
-                </a>
+                <div className="flex items-center gap-1">
+                  <a
+                    href={m.blob_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Download ${m.title}`}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <Download className="h-4 w-4" aria-hidden="true" />
+                  </a>
+                  {canDelete ? (
+                    <DeleteIconButton
+                      id={m.id}
+                      action={deleteMaterial}
+                      confirmText="Delete this material?"
+                      label={`Delete ${m.title}`}
+                    />
+                  ) : null}
+                </div>
               </div>
             </li>
           ))}

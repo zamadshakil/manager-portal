@@ -120,13 +120,21 @@ export default async function SubmissionDetail({ params }: PageProps) {
                 <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
                   Flags
                 </p>
-                <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                <ul className="mt-1.5 space-y-1.5">
                   {flags.map((f, idx) => (
                     <li
                       key={idx}
-                      className="inline-flex items-center rounded-full bg-[#fff8e1] px-2.5 py-1 text-[11.5px] font-semibold text-[#7a5b00]"
+                      className={cn(
+                        "rounded-lg border px-3 py-1.5 text-[12px] font-medium leading-snug",
+                        f.severity === "fail" && "border-[#f6cdb1] bg-[#fff1e6] text-[#a4400a]",
+                        f.severity === "warn" && "border-[#f4dfa2] bg-[#fff8e1] text-[#7a5b00]",
+                        f.severity === "info" && "border-border bg-warm-white text-muted-foreground",
+                      )}
                     >
-                      {f}
+                      {f.rule_name ? (
+                        <span className="font-semibold">{f.rule_name}: </span>
+                      ) : null}
+                      {f.message}
                     </li>
                   ))}
                 </ul>
@@ -152,39 +160,54 @@ export default async function SubmissionDetail({ params }: PageProps) {
               </div>
             ) : (
               <ul className="divide-y divide-border">
-                {runRows.map((r) => (
-                  <li key={r.id} className="px-5 py-3.5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[13.5px] font-semibold">
-                          {r.rule_snapshot?.rule_name ?? "Validation rule"}
-                        </p>
-                        {r.reasoning ? (
-                          <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground whitespace-pre-line">
-                            {r.reasoning}
-                          </p>
-                        ) : null}
+                {runRows.map((r) => {
+                  const ruleName =
+                    (r.raw_output as { rule_name?: string } | null)?.rule_name ??
+                    "Validation rule"
+                  return (
+                    <li key={r.id} className="px-5 py-3.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[13.5px] font-semibold">{ruleName}</p>
+                          {r.reasons.length > 0 ? (
+                            <ul className="mt-1 space-y-0.5">
+                              {r.reasons.slice(0, 4).map((reason, idx) => (
+                                <li
+                                  key={idx}
+                                  className="text-[12.5px] leading-relaxed text-muted-foreground"
+                                >
+                                  • {reason}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                          {r.latency_ms !== null ? (
+                            <p className="mt-1 text-[10.5px] font-mono text-muted-foreground">
+                              {r.model} · {r.latency_ms}ms
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                              r.pass === true && "bg-[#e8f8eb] text-[#157a2a]",
+                              r.pass === false && "bg-[#fff1e6] text-[#a4400a]",
+                              r.pass === null && "bg-muted text-muted-foreground",
+                            )}
+                          >
+                            {r.pass === true ? "Passed" : r.pass === false ? "Failed" : "—"}
+                          </span>
+                          {r.score !== null ? (
+                            <p className="mt-1 text-[11px] font-mono text-muted-foreground">
+                              {Number(r.score).toFixed(0)}/100
+                            </p>
+                          ) : null}
+                        </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <span
-                          className={cn(
-                            "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                            r.passed === true && "bg-[#e8f8eb] text-[#157a2a]",
-                            r.passed === false && "bg-[#fff1e6] text-[#a4400a]",
-                            r.passed === null && "bg-muted text-muted-foreground",
-                          )}
-                        >
-                          {r.passed === true ? "Passed" : r.passed === false ? "Failed" : "—"}
-                        </span>
-                        {r.score !== null ? (
-                          <p className="mt-1 text-[11px] font-mono text-muted-foreground">
-                            {Number(r.score).toFixed(0)}/100
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </section>

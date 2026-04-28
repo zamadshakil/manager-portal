@@ -149,14 +149,89 @@ export async function listMaterials(profile: Profile, limit = 100): Promise<Mate
   return (data ?? []) as Material[]
 }
 
-export async function listActivity(profile: Profile, limit = 100): Promise<ActivityLogEntry[]> {
+export async function listActivity(
+  profile: Profile,
+  limit = 100,
+): Promise<(ActivityLogEntry & { actor_name?: string | null; actor_email?: string | null })[]> {
   const supabase = await createClient()
   const { data } = await supabase
     .from("activity_log")
-    .select("*")
+    .select("*, actor:profiles!activity_log_actor_id_fkey(full_name, email)")
     .order("created_at", { ascending: false })
     .limit(limit)
-  return (data ?? []) as ActivityLogEntry[]
+  if (!data) return []
+  return (data as Array<ActivityLogEntry & { actor: { full_name: string | null; email: string } | null }>).map(
+    (row) => ({
+      ...row,
+      actor_name: row.actor?.full_name ?? null,
+      actor_email: row.actor?.email ?? null,
+    }),
+  )
+}
+
+export interface DailyMetricRow {
+  day: string
+  submissions: number
+  passed: number
+  failed: number
+  needs_review: number
+  avg_score: number
+}
+
+export async function getDailyMetrics(
+  profile: Profile,
+  days = 30,
+): Promise<DailyMetricRow[]> {
+  const supabase = await createClient()
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+
+  let q = supabase
+    .from("submissions")
+    .select("created_at, status, score")
+    .gte("created_at", since)
+    .order("created_at", { ascending: true })
+
+  if (profile.role === "manager" && profile.team_id) q = q.eq("team_id", profile.team_id)
+  if (profile.role === "member") q = q.eq("uploader_id", profile.id)
+
+  const { data } = await q
+  if (!data) return []
+
+  const buckets = new Map<string, DailyMetricRow>()
+  for (const row of data as Array<{ created_at: string; status: string; score: number | null }>) {
+    const day = row.created_at.slice(0, 10)
+    const existing =
+      buckets.get(day) ??
+      ({ day, submissions: 0, passed: 0, failed: 0, needs_review: 0, avg_score: 0 } as DailyMetricRow)
+    existing.submissions += 1
+    if (row.status === "passed") existing.passed += 1
+    if (row.status === "failed") existing.failed += 1
+    if (row.status === "needs_review") existing.needs_review += 1
+    if (row.score !== null) {
+      // running mean
+      const n = existing.submissions
+      existing.avg_score = ((existing.avg_score * (n - 1)) + Number(row.score)) / n
+    }
+    buckets.set(day, existing)
+  }
+
+  // fill missing days for stable chart axis
+  const out: DailyMetricRow[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
+    const key = d.toISOString().slice(0, 10)
+    out.push(
+      buckets.get(key) ?? {
+        day: key,
+        submissions: 0,
+        passed: 0,
+        failed: 0,
+        needs_review: 0,
+        avg_score: 0,
+      },
+    )
+  }
+  return out
 }
 
 export async function listRules(profile: Profile): Promise<ValidationRule[]> {
