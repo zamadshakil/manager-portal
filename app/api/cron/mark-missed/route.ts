@@ -36,11 +36,9 @@ export async function GET(request: Request) {
     .lt("task.due_at", nowIso)
 
   let missedCount = 0
-  if (overdue && overdue.length > 0) {
-    const toMiss = (overdue as Array<{
-      id: string
-      task: { allow_late: boolean }
-    }>)
+  const overdueRows = (overdue as unknown as any[]) || []
+  if (overdueRows.length > 0) {
+    const toMiss = overdueRows
       .filter((row) => row.task.allow_late === false)
       .map((row) => row.id)
 

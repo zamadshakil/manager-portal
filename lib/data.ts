@@ -165,7 +165,7 @@ export async function listActivity(
     .order("created_at", { ascending: false })
     .limit(limit)
   if (!data) return []
-  return (data as Array<ActivityLogEntry & { actor: { full_name: string | null; email: string } | null }>).map(
+  return (data as unknown as Array<ActivityLogEntry & { actor: { full_name: string | null; email: string } | null }>).map(
     (row) => ({
       ...row,
       actor_name: row.actor?.full_name ?? null,
@@ -310,7 +310,7 @@ export async function listTasksForManager(profile: Profile): Promise<TaskWithSta
   const { data } = await q
   if (!data) return []
 
-  return (data as Array<Task & { task_assignments: { status: string }[] }>).map((t) => {
+  return (data as unknown as Array<Task & { task_assignments: { status: string }[] }>).map((t) => {
     const assigns = t.task_assignments ?? []
     const submitted = assigns.filter(
       (a) => a.status === "submitted" || a.status === "late_submitted",
@@ -341,7 +341,7 @@ export async function listMyTasks(profile: Profile): Promise<MyTask[]> {
     .eq("assignee_id", profile.id)
     .order("created_at", { ascending: false })
   if (!data) return []
-  return (data as Array<TaskAssignment & { task: Task }>).map((row) => ({
+  return (data as unknown as Array<TaskAssignment & { task: Task }>).map((row) => ({
     ...row,
     task: row.task,
   }))
@@ -355,7 +355,7 @@ export async function getTaskById(profile: Profile, id: string): Promise<TaskWit
     .eq("id", id)
     .maybeSingle()
   if (!data) return null
-  const t = data as Task & { task_assignments: { status: string }[] }
+  const t = data as unknown as Task & { task_assignments: { status: string }[] }
   const assigns = t.task_assignments ?? []
   return {
     ...t,
@@ -395,7 +395,7 @@ export async function listAssignmentsForTask(taskId: string): Promise<
     .select("*, assignee:profiles!task_assignments_assignee_id_fkey(full_name, email)")
     .eq("task_id", taskId)
     .order("created_at", { ascending: true })
-  return (data ?? []) as Array<
+  return (data ?? []) as unknown as Array<
     TaskAssignment & { assignee: { full_name: string | null; email: string } | null }
   >
 }
