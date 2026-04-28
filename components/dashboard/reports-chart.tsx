@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import {
   ResponsiveContainer,
   AreaChart,
@@ -12,45 +12,55 @@ import {
 } from "recharts"
 import { CalendarDays, Download } from "lucide-react"
 import { cn } from "@/lib/utils"
+import type { DailyMetricRow } from "@/lib/data"
 
-const dataDay = [
-  { label: "Mon", submissions: 38, validated: 34 },
-  { label: "Tue", submissions: 52, validated: 49 },
-  { label: "Wed", submissions: 47, validated: 44 },
-  { label: "Thu", submissions: 61, validated: 57 },
-  { label: "Fri", submissions: 73, validated: 67 },
-  { label: "Sat", submissions: 22, validated: 21 },
-  { label: "Sun", submissions: 18, validated: 17 },
-]
+type RangeId = "day" | "week" | "month"
 
-const dataMonth = [
-  { label: "W1", submissions: 240, validated: 222 },
-  { label: "W2", submissions: 312, validated: 290 },
-  { label: "W3", submissions: 287, validated: 264 },
-  { label: "W4", submissions: 351, validated: 332 },
-]
+const RANGE_LABELS: Record<RangeId, string> = {
+  day: "7 days",
+  week: "30 days",
+  month: "90 days",
+}
 
-const dataYear = [
-  { label: "Jan", submissions: 980, validated: 902 },
-  { label: "Feb", submissions: 1124, validated: 1051 },
-  { label: "Mar", submissions: 1310, validated: 1228 },
-  { label: "Apr", submissions: 1462, validated: 1377 },
-  { label: "May", submissions: 1318, validated: 1234 },
-  { label: "Jun", submissions: 1521, validated: 1430 },
-]
+interface Props {
+  daily: DailyMetricRow[]
+}
 
-const ranges = [
-  { id: "day", label: "Day", data: dataDay },
-  { id: "month", label: "Month", data: dataMonth },
-  { id: "year", label: "Year", data: dataYear },
-] as const
+export function ReportsChart({ daily }: Props) {
+  const [range, setRange] = useState<RangeId>("week")
 
-export function ReportsChart() {
-  const [range, setRange] = useState<(typeof ranges)[number]["id"]>("day")
-  const data = ranges.find((r) => r.id === range)!.data
-  const total = data.reduce((sum, d) => sum + d.submissions, 0)
-  const validated = data.reduce((sum, d) => sum + d.validated, 0)
-  const passRate = ((validated / total) * 100).toFixed(1)
+  const data = useMemo(() => {
+    const days = range === "day" ? 7 : range === "week" ? 30 : 90
+    const slice = daily.slice(-days)
+    return slice.map((d) => ({
+      label: new Date(d.day).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      raw: d.day,
+      submissions: d.submissions,
+      validated: d.passed,
+      avg_score: Math.round(d.avg_score),
+    }))
+  }, [daily, range])
+
+  const total = data.reduce((s, d) => s + d.submissions, 0)
+  const validated = data.reduce((s, d) => s + d.validated, 0)
+  const passRate = total > 0 ? ((validated / total) * 100).toFixed(1) : "0.0"
+
+  function exportCsv() {
+    const rows = [
+      ["date", "submissions", "passed", "avg_score"],
+      ...data.map((d) => [d.raw, d.submissions, d.validated, d.avg_score]),
+    ]
+    const csv = rows.map((r) => r.join(",")).join("\n")
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `report-${range}-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <section
@@ -64,32 +74,37 @@ export function ReportsChart() {
             Submission analytics
           </h2>
           <p className="text-[12px] font-medium text-muted-foreground">
-            Granular reports — sliced by day, month or year
+            Live data — rebuilt every page load
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div role="tablist" aria-label="Time range" className="flex items-center gap-1 rounded-xl border border-border bg-background p-1">
-            {ranges.map((r) => (
+          <div
+            role="tablist"
+            aria-label="Time range"
+            className="flex items-center gap-1 rounded-xl border border-border bg-background p-1"
+          >
+            {(Object.keys(RANGE_LABELS) as RangeId[]).map((r) => (
               <button
-                key={r.id}
+                key={r}
                 role="tab"
-                aria-selected={range === r.id}
-                onClick={() => setRange(r.id)}
+                aria-selected={range === r}
+                onClick={() => setRange(r)}
                 className={cn(
                   "rounded-lg px-2.5 py-1 text-[12px] font-semibold transition-colors",
-                  range === r.id
+                  range === r
                     ? "bg-foreground text-background"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {r.label}
+                {RANGE_LABELS[r]}
               </button>
             ))}
           </div>
           <button
             type="button"
+            onClick={exportCsv}
             className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-background px-3 h-9 text-[12px] font-semibold transition-colors hover:bg-muted"
-            aria-label="Export report"
+            aria-label="Export report as CSV"
           >
             <Download className="h-3.5 w-3.5" />
             Export
@@ -126,7 +141,7 @@ export function ReportsChart() {
           <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground flex items-center gap-1">
             <CalendarDays className="h-3 w-3" /> Range
           </div>
-          <div className="mt-1 text-[14px] font-semibold capitalize">{range}</div>
+          <div className="mt-1 text-[14px] font-semibold capitalize">{RANGE_LABELS[range]}</div>
         </div>
       </div>
 
@@ -155,14 +170,14 @@ export function ReportsChart() {
                 tick={{ fill: "#615d59", fontSize: 11, fontWeight: 500 }}
                 tickLine={false}
                 axisLine={false}
+                allowDecimals={false}
               />
               <Tooltip
                 contentStyle={{
                   background: "#ffffff",
                   border: "1px solid rgba(0,0,0,0.1)",
                   borderRadius: 12,
-                  boxShadow:
-                    "rgba(0,0,0,0.04) 0px 4px 18px, rgba(0,0,0,0.02) 0px 1px 4px",
+                  boxShadow: "rgba(0,0,0,0.04) 0px 4px 18px, rgba(0,0,0,0.02) 0px 1px 4px",
                   fontSize: 12,
                   fontWeight: 500,
                 }}
