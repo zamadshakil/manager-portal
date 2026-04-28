@@ -1,0 +1,222 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Notion-inspired warm neutral palette */
+  --background: #ffffff;
+  --foreground: rgba(0, 0, 0, 0.95);
+  --card: #ffffff;
+  --card-foreground: rgba(0, 0, 0, 0.95);
+  --popover: #ffffff;
+  --popover-foreground: rgba(0, 0, 0, 0.95);
+
+  /* Notion Blue as primary accent */
+  --primary: #0075de;
+  --primary-foreground: #ffffff;
+
+  /* Warm neutral scale */
+  --secondary: #f6f5f4;
+  --secondary-foreground: rgba(0, 0, 0, 0.95);
+  --muted: #f6f5f4;
+  --muted-foreground: #615d59;
+  --accent: #f2f9ff;
+  --accent-foreground: #097fe8;
+
+  /* Semantic colors */
+  --destructive: #dd5b00;
+  --destructive-foreground: #ffffff;
+  --success: #1aae39;
+  --success-foreground: #ffffff;
+  --warning: #dd5b00;
+  --warning-foreground: #ffffff;
+  --info: #2a9d99;
+  --info-foreground: #ffffff;
+
+  /* Whisper border */
+  --border: rgba(0, 0, 0, 0.1);
+  --input: rgba(0, 0, 0, 0.1);
+  --ring: #097fe8;
+
+  /* Chart colors derived from Notion accents */
+  --chart-1: #0075de;
+  --chart-2: #2a9d99;
+  --chart-3: #1aae39;
+  --chart-4: #dd5b00;
+  --chart-5: #615d59;
+
+  --radius: 0.75rem;
+
+  /* Sidebar */
+  --sidebar: #f6f5f4;
+  --sidebar-foreground: rgba(0, 0, 0, 0.95);
+  --sidebar-primary: #0075de;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(0, 0, 0, 0.05);
+  --sidebar-accent-foreground: rgba(0, 0, 0, 0.95);
+  --sidebar-border: rgba(0, 0, 0, 0.08);
+  --sidebar-ring: #097fe8;
+
+  /* Notion-specific tokens */
+  --warm-white: #f6f5f4;
+  --warm-dark: #31302e;
+  --warm-gray-500: #615d59;
+  --warm-gray-300: #a39e98;
+  --notion-blue: #0075de;
+  --notion-blue-active: #005bab;
+  --badge-blue-bg: #f2f9ff;
+  --badge-blue-text: #097fe8;
+
+  /* Multi-layer shadow stacks */
+  --shadow-card: rgba(0, 0, 0, 0.04) 0px 4px 18px,
+    rgba(0, 0, 0, 0.027) 0px 2.025px 7.84688px,
+    rgba(0, 0, 0, 0.02) 0px 0.8px 2.925px,
+    rgba(0, 0, 0, 0.01) 0px 0.175px 1.04062px;
+  --shadow-deep: rgba(0, 0, 0, 0.01) 0px 1px 3px,
+    rgba(0, 0, 0, 0.02) 0px 3px 7px, rgba(0, 0, 0, 0.02) 0px 7px 15px,
+    rgba(0, 0, 0, 0.04) 0px 14px 28px, rgba(0, 0, 0, 0.05) 0px 23px 52px;
+}
+
+.dark {
+  --background: #1f1e1c;
+  --foreground: rgba(255, 255, 255, 0.95);
+  --card: #252422;
+  --card-foreground: rgba(255, 255, 255, 0.95);
+  --popover: #252422;
+  --popover-foreground: rgba(255, 255, 255, 0.95);
+  --primary: #097fe8;
+  --primary-foreground: #ffffff;
+  --secondary: #31302e;
+  --secondary-foreground: rgba(255, 255, 255, 0.95);
+  --muted: #31302e;
+  --muted-foreground: #a39e98;
+  --accent: rgba(9, 127, 232, 0.15);
+  --accent-foreground: #62aef0;
+  --destructive: #dd5b00;
+  --destructive-foreground: #ffffff;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: #097fe8;
+  --sidebar: #252422;
+  --sidebar-foreground: rgba(255, 255, 255, 0.95);
+  --sidebar-primary: #097fe8;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(255, 255, 255, 0.05);
+  --sidebar-accent-foreground: rgba(255, 255, 255, 0.95);
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+}
+
+@theme inline {
+  --font-sans: var(--font-inter), 'Inter', -apple-system, system-ui, 'Segoe UI',
+    Helvetica, Arial, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), 'JetBrains Mono', ui-monospace,
+    monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-warm-white: var(--warm-white);
+  --color-warm-dark: var(--warm-dark);
+  --color-warm-gray-500: var(--warm-gray-500);
+  --color-warm-gray-300: var(--warm-gray-300);
+  --color-notion-blue: var(--notion-blue);
+  --color-badge-blue-bg: var(--badge-blue-bg);
+  --color-badge-blue-text: var(--badge-blue-text);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-deep: var(--shadow-deep);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: 'lnum', 'locl';
+  }
+
+  /* Notion-style heading letter-spacing */
+  h1 {
+    letter-spacing: -1.5px;
+  }
+  h2 {
+    letter-spacing: -0.625px;
+  }
+  h3 {
+    letter-spacing: -0.25px;
+  }
+}
+
+@layer utilities {
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+  .shadow-deep {
+    box-shadow: var(--shadow-deep);
+  }
+  .border-whisper {
+    border: 1px solid rgba(0, 0, 0, 0.1);
+  }
+  .text-warm {
+    color: var(--warm-gray-500);
+  }
+  .bg-warm {
+    background-color: var(--warm-white);
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 9999px;
+  }
+}
