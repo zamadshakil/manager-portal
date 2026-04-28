@@ -1,81 +1,84 @@
-import { ArrowUpRight, ArrowDownRight, FileCheck2, Sparkles, Clock4, Users } from "lucide-react"
+import { TrendingUp, Activity, ShieldCheck, AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-type Stat = {
+interface Stat {
   label: string
   value: string
-  delta: { value: string; trend: "up" | "down"; positive: boolean }
+  hint?: string
   icon: React.ComponentType<{ className?: string }>
-  hint: string
+  tone?: "default" | "warn" | "ok"
 }
 
-const stats: Stat[] = [
-  {
-    label: "Submissions today",
-    value: "248",
-    delta: { value: "+12.4%", trend: "up", positive: true },
-    icon: FileCheck2,
-    hint: "vs. yesterday",
-  },
-  {
-    label: "AI validation pass-rate",
-    value: "94.2%",
-    delta: { value: "+2.1pt", trend: "up", positive: true },
-    icon: Sparkles,
-    hint: "rolling 7 days",
-  },
-  {
-    label: "Avg. analysis latency",
-    value: "1.8s",
-    delta: { value: "-0.4s", trend: "down", positive: true },
-    icon: Clock4,
-    hint: "p95 across pipeline",
-  },
-  {
-    label: "Active members",
-    value: "62 / 78",
-    delta: { value: "-3.1%", trend: "down", positive: false },
-    icon: Users,
-    hint: "engagement this week",
-  },
-]
+interface StatCardsProps {
+  total: number
+  passRate: number
+  avgScore: number
+  needsReview: number
+}
 
-export function StatCards() {
+export function StatCards({ total, passRate, avgScore, needsReview }: StatCardsProps) {
+  const stats: Stat[] = [
+    {
+      label: "Total submissions",
+      value: total.toLocaleString(),
+      hint: "all time",
+      icon: Activity,
+    },
+    {
+      label: "AI pass rate",
+      value: `${passRate}%`,
+      hint: "passing validation rules",
+      icon: ShieldCheck,
+      tone: passRate >= 80 ? "ok" : passRate >= 50 ? "default" : "warn",
+    },
+    {
+      label: "Avg score",
+      value: avgScore > 0 ? `${avgScore}/100` : "—",
+      hint: "weighted across rules",
+      icon: TrendingUp,
+    },
+    {
+      label: "Needs review",
+      value: needsReview.toLocaleString(),
+      hint: "awaiting attention",
+      icon: AlertTriangle,
+      tone: needsReview > 0 ? "warn" : "default",
+    },
+  ]
+
   return (
-    <section aria-label="Key metrics" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-      {stats.map((stat) => {
-        const Icon = stat.icon
-        const TrendIcon = stat.delta.trend === "up" ? ArrowUpRight : ArrowDownRight
+    <section
+      aria-label="Key metrics"
+      className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4"
+    >
+      {stats.map((s) => {
+        const Icon = s.icon
         return (
           <article
-            key={stat.label}
-            className="rounded-xl border border-border bg-card p-5 shadow-card transition-shadow hover:shadow-deep"
+            key={s.label}
+            className="rounded-xl border border-border bg-card p-4 lg:p-5 shadow-card transition-shadow hover:shadow-deep"
           >
-            <div className="flex items-start justify-between">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-warm-white">
-                <Icon className="h-[18px] w-[18px] text-foreground" aria-hidden="true" />
-              </div>
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+                {s.label}
+              </p>
               <span
                 className={cn(
-                  "inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                  stat.delta.positive
-                    ? "bg-[#eafbef] text-[#1aae39]"
-                    : "bg-[#fdecdc] text-[#dd5b00]",
+                  "flex h-7 w-7 items-center justify-center rounded-lg shrink-0",
+                  s.tone === "warn" && "bg-[#fff1e6] text-[#a4400a]",
+                  s.tone === "ok" && "bg-[#e8f8eb] text-[#157a2a]",
+                  (!s.tone || s.tone === "default") && "bg-[#f2f9ff] text-[#097fe8]",
                 )}
               >
-                <TrendIcon className="h-3 w-3" aria-hidden="true" />
-                {stat.delta.value}
+                <Icon className="h-[14px] w-[14px]" aria-hidden="true" />
               </span>
             </div>
-            <div className="mt-4">
-              <div className="text-[13px] font-medium text-muted-foreground">{stat.label}</div>
-              <div className="mt-1 text-[28px] font-bold tracking-[-0.5px] leading-none">
-                {stat.value}
-              </div>
-              <div className="mt-1.5 text-[12px] font-medium text-muted-foreground">
-                {stat.hint}
-              </div>
-            </div>
+            <p className="mt-3 text-[26px] font-semibold tracking-tight leading-none">
+              {s.value}
+            </p>
+            {s.hint ? (
+              <p className="mt-1.5 text-[12px] text-muted-foreground">{s.hint}</p>
+            ) : null}
           </article>
         )
       })}

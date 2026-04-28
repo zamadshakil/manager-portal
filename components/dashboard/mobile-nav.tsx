@@ -1,36 +1,56 @@
-import { LayoutDashboard, Megaphone, FolderOpen, Upload, BarChart3 } from "lucide-react"
-import { cn } from "@/lib/utils"
+"use client"
 
-const items = [
-  { label: "Overview", icon: LayoutDashboard, href: "#overview", active: true },
-  { label: "News", icon: Megaphone, href: "#announcements" },
-  { label: "Files", icon: FolderOpen, href: "#materials" },
-  { label: "Submit", icon: Upload, href: "#submissions" },
-  { label: "Reports", icon: BarChart3, href: "#reports" },
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+import { LayoutDashboard, Upload, Megaphone, FolderOpen, BarChart3 } from "lucide-react"
+import { cn } from "@/lib/utils"
+import type { UserRole } from "@/lib/types"
+
+interface NavItem {
+  href: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  roles: UserRole[]
+}
+
+const items: NavItem[] = [
+  { href: "/dashboard", label: "Home", icon: LayoutDashboard, roles: ["main_admin", "manager", "member"] },
+  { href: "/dashboard/submissions", label: "Submissions", icon: Upload, roles: ["main_admin", "manager", "member"] },
+  { href: "/dashboard/announcements", label: "News", icon: Megaphone, roles: ["main_admin", "manager", "member"] },
+  { href: "/dashboard/materials", label: "Files", icon: FolderOpen, roles: ["main_admin", "manager", "member"] },
+  { href: "/dashboard/reports", label: "Reports", icon: BarChart3, roles: ["main_admin", "manager"] },
 ]
 
-export function MobileNav() {
+export function MobileNav({ role }: { role: UserRole }) {
+  const pathname = usePathname()
+  const visible = items.filter((i) => i.roles.includes(role))
+
   return (
     <nav
-      aria-label="Mobile navigation"
-      className="lg:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-border bg-background/95 backdrop-blur-md"
+      aria-label="Primary mobile navigation"
+      className="lg:hidden fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/95 backdrop-blur-md"
     >
-      <ul className="grid grid-cols-5">
-        {items.map((item) => {
+      <ul
+        className="grid"
+        style={{ gridTemplateColumns: `repeat(${visible.length}, minmax(0, 1fr))` }}
+      >
+        {visible.map((item) => {
           const Icon = item.icon
+          const active =
+            item.href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(item.href)
           return (
-            <li key={item.label}>
-              <a
+            <li key={item.href}>
+              <Link
                 href={item.href}
+                aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex flex-col items-center justify-center gap-0.5 py-2.5 text-[10.5px] font-semibold transition-colors",
-                  item.active ? "text-primary" : "text-muted-foreground hover:text-foreground",
+                  "flex flex-col items-center gap-0.5 py-2.5 text-[10.5px] font-semibold",
+                  active ? "text-primary" : "text-muted-foreground",
                 )}
-                aria-current={item.active ? "page" : undefined}
               >
-                <Icon className="h-[18px] w-[18px]" />
+                <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
                 {item.label}
-              </a>
+              </Link>
             </li>
           )
         })}
