@@ -30,7 +30,15 @@ export interface Database {
       [k: string]: Tbl
     }
     Views: Record<string, never>
-    Functions: Record<string, never>
+    Functions: {
+      assign_task_to_team: {
+        Args: {
+          p_task_id: string
+          p_team_id: string
+        }
+        Returns: number
+      }
+    }
     Enums: {
       user_role: "main_admin" | "manager" | "member"
       submission_status:
