@@ -34,9 +34,15 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
 
+  // Random suffix keeps the public URL unguessable; the download proxy
+  // (`/api/download/[id]?type=material`) re-checks RLS before streaming bytes.
   const safeName = file.name.replace(/[^\w.\-]+/g, "_")
-  const pathname = `materials/${profile.team_id ?? "global"}/${Date.now()}-${safeName}`
-  const blob = await put(pathname, file, { access: "public", addRandomSuffix: false, contentType: file.type })
+  const pathname = `materials/${profile.team_id ?? "global"}/${safeName}`
+  const blob = await put(pathname, file, {
+    access: "public",
+    addRandomSuffix: true,
+    contentType: file.type,
+  })
 
   const supabase = await createClient()
   const tags = (parsed.data.tags ?? "")
@@ -53,7 +59,7 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
       title: parsed.data.title,
       description: parsed.data.description || null,
       blob_url: blob.url,
-      blob_pathname: pathname,
+      blob_pathname: blob.pathname,
       file_type: file.type,
       size_bytes: file.size,
       tags,

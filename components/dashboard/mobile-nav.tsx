@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, Upload, Megaphone, FolderOpen, BarChart3 } from "lucide-react"
+import { LayoutDashboard, Upload, Megaphone, FolderOpen, BarChart3, ListChecks } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { UserRole } from "@/lib/types"
 
@@ -15,9 +15,9 @@ interface NavItem {
 
 const items: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: LayoutDashboard, roles: ["main_admin", "manager", "member"] },
+  { href: "/dashboard/tasks", label: "Tasks", icon: ListChecks, roles: ["main_admin", "manager", "member"] },
   { href: "/dashboard/submissions", label: "Submissions", icon: Upload, roles: ["main_admin", "manager", "member"] },
   { href: "/dashboard/announcements", label: "News", icon: Megaphone, roles: ["main_admin", "manager", "member"] },
-  { href: "/dashboard/materials", label: "Files", icon: FolderOpen, roles: ["main_admin", "manager", "member"] },
   { href: "/dashboard/reports", label: "Reports", icon: BarChart3, roles: ["main_admin", "manager"] },
 ]
 

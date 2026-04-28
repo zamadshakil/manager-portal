@@ -4,6 +4,7 @@ import {
   listAnnouncements,
   listMaterials,
   listActivity,
+  listMyTasks,
 } from "@/lib/data"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { StatCards } from "@/components/dashboard/stat-cards"
@@ -11,19 +12,22 @@ import { SubmissionsTable } from "@/components/dashboard/submissions-table"
 import { Announcements } from "@/components/dashboard/announcements"
 import { Materials } from "@/components/dashboard/materials"
 import { ActivityLog } from "@/components/dashboard/activity-log"
-import { UploadCard } from "@/components/dashboard/upload-card"
+import { MyTasks } from "@/components/dashboard/my-tasks"
 import { roleLabel } from "@/lib/auth-shared"
 
 export const dynamic = "force-dynamic"
 
 export default async function OverviewPage() {
   const profile = await requireProfile()
-  const [summary, announcements, materials, activity] = await Promise.all([
+  const [summary, announcements, materials, activity, myTasks] = await Promise.all([
     getDashboardSummary(profile),
     listAnnouncements(profile, 5),
     listMaterials(profile, 6),
     profile.role !== "member" ? listActivity(profile, 8) : Promise.resolve([]),
+    profile.role === "member" ? listMyTasks(profile) : Promise.resolve([]),
   ])
+
+  const openTasks = myTasks.filter((t) => t.status === "assigned")
 
   const greeting = profile.full_name?.split(" ")[0] ?? profile.email
   const roleline =
@@ -55,7 +59,14 @@ export default async function OverviewPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 lg:gap-6">
         <div className="xl:col-span-2 space-y-4 lg:space-y-6 min-w-0">
-          {profile.role === "member" ? <UploadCard /> : null}
+          {profile.role === "member" && openTasks.length > 0 ? (
+            <section>
+              <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-3">
+                Open tasks ({openTasks.length})
+              </h2>
+              <MyTasks tasks={openTasks.slice(0, 3)} />
+            </section>
+          ) : null}
           <SubmissionsTable rows={summary.recent} />
           <Materials rows={materials} />
         </div>

@@ -68,7 +68,7 @@ export function Materials({ rows, emptyHint, canDelete = false }: MaterialsProps
                 </div>
                 <div className="flex items-center gap-1">
                   <a
-                    href={m.blob_url}
+                    href={`/api/download/${m.id}?type=material`}
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label={`Download ${m.title}`}

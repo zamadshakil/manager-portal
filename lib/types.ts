@@ -1,6 +1,16 @@
 export type UserRole = "main_admin" | "manager" | "member"
 
-export type SubmissionStatus = "queued" | "parsing" | "validating" | "passed" | "failed" | "needs_review"
+export type SubmissionStatus =
+  | "queued"
+  | "parsing"
+  | "validating"
+  | "passed"
+  | "failed"
+  | "needs_review"
+  | "late_submitted"
+  | "missed"
+
+export type TaskAssignmentStatus = "assigned" | "submitted" | "late_submitted" | "missed"
 
 export type AnnouncementPriority = "low" | "normal" | "high" | "urgent"
 
@@ -44,6 +54,37 @@ export interface Submission {
   extracted_text: string | null
   flags: SubmissionFlag[]
   metadata: Record<string, unknown>
+  task_id: string | null
+  task_assignment_id: string | null
+  late_reason: string | null
+  is_late: boolean
+  submitted_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Task {
+  id: string
+  team_id: string
+  manager_id: string
+  title: string
+  description: string | null
+  instructions: string | null
+  due_at: string | null
+  allow_late: boolean
+  require_late_reason: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface TaskAssignment {
+  id: string
+  task_id: string
+  assignee_id: string
+  status: TaskAssignmentStatus
+  submission_id: string | null
+  late_reason: string | null
+  submitted_at: string | null
   created_at: string
   updated_at: string
 }

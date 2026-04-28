@@ -20,6 +20,8 @@ const VALID: SubmissionStatus[] = [
   "passed",
   "failed",
   "needs_review",
+  "late_submitted",
+  "missed",
 ]
 
 export default async function SubmissionsPage({ searchParams }: PageProps) {
