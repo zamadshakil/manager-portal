@@ -10,8 +10,9 @@ const FILTERS: { value: SubmissionStatus | "all"; label: string }[] = [
   { value: "passed", label: "Passed" },
   { value: "needs_review", label: "Needs review" },
   { value: "failed", label: "Failed" },
+  { value: "late_submitted", label: "Late" },
+  { value: "missed", label: "Missed" },
   { value: "queued", label: "Queued" },
-  { value: "parsing", label: "Parsing" },
   { value: "validating", label: "Validating" },
 ]
 

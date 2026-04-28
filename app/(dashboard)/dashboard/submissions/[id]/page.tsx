@@ -231,7 +231,7 @@ export default async function SubmissionDetail({ params }: PageProps) {
               </div>
             </dl>
             <a
-              href={submission.blob_url}
+              href={`/api/download/${submission.id}?type=submission`}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 h-9 text-[13px] font-semibold hover:bg-muted"
@@ -240,6 +240,31 @@ export default async function SubmissionDetail({ params }: PageProps) {
               Open original
             </a>
           </section>
+
+          {submission.task_id ? (
+            <section className="rounded-xl border border-border bg-card p-5 shadow-card">
+              <h2 className="text-[15px] font-semibold tracking-tight">Task</h2>
+              <p className="mt-2 text-[13px] text-muted-foreground">
+                Submitted in response to a task brief.
+              </p>
+              <Link
+                href={`/dashboard/tasks/${submission.task_id}`}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 h-9 text-[13px] font-semibold hover:bg-muted"
+              >
+                Open task
+              </Link>
+              {submission.is_late ? (
+                <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                  <p className="text-[12px] font-semibold text-amber-900">Submitted late</p>
+                  {submission.late_reason ? (
+                    <p className="mt-1 text-[12px] text-amber-900/90">
+                      {submission.late_reason}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
         </aside>
       </div>
     </>

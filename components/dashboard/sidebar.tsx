@@ -12,6 +12,7 @@ import {
   Users,
   Settings,
   ShieldCheck,
+  ListChecks,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { roleLabel } from "@/lib/auth-shared"
@@ -37,6 +38,12 @@ const NAV: NavGroup[] = [
         label: "Overview",
         icon: LayoutDashboard,
         href: "/dashboard",
+        roles: ["main_admin", "manager", "member"],
+      },
+      {
+        label: "Tasks",
+        icon: ListChecks,
+        href: "/dashboard/tasks",
         roles: ["main_admin", "manager", "member"],
       },
       {

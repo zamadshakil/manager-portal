@@ -14,6 +14,8 @@ import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
 
 const UploadSchema = z.object({
   title: z.string().trim().min(2, "Title must be at least 2 characters").max(200),
+  taskId: z.string().uuid().optional(),
+  lateReason: z.string().trim().max(1000).optional(),
 })
 
 export interface ActionResult {
@@ -22,6 +24,11 @@ export interface ActionResult {
   submissionId?: string
 }
 
+/**
+ * Create a submission. Optionally tied to a task: if a `taskId` is supplied,
+ * we look up the assignment row, enforce deadline rules, and persist late
+ * metadata. The async pipeline runs after the response is sent.
+ */
 export async function createSubmission(formData: FormData): Promise<ActionResult> {
   const profile = await requireProfile()
   if (!profile.team_id) return { ok: false, error: "You are not assigned to a team." }
@@ -33,8 +40,14 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
     return { ok: false, error: `Unsupported file type: ${file.type || "unknown"}` }
   }
 
-  const parsed = UploadSchema.safeParse({ title: formData.get("title") })
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
+  const parsed = UploadSchema.safeParse({
+    title: formData.get("title"),
+    taskId: formData.get("taskId") || undefined,
+    lateReason: formData.get("lateReason") || undefined,
+  })
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
+  }
 
   // Per-user rate limit on uploads.
   const limit = await uploadLimiter().limit(`user:${profile.id}`)
@@ -42,17 +55,76 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
     return { ok: false, error: "Too many uploads. Please wait a moment and try again." }
   }
 
-  // Upload to Vercel Blob (private, server-side put with Pages Router-style multipart).
+  // ---------- Task linkage + deadline enforcement ----------
+  const supabase = await createClient()
+  let taskId: string | null = null
+  let taskAssignmentId: string | null = null
+  let isLate = false
+  let lateReason: string | null = null
+
+  if (parsed.data.taskId) {
+    const { data: task } = await supabase
+      .from("tasks")
+      .select("id, team_id, due_at, allow_late, require_late_reason, title")
+      .eq("id", parsed.data.taskId)
+      .maybeSingle()
+    if (!task) return { ok: false, error: "Task not found." }
+    if (task.team_id !== profile.team_id) {
+      return { ok: false, error: "This task belongs to a different team." }
+    }
+
+    const { data: assignment } = await supabase
+      .from("task_assignments")
+      .select("id, status")
+      .eq("task_id", task.id)
+      .eq("assignee_id", profile.id)
+      .maybeSingle()
+    if (!assignment) {
+      return { ok: false, error: "You are not assigned to this task." }
+    }
+    if (assignment.status === "submitted" || assignment.status === "late_submitted") {
+      return { ok: false, error: "You have already submitted this task." }
+    }
+    if (assignment.status === "missed") {
+      return { ok: false, error: "Submission window has closed for this task." }
+    }
+
+    const now = Date.now()
+    const due = task.due_at ? new Date(task.due_at).getTime() : null
+    if (due !== null && now > due) {
+      if (!task.allow_late) {
+        return {
+          ok: false,
+          error: "Submission failed: the deadline has passed and late submissions are not allowed.",
+        }
+      }
+      isLate = true
+      const reason = parsed.data.lateReason?.trim() ?? ""
+      if (task.require_late_reason && reason.length < 8) {
+        return {
+          ok: false,
+          error: "Late submission requires a reason (at least 8 characters).",
+        }
+      }
+      lateReason = reason || null
+    }
+
+    taskId = task.id
+    taskAssignmentId = assignment.id
+  }
+
+  // ---------- Upload to Vercel Blob ----------
+  // We add a random suffix so the URL is unguessable; the client never receives
+  // `blob_url` directly — they hit `/api/download/[id]` which re-checks RLS.
   const safeName = file.name.replace(/[^\w.\-]+/g, "_")
-  const pathname = `submissions/${profile.team_id}/${profile.id}/${Date.now()}-${safeName}`
+  const pathname = `submissions/${profile.team_id}/${profile.id}/${safeName}`
   const blob = await put(pathname, file, {
-    access: "public", // public-by-URL but unlisted; signed access can be added later.
-    addRandomSuffix: false,
+    access: "public", // Vercel Blob currently exposes only `public`; URL is unlisted.
+    addRandomSuffix: true,
     contentType: file.type,
   })
 
-  // Insert submission row (RLS allows this for the uploader).
-  const supabase = await createClient()
+  // ---------- Insert submission row ----------
   const { data, error } = await supabase
     .from("submissions")
     .insert({
@@ -60,20 +132,39 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
       team_id: profile.team_id,
       title: parsed.data.title,
       blob_url: blob.url,
-      blob_pathname: pathname,
+      blob_pathname: blob.pathname,
       mime_type: file.type,
       size_bytes: file.size,
       status: "queued",
+      task_id: taskId,
+      task_assignment_id: taskAssignmentId,
+      is_late: isLate,
+      late_reason: lateReason,
+      submitted_at: new Date().toISOString(),
     })
     .select("id")
     .single()
 
   if (error || !data) {
-    // Roll back the blob if DB insert fails.
     try {
       await del(blob.url)
     } catch {}
     return { ok: false, error: error?.message ?? "Could not save submission." }
+  }
+
+  // Mirror initial state onto the assignment immediately so manager dashboards
+  // reflect the submission within their next refresh — the pipeline will
+  // overwrite this with the final status when it finishes.
+  if (taskAssignmentId) {
+    await supabase
+      .from("task_assignments")
+      .update({
+        status: isLate ? "late_submitted" : "submitted",
+        submission_id: data.id,
+        late_reason: lateReason,
+        submitted_at: new Date().toISOString(),
+      })
+      .eq("id", taskAssignmentId)
   }
 
   await logActivity({
@@ -82,7 +173,13 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
     action: "submission.created",
     entityType: "submission",
     entityId: data.id,
-    metadata: { title: parsed.data.title, size: file.size, mime: file.type },
+    metadata: {
+      title: parsed.data.title,
+      size: file.size,
+      mime: file.type,
+      task_id: taskId,
+      late: isLate,
+    },
   })
 
   // Run the parsing + LLM validation pipeline AFTER the response is sent.
@@ -96,6 +193,10 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
 
   revalidatePath("/dashboard")
   revalidatePath("/dashboard/submissions")
+  if (taskId) {
+    revalidatePath("/dashboard/tasks")
+    revalidatePath(`/dashboard/tasks/${taskId}`)
+  }
   return { ok: true, submissionId: data.id }
 }
 
