@@ -5,7 +5,7 @@
 > should be able to read just this file plus `README.md` and orient
 > themselves in under fifteen minutes.
 
-Last reviewed: 2026-04-29 (full end-to-end flow audit)
+Last reviewed: 2026-04-29 (full end-to-end flow audit) 
 
 ---
 
