@@ -6,6 +6,17 @@ import { ShieldCheck, Trash2, Edit3, Loader2, Plus } from "lucide-react"
 import { upsertRule, deleteRule } from "@/app/actions/rules"
 import type { ValidationRule } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 
 interface Props {
   rules: ValidationRule[]
@@ -41,7 +52,6 @@ export function RulesEditor({ rules }: Props) {
   }
 
   function onDelete(id: string) {
-    if (!confirm("Delete this rule? Existing submissions are not affected.")) return
     const fd = new FormData()
     fd.set("id", id)
     start(async () => {
@@ -234,14 +244,35 @@ export function RulesEditor({ rules }: Props) {
                 >
                   <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onDelete(rule.id)}
-                  aria-label="Delete rule"
-                  className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted text-destructive"
-                >
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={`Delete rule ${rule.rule_name}`}
+                      className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete this rule?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Future submissions will skip <strong>{rule.rule_name}</strong>. Existing
+                        validation runs are unaffected.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => onDelete(rule.id)}
+                        className="bg-destructive text-white hover:bg-destructive/90"
+                      >
+                        Delete rule
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </li>
           ))}

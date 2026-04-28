@@ -44,13 +44,13 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
             : "Every submission across your team — sortable, filterable, exportable."
         }
         action={
-          profile.role !== "main_admin" ? (
+          profile.role === "member" ? (
             <Link
-              href="/dashboard/submissions/new"
+              href="/dashboard/tasks"
               className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-10 text-[13px] font-semibold text-primary-foreground hover:bg-[#005bab] active:scale-[0.97] transition-all"
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
-              New submission
+              Open tasks
             </Link>
           ) : null
         }

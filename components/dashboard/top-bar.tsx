@@ -38,17 +38,25 @@ export function TopBar({ name, email, role }: TopBarProps) {
           <Bell className="h-[18px] w-[18px]" aria-hidden="true" />
         </button>
 
-        {role !== "main_admin" ? (
+        {role === "member" ? (
           <Link
-            href="/dashboard/submissions/new"
+            href="/dashboard/tasks"
             className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-10 text-[14px] font-semibold text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
-            New submission
+            Open tasks
+          </Link>
+        ) : role === "manager" ? (
+          <Link
+            href="/dashboard/tasks"
+            className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-10 text-[14px] font-semibold text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97]"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Assign task
           </Link>
         ) : (
           <Link
-            href="/dashboard/admin/users"
+            href="/dashboard/team"
             className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-10 text-[14px] font-semibold text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97]"
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
