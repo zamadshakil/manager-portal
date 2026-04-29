@@ -1,16 +1,14 @@
 import { Users } from "lucide-react"
 import { roleLabel } from "@/lib/auth-shared"
 import { formatRelative } from "@/lib/format"
-import type { Profile, Team, UserRole } from "@/lib/types"
+import type { Profile, Team } from "@/lib/types"
 
 interface Props {
   members: Profile[]
   teams: Team[]
-  viewerRole: UserRole
 }
 
-export function TeamMembers({ members, teams, viewerRole }: Props) {
-  void viewerRole
+export function TeamMembers({ members, teams }: Props) {
   const teamMap = new Map(teams.map((t) => [t.id, t.name]))
 
   return (

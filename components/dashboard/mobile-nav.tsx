@@ -2,7 +2,14 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, Upload, Megaphone, FolderOpen, BarChart3, ListChecks } from "lucide-react"
+import {
+  BarChart3,
+  LayoutDashboard,
+  ListChecks,
+  Megaphone,
+  Upload,
+  Users,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { UserRole } from "@/lib/types"
 
@@ -13,17 +20,24 @@ interface NavItem {
   roles: UserRole[]
 }
 
+// All possible items, in priority order. The mobile bar shows the top 5 for
+// each role so it stays scannable without horizontal scrolling on small
+// devices. Reports is dropped on mobile for managers/admins because its
+// charts are not designed for narrow widths — it lives in the sidebar instead.
 const items: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: LayoutDashboard, roles: ["main_admin", "manager", "member"] },
   { href: "/dashboard/tasks", label: "Tasks", icon: ListChecks, roles: ["main_admin", "manager", "member"] },
   { href: "/dashboard/submissions", label: "Submissions", icon: Upload, roles: ["main_admin", "manager", "member"] },
+  { href: "/dashboard/team", label: "Team", icon: Users, roles: ["main_admin", "manager"] },
   { href: "/dashboard/announcements", label: "News", icon: Megaphone, roles: ["main_admin", "manager", "member"] },
   { href: "/dashboard/reports", label: "Reports", icon: BarChart3, roles: ["main_admin", "manager"] },
 ]
 
+const MAX_VISIBLE = 5
+
 export function MobileNav({ role }: { role: UserRole }) {
   const pathname = usePathname()
-  const visible = items.filter((i) => i.roles.includes(role))
+  const visible = items.filter((i) => i.roles.includes(role)).slice(0, MAX_VISIBLE)
 
   return (
     <nav
