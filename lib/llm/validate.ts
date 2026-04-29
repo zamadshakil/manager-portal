@@ -14,7 +14,7 @@ export const PROMPT_VERSION = "v3"
 const RuleResultSchema = z.object({
   pass: z.boolean(),
   score: z.number().min(0).max(100),
-  reasons: z.array(z.string()).max(8),
+  reasons: z.array(z.string()).min(1).max(8),
   flags: z
     .array(
       z.object({
@@ -124,7 +124,7 @@ export async function runRule(
         "1. Evaluate ONLY what the rule instructions explicitly ask for. Do NOT invent or assume additional requirements.",
         "2. If the document is a different type than what the rule expects (e.g. a technical spec checked against academic formatting), score based only on what the rule asks, not what the document 'should' have.",
         "3. If the rule criteria are not applicable to this document type, set pass=true, score=100, and explain it is not applicable.",
-        "4. Be specific in `reasons`; cite short excerpts from the document where possible.",
+        "4. Be specific in `reasons`; cite short excerpts from the document where possible. YOU MUST PROVIDE AT LEAST ONE REASON, EVEN IF SCORE IS 100.",
         "5. Do NOT hallucinate content that is not in the document.",
       ].join(" "),
       prompt,

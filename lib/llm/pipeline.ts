@@ -203,6 +203,9 @@ async function runPipeline(submissionId: string) {
     })
   }
 
+  // Clean up any old runs before generating new ones.
+  await admin.from("validation_runs").delete().eq("submission_id", submissionId)
+
   const ruleOutputs = await Promise.all(
     rules.map(async (rule) => {
       try {

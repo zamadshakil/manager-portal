@@ -180,7 +180,11 @@ export default async function SubmissionDetail({ params }: PageProps) {
                                 </li>
                               ))}
                             </ul>
-                          ) : null}
+                          ) : (
+                            <p className="mt-1 text-[12.5px] italic text-muted-foreground">
+                              No specific reasons were provided.
+                            </p>
+                          )}
                           {r.latency_ms !== null && (profile.role === "main_admin" || profile.role === "manager") ? (
                             <p className="mt-1 text-[10.5px] font-mono text-muted-foreground">
                               {r.model} · {r.latency_ms}ms
