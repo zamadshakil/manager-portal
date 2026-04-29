@@ -7,7 +7,7 @@ const nextConfig = {
   experimental: {
     serverActions: { bodySizeLimit: "30mb" },
   },
-  serverExternalPackages: ["pdf-parse", "mammoth", "officeparser", "tesseract.js"],
+  serverExternalPackages: ["unpdf", "mammoth", "officeparser", "tesseract.js"],
 
   async headers() {
     const security = [

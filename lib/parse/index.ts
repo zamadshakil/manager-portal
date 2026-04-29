@@ -29,16 +29,12 @@ export interface ParseResult {
 }
 
 async function parsePdf(buf: Buffer): Promise<ParseResult> {
-  // pdf-parse v2 uses a class-based API — the old v1 subpath import no longer works.
-  const { PDFParse } = await import("pdf-parse")
-  const parser = new PDFParse({ data: buf })
-  const result = await parser.getText()
-  await parser.destroy()
-  // result is { pages: [...], text: string, total: number }
-  const fullText = typeof result === "string" ? result : (result as { text?: string }).text ?? ""
-  const pageCount = Array.isArray((result as { pages?: unknown[] }).pages)
-    ? (result as { pages: unknown[] }).pages.length
-    : undefined
+  const { extractText, getDocumentProxy } = await import("unpdf")
+  const arr = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+  const doc = await getDocumentProxy(arr)
+  const result = await extractText(doc, { mergePages: true })
+  const fullText = result.text ?? ""
+  const pageCount = result.totalPages ?? undefined
   const clamped = clamp(fullText)
   return { text: clamped.text, pages: pageCount, truncated: clamped.truncated }
 }
