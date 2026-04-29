@@ -85,14 +85,40 @@ async function runPipeline(submissionId: string) {
   let text = ""
   let truncated = false
   try {
-    const res = await fetch(submission.blob_url, {
-      headers: {
-        Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`,
-      },
+    // Use the @vercel/blob SDK to read private blobs — raw fetch() does not
+    // work on private stores even with an Authorization header in all runtimes.
+    const { get: getBlob } = await import("@vercel/blob")
+    const blobResult = await getBlob(submission.blob_url, {
+      access: "private" as const,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
     })
-    if (!res.ok) throw new Error(`blob fetch ${res.status} ${res.statusText}`)
-    const arrayBuf = await res.arrayBuffer()
-    const buf = Buffer.from(arrayBuf)
+    if (!blobResult) {
+      console.error("[pipeline] blob not found at", submission.blob_url)
+      throw new Error("blob not found")
+    }
+
+    // Read the stream into a Buffer for the parsers.
+    const chunks: Uint8Array[] = []
+    const stream = blobResult.stream ?? (blobResult as unknown as { body: ReadableStream }).body
+    if (stream) {
+      const reader = stream.getReader()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        chunks.push(value)
+      }
+    } else {
+      // Fallback: re-fetch with auth header
+      const blobMeta = blobResult.blob ?? blobResult
+      const fetchUrl = (blobMeta as unknown as { url: string }).url ?? submission.blob_url
+      const resp = await fetch(fetchUrl, {
+        headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+      })
+      if (!resp.ok) throw new Error(`blob fetch fallback ${resp.status} ${resp.statusText}`)
+      chunks.push(new Uint8Array(await resp.arrayBuffer()))
+    }
+    const buf = Buffer.concat(chunks)
+
     const parsed = await extractText(buf, submission.mime_type)
     text = parsed.text
     truncated = parsed.truncated
@@ -131,7 +157,7 @@ async function runPipeline(submissionId: string) {
       return
     }
   } catch (err) {
-    console.error("[pipeline] parse error", err)
+    console.error("[pipeline] parse error for submission", submissionId, err)
     await admin
       .from("submissions")
       .update({

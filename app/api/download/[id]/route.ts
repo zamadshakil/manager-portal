@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { get as getBlob } from "@vercel/blob"
 import { createClient } from "@/lib/supabase/server"
 import { requireProfile } from "@/lib/auth"
 
@@ -53,21 +54,28 @@ export async function GET(
 
   if (!blobUrl) return NextResponse.json({ error: "No file" }, { status: 404 })
 
-  const upstream = await fetch(blobUrl, {
-    headers: {
-      Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`,
-    },
-  })
-  if (!upstream.ok) {
-    return NextResponse.json({ error: `Upstream fetch failed: ${upstream.status} ${upstream.statusText}` }, { status: 502 })
-  }
+  try {
+    const blobResult = await getBlob(blobUrl, {
+      access: "private" as const,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    })
+    if (!blobResult) {
+      return NextResponse.json({ error: "Blob not found" }, { status: 404 })
+    }
 
-  const safeName = (fileName ?? "download").replace(/[^\w.\-]+/g, "_")
-  return new NextResponse(upstream.body, {
-    headers: {
-      "Content-Type": mimeType ?? "application/octet-stream",
-      "Content-Disposition": `inline; filename="${safeName}"`,
-      "Cache-Control": "private, max-age=0, no-store",
-    },
-  })
+    const safeName = (fileName ?? "download").replace(/[^\w.\-]+/g, "_")
+    return new NextResponse(blobResult.stream, {
+      headers: {
+        "Content-Type": blobResult.blob.contentType || mimeType || "application/octet-stream",
+        "Content-Disposition": `inline; filename="${safeName}"`,
+        "Cache-Control": "private, max-age=0, no-store",
+      },
+    })
+  } catch (err) {
+    console.error("[download] blob fetch failed", blobUrl, err)
+    return NextResponse.json(
+      { error: `Upstream fetch failed: ${err instanceof Error ? err.message : "unknown"}` },
+      { status: 502 },
+    )
+  }
 }
