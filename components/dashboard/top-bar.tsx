@@ -56,7 +56,7 @@ export function TopBar({ name, email, role }: TopBarProps) {
           </Link>
         ) : (
           <Link
-            href="/dashboard/team"
+            href="/dashboard/team?tab=provisioning"
             className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-10 text-[14px] font-semibold text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97]"
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
