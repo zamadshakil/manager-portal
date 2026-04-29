@@ -15,8 +15,6 @@ import { ActivityLog } from "@/components/dashboard/activity-log"
 import { MyTasks } from "@/components/dashboard/my-tasks"
 import { roleLabel } from "@/lib/auth-shared"
 
-export const dynamic = "force-dynamic"
-
 export default async function OverviewPage() {
   const profile = await requireProfile()
   const [summary, announcements, materials, activity, myTasks] = await Promise.all([

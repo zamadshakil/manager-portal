@@ -6,8 +6,6 @@ import { TeamMembers } from "@/components/dashboard/team-members"
 import { TeamAdminPanel } from "@/components/dashboard/team-admin-panel"
 import { TeamPageTabs } from "@/components/dashboard/team-page-tabs"
 
-export const dynamic = "force-dynamic"
-
 export default async function TeamPage() {
   const profile = await requireRole(["main_admin", "manager"])
 

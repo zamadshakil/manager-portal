@@ -4,8 +4,6 @@ import { PageHeader } from "@/components/dashboard/page-header"
 import { Announcements } from "@/components/dashboard/announcements"
 import { AnnouncementComposer } from "@/components/dashboard/announcement-composer"
 
-export const dynamic = "force-dynamic"
-
 export default async function AnnouncementsPage() {
   const profile = await requireProfile()
   const announcements = await listAnnouncements(profile)
