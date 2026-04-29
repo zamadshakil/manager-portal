@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Bell, Plus, LogOut } from "lucide-react"
+import { Plus, LogOut } from "lucide-react"
 import { roleLabel } from "@/lib/auth-shared"
 import type { UserRole } from "@/lib/types"
 
@@ -30,14 +30,6 @@ export function TopBar({ name, email, role }: TopBarProps) {
       </div>
 
       <div className="flex items-center gap-1.5 ml-auto">
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background transition-colors hover:bg-muted"
-        >
-          <Bell className="h-[18px] w-[18px]" aria-hidden="true" />
-        </button>
-
         {role === "member" ? (
           <Link
             href="/dashboard/tasks"

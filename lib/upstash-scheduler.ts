@@ -1,4 +1,4 @@
-import { Redis } from "@upstash/redis"
+import { getRedis } from "@/lib/redis"
 
 /**
  * Upstash Scheduler Utility
@@ -6,12 +6,12 @@ import { Redis } from "@upstash/redis"
  * Manages 15-minute interval scheduling for the mark-missed cron task.
  * Since Vercel Cron only allows one job per day, we use Upstash Redis
  * to trigger task marking every 15 minutes.
+ *
+ * Uses the shared `getRedis()` factory from `lib/redis` so the entire app
+ * shares a single Upstash Redis client (and a single TLS connection pool)
+ * instead of constructing a new one per module.
  */
-
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL || "",
-  token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
-})
+const redis = getRedis()
 
 /**
  * Initialize the 15-minute recurring schedule in Upstash
@@ -88,4 +88,3 @@ export async function recordTaskExecution(
   }
 }
 
-export { redis }

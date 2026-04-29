@@ -6,13 +6,26 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { requireRole } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
 
-const Schema = z.object({
-  email: z.string().email(),
-  full_name: z.string().trim().min(1).max(200),
-  role: z.enum(["main_admin", "manager", "member"]),
-  team_id: z.string().uuid().optional().or(z.literal("")),
-  password: z.string().min(8).max(72),
-})
+const Schema = z
+  .object({
+    email: z.string().email(),
+    full_name: z.string().trim().min(1).max(200),
+    role: z.enum(["main_admin", "manager", "member"]),
+    team_id: z.string().uuid().optional().or(z.literal("")),
+    password: z.string().min(8).max(72),
+  })
+  .superRefine((value, ctx) => {
+    // Managers must own a team — without one they cannot create tasks,
+    // assign members, or own validation rules. Enforce at the boundary so
+    // the UI surfaces a clear validation message instead of a silent state.
+    if (value.role === "manager" && !value.team_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["team_id"],
+        message: "A team is required when provisioning a manager.",
+      })
+    }
+  })
 
 export async function provisionUser(formData: FormData) {
   const actor = await requireRole(["main_admin"])

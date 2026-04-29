@@ -6,5 +6,12 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  // Skip the proxy for:
+  //  - Next.js internals and static asset extensions
+  //  - Cron endpoints (`/api/cron/*`) — they authenticate via shared secret,
+  //    not via Supabase session cookies, so refreshing the session on every
+  //    invocation is wasted IO on a hot path that runs every 15 min.
+  matcher: [
+    "/((?!api/cron|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+  ],
 }

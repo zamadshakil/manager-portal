@@ -39,11 +39,16 @@ export function TeamCreatorForm({ teams, managers, editingTeam, onCancelEdit }: 
       const teamName = String(fd.get("name") || "")
       const actionLabel = editingTeam ? "updated" : "created"
       setSuccess(`Team "${teamName}" ${actionLabel} successfully.`)
-      form.reset()
 
-      setTimeout(() => {
-        router.refresh()
-      }, 500)
+      // For create flows, reset the form so the admin can immediately add
+      // another team. For edit flows, keep the values in the inputs so the
+      // user can see what they just saved alongside the success message.
+      if (!editingTeam) form.reset()
+
+      // Refresh the data on the next tick so the existing-teams list and
+      // success banner stay in sync, but without the timing race that the
+      // previous 500ms timeout introduced.
+      router.refresh()
     })
   }
 

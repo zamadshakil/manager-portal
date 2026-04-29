@@ -41,21 +41,27 @@ interface RecentRow {
 export async function getDashboardSummary(profile: Profile): Promise<DashboardSummary> {
   const supabase = await createClient()
 
-  // Scope by role.
-  let countQuery = supabase
-    .from("submissions")
-    .select("status", { count: "exact", head: false })
-  if (profile.role === "manager" && profile.team_id) {
-    countQuery = countQuery.eq("team_id", profile.team_id)
-  } else if (profile.role === "member") {
-    countQuery = countQuery.eq("uploader_id", profile.id)
+  // Build a base query factory so role scoping stays consistent across counts.
+  // Using `count: "exact", head: true` returns the count without paging the
+  // body, so totals are accurate for tenants beyond the default 1k page size.
+  const buildBase = () => {
+    let q = supabase.from("submissions").select("*", { count: "exact", head: true })
+    if (profile.role === "manager" && profile.team_id) q = q.eq("team_id", profile.team_id)
+    if (profile.role === "member") q = q.eq("uploader_id", profile.id)
+    return q
   }
-  const { data: countData } = await countQuery
 
-  const total = countData?.length ?? 0
-  const passed = countData?.filter((r) => r.status === "passed").length ?? 0
-  const failed = countData?.filter((r) => r.status === "failed").length ?? 0
-  const needsReview = countData?.filter((r) => r.status === "needs_review").length ?? 0
+  const [totalRes, passedRes, failedRes, needsReviewRes] = await Promise.all([
+    buildBase(),
+    buildBase().eq("status", "passed"),
+    buildBase().eq("status", "failed"),
+    buildBase().eq("status", "needs_review"),
+  ])
+
+  const total = totalRes.count ?? 0
+  const passed = passedRes.count ?? 0
+  const failed = failedRes.count ?? 0
+  const needsReview = needsReviewRes.count ?? 0
   const passRate = total > 0 ? Math.round((passed / total) * 100) : 0
 
   // Avg score across passed/failed/needs_review (i.e. completed runs).
@@ -299,6 +305,22 @@ export async function listTeamMembers(profile: Profile): Promise<Profile[]> {
   }
 
   const { data } = await q
+  return (data ?? []) as Profile[]
+}
+
+/**
+ * Admin-only: every profile across every team. Used by the provisioning
+ * console so the Main Admin can see the full directory and pick managers.
+ * Returns an empty array for non-admin callers as a defensive guard — the
+ * real authorization gate is `requireRole(["main_admin"])` upstream.
+ */
+export async function listAllProfiles(profile: Profile): Promise<Profile[]> {
+  if (profile.role !== "main_admin") return []
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from("profiles")
+    .select("*")
+    .order("created_at", { ascending: true })
   return (data ?? []) as Profile[]
 }
 

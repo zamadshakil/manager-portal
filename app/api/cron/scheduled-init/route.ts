@@ -1,5 +1,5 @@
-import { Redis } from "@upstash/redis"
 import { NextResponse } from "next/server"
+import { getRedis } from "@/lib/redis"
 
 /**
  * Upstash Scheduled Tasks Initialization
@@ -11,10 +11,7 @@ import { NextResponse } from "next/server"
  * to trigger the mark-missed task every 15 minutes instead.
  */
 
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-})
+const redis = getRedis()
 
 export async function POST(request: Request) {
   const authHeader = request.headers.get("authorization")
