@@ -151,13 +151,14 @@ async function runPipeline(submissionId: string) {
       return
     }
   } catch (err) {
-    console.error("[pipeline] parse error for submission", submissionId, "error:", err instanceof Error ? err.message : err, err instanceof Error ? err.stack : "")
+    const errorMsg = err instanceof Error ? err.message : String(err)
+    console.error("[pipeline] parse error for submission", submissionId, "error:", errorMsg, err instanceof Error ? err.stack : "")
     await admin
       .from("submissions")
       .update({
         status: "failed",
         flags: [
-          { severity: "fail" as const, message: "Document could not be parsed." },
+          { severity: "fail" as const, message: `Parse Error: ${errorMsg}` },
         ] satisfies SubmissionFlag[],
       })
       .eq("id", submissionId)
