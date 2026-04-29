@@ -11,8 +11,6 @@ import { TaskComposer } from "@/components/dashboard/task-composer"
 import { TaskList } from "@/components/dashboard/task-list"
 import { MyTasks } from "@/components/dashboard/my-tasks"
 
-export const dynamic = "force-dynamic"
-
 export default async function TasksPage() {
   const profile = await requireProfile()
 

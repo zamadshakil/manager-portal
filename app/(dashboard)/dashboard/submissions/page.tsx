@@ -7,8 +7,6 @@ import { SubmissionsTable } from "@/components/dashboard/submissions-table"
 import { SubmissionsFilter } from "@/components/dashboard/submissions-filter"
 import type { SubmissionStatus } from "@/lib/types"
 
-export const dynamic = "force-dynamic"
-
 interface PageProps {
   searchParams: Promise<{ status?: string }>
 }

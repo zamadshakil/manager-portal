@@ -4,8 +4,6 @@ import { ProfileForm } from "@/components/dashboard/profile-form"
 import { PasswordForm } from "@/components/dashboard/password-form"
 import { roleLabel } from "@/lib/auth-shared"
 
-export const dynamic = "force-dynamic"
-
 export default async function SettingsPage() {
   const profile = await requireProfile()
 

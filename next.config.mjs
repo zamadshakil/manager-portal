@@ -6,6 +6,27 @@ const nextConfig = {
   // Blob without traversing the server, but until then this prevents 413s.
   experimental: {
     serverActions: { bodySizeLimit: "30mb" },
+    // ------------------------------------------------------------------
+    // Client-side Router Cache TTLs.
+    //
+    // In Next 16 the default `dynamic` TTL is 0s, which means every tab
+    // click re-fetches the RSC payload from the server even on back/forward
+    // navigation. Setting it to 30s gives us instant tab-to-tab navigation
+    // for pages the user just visited, while still re-validating on a
+    // longer interval. `static` is bumped in line so prefetched routes
+    // also stay warm.
+    // ------------------------------------------------------------------
+    staleTimes: {
+      dynamic: 30,
+      static: 180,
+    },
+    // ------------------------------------------------------------------
+    // Tree-shake icon and date libraries that we import individually.
+    // Without this, `import { Plus } from "lucide-react"` pulls the whole
+    // 1k+ icon barrel file into the bundle. With it, Next rewrites the
+    // import to the specific module path.
+    // ------------------------------------------------------------------
+    optimizePackageImports: ["lucide-react", "date-fns", "recharts"],
   },
   serverExternalPackages: ["unpdf", "mammoth", "officeparser", "tesseract.js"],
 

@@ -4,8 +4,6 @@ import { PageHeader } from "@/components/dashboard/page-header"
 import { Materials } from "@/components/dashboard/materials"
 import { MaterialUploader } from "@/components/dashboard/material-uploader"
 
-export const dynamic = "force-dynamic"
-
 export default async function MaterialsPage() {
   const profile = await requireProfile()
   const materials = await listMaterials(profile, 200)

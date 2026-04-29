@@ -3,8 +3,6 @@ import { listRules } from "@/lib/data"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { RulesEditor } from "@/components/dashboard/rules-editor"
 
-export const dynamic = "force-dynamic"
-
 export default async function RulesPage() {
   const profile = await requireRole(["main_admin", "manager"])
   const rules = await listRules(profile)

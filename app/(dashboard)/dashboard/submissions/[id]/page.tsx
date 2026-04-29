@@ -9,8 +9,6 @@ import { fileIconLabel, formatBytes, formatRelative } from "@/lib/format"
 import type { Submission, ValidationRun } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-export const dynamic = "force-dynamic"
-
 interface PageProps {
   params: Promise<{ id: string }>
 }

@@ -1,12 +1,29 @@
+import { headers } from "next/headers"
+import { redirect } from "next/navigation"
 import { requireProfile } from "@/lib/auth"
 import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { TopBar } from "@/components/dashboard/top-bar"
 import { MobileNav } from "@/components/dashboard/mobile-nav"
 
-export const dynamic = "force-dynamic"
+const PASSWORD_RESET_PATH = "/dashboard/settings"
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  // requireProfile() is wrapped in React.cache, so this single call is
+  // shared with whatever inner page also calls requireProfile()/requireRole().
+  // No more duplicate auth.getUser() + profile selects per navigation.
   const profile = await requireProfile()
+
+  // First-login password reset: previously enforced in the edge proxy via a
+  // dedicated DB query on EVERY request. Moved here so the proxy stays
+  // network-light. Pathname comes from the `x-pathname` header set by the
+  // proxy because Next does not expose pathname directly in server layouts.
+  if (profile.must_reset) {
+    const h = await headers()
+    const pathname = h.get("x-pathname") ?? ""
+    if (!pathname.startsWith(PASSWORD_RESET_PATH)) {
+      redirect(`${PASSWORD_RESET_PATH}?reset=1`)
+    }
+  }
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">

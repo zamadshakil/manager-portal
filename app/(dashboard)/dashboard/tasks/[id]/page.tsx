@@ -12,8 +12,6 @@ import { TaskSubmissionForm } from "@/components/dashboard/task-submission-form"
 import { StatusBadge } from "@/components/dashboard/status-badge"
 import { formatRelative } from "@/lib/format"
 
-export const dynamic = "force-dynamic"
-
 export default async function TaskDetailPage({
   params,
 }: {
