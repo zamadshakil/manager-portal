@@ -4,8 +4,8 @@ import { groq } from "@ai-sdk/groq"
 import { z } from "zod"
 import type { ValidationRule } from "@/lib/types"
 
-const MODEL = process.env.GROQ_VALIDATION_MODEL || "llama-3.3-70b-versatile"
-const SUMMARY_MODEL = process.env.GROQ_SUMMARY_MODEL || "llama-3.3-70b-versatile"
+const MODEL = process.env.GROQ_VALIDATION_MODEL || "llama-3.1-70b-versatile"
+const SUMMARY_MODEL = process.env.GROQ_SUMMARY_MODEL || "llama-3.1-70b-versatile"
 
 // Bumped whenever the system prompt or schema changes so we can compare
 // historical runs in `validation_runs.prompt_version`.
