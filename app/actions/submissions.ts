@@ -119,7 +119,7 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   const safeName = file.name.replace(/[^\w.\-]+/g, "_")
   const pathname = `submissions/${profile.team_id}/${profile.id}/${safeName}`
   const blob = await put(pathname, file, {
-    access: "public", // Vercel Blob currently exposes only `public`; URL is unlisted.
+    access: "private",
     addRandomSuffix: true,
     contentType: file.type,
   })

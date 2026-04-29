@@ -39,7 +39,7 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
   const safeName = file.name.replace(/[^\w.\-]+/g, "_")
   const pathname = `materials/${profile.team_id ?? "global"}/${safeName}`
   const blob = await put(pathname, file, {
-    access: "public",
+    access: "private",
     addRandomSuffix: true,
     contentType: file.type,
   })
