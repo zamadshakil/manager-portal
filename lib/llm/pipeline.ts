@@ -85,8 +85,12 @@ async function runPipeline(submissionId: string) {
   let text = ""
   let truncated = false
   try {
-    const res = await fetch(submission.blob_url)
-    if (!res.ok) throw new Error(`blob fetch ${res.status}`)
+    const res = await fetch(submission.blob_url, {
+      headers: {
+        Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`,
+      },
+    })
+    if (!res.ok) throw new Error(`blob fetch ${res.status} ${res.statusText}`)
     const arrayBuf = await res.arrayBuffer()
     const buf = Buffer.from(arrayBuf)
     const parsed = await extractText(buf, submission.mime_type)
