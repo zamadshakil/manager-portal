@@ -4,5 +4,7 @@
       "path": "/api/cron/mark-missed",
       "schedule": "0 0 * * *"
     }
-  ]
+  ],
+  "comment": "Vercel allows ONE cron per day. The /api/cron/mark-missed route is called daily but uses Upstash Redis to execute only every 15 minutes via the shouldRunCronTask() check in the handler. This allows us to maintain 15-minute intervals without hitting Vercel's daily limit."
 }
+

@@ -16,7 +16,7 @@ Last reviewed: 2026-04-29 (full end-to-end flow audit)
 - **Database:** Supabase Postgres with RLS on every table.
 - **Files:** Vercel Blob, fronted by an authenticated download proxy.
 - **AI:** Groq (via the Vercel AI SDK) for validation + summarisation; Tesseract OCR with a Groq Vision fallback for images.
-- **Background work:** Next.js `after()` for the validation pipeline; Vercel Cron for missed-deadline sweeps and stuck-submission recovery.
+- **Background work:** Next.js `after()` for the validation pipeline; Vercel Cron (daily) + Upstash Redis (15-minute intervals) for missed-deadline sweeps and stuck-submission recovery.
 - **Rate limit / idempotency:** Upstash Redis.
 - **Roles:** `main_admin`, `manager`, `member`. Three different views of the same dashboard.
 
@@ -272,12 +272,19 @@ Every action returns a discriminated `ActionResult` (`{ ok: true, … } | { ok: 
 
 ### 6.5 Cron — missed deadlines and stuck-pipeline recovery
 
-`vercel.json` schedules `/api/cron/mark-missed` every **15 minutes** (`*/15 * * * *`). The handler is protected by `Authorization: Bearer ${CRON_SECRET}` (see §8). It runs two queries via the admin client:
+**Scheduling Strategy:** Since Vercel Cron allows only **one job per day**, we use **Upstash Redis** to maintain 15-minute execution intervals. The `vercel.json` entry calls `/api/cron/mark-missed` once daily (`0 0 * * *`), but the handler uses `shouldRunCronTask()` from `lib/upstash-scheduler.ts` to gate execution — it only runs if 15 minutes have elapsed since the last execution, stored in Redis.
+
+The handler is protected by `Authorization: Bearer ${CRON_SECRET}` (see §8). It runs two queries via the admin client:
 
 1. **Mark missed.** `task_assignments.status = 'assigned'` join `tasks` where `due_at < now()` AND `tasks.allow_late = false` → flip to `missed`.
 2. **Recover stuck.** Any `submissions.status IN ('queued','parsing','validating')` whose `updated_at` is older than 30 minutes → flip to `failed` with a `"Validation pipeline timed out. Please retry."` flag. This is the failsafe for `after()` invocations that crashed silently.
 
-The endpoint returns `{ ok, missedCount, stuckRecovered }` so it's easy to verify with curl.
+The endpoint returns `{ ok, missedCount, stuckRecovered, skipped }` so it's easy to verify with curl. Executions are logged in `cron:mark-missed:executions` in Redis for monitoring.
+
+**Key modules:**
+- `lib/upstash-scheduler.ts` — `shouldRunCronTask()`, `recordTaskExecution()`
+- `app/api/cron/scheduled-init/route.ts` — (optional) manual initialization endpoint
+- `app/api/cron/mark-missed/route.ts` — main cron handler with Upstash gating
 
 ### 6.6 Authenticated download proxy
 
@@ -289,6 +296,7 @@ The endpoint returns `{ ok, missedCount, stuckRecovered }` so it's easy to verif
 
 | Module | Imports from | Imported by | Server-only? |
 |---|---|---|---|
+| `lib/upstash-scheduler.ts` | `@upstash/redis` | `app/api/cron/mark-missed`, monitoring tools | yes |
 | `lib/supabase/admin.ts` | `@supabase/supabase-js` | `app/actions/*`, `lib/llm/pipeline.ts`, `lib/activity.ts`, `app/api/cron/*` | yes |
 | `lib/supabase/server.ts` | `@supabase/ssr`, `next/headers` | RSC pages, `lib/auth.ts`, `lib/data.ts`, action handlers | no (RSC compatible) |
 | `lib/supabase/client.ts` | `@supabase/ssr` | `components/auth/login-form.tsx` | no (browser) |
@@ -324,15 +332,15 @@ These must be set on Vercel (Production + Preview). Locally they go in `.env.loc
 | `GROQ_VISION_MODEL` | optional | defaults to `llama-3.2-90b-vision-preview` |
 | `CRON_SECRET` | server only | shared secret for the cron endpoint — see below |
 
-### About `CRON_SECRET`
+### About `CRON_SECRET` and `UPSTASH_REDIS_*`
 
-It's a random opaque token **you generate yourself**. There is no service that issues it. Generate one with:
+**CRON_SECRET:** A random opaque token **you generate yourself**. There is no service that issues it. Generate one with:
 
 ```bash
 openssl rand -hex 32
 ```
 
-Add `CRON_SECRET = <value>` to *Vercel → Project → Settings → Environment Variables* for Production (and Preview if you want preview crons to fire). When Vercel Cron triggers `/api/cron/mark-missed`, it sends `Authorization: Bearer ${CRON_SECRET}` automatically because the project-level env var is paired with the schedule. The route checks:
+Add `CRON_SECRET = <value>` to *Vercel → Project → Settings → Environment Variables* for Production (and Preview if you want preview crons to fire). When Vercel Cron triggers `/api/cron/mark-missed`, it sends `Authorization: Bearer ${CRON_SECRET}` automatically. The route checks:
 
 ```ts
 const auth = request.headers.get("authorization")
@@ -341,7 +349,9 @@ if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
 }
 ```
 
-If the variable is **unset**, the check is skipped. That is intentional for local dev so `curl http://localhost:3000/api/cron/mark-missed` works without ceremony. **Always set it on Vercel** — otherwise anyone can trigger the job.
+If the variable is **unset**, the check is skipped — intentional for local dev so `curl http://localhost:3000/api/cron/mark-missed` works without ceremony. **Always set it on Vercel** — otherwise anyone can trigger the job.
+
+**UPSTASH_REDIS_REST_URL & UPSTASH_REDIS_REST_TOKEN:** Required for 15-minute interval scheduling (via `lib/upstash-scheduler.ts`). These are auto-injected by Vercel if you've connected the Upstash integration, but can also be manually added. The cron handler uses Redis to gate execution, ensuring the task only runs once per 15 minutes despite Vercel calling it daily.
 
 Manual test:
 
