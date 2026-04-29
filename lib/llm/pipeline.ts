@@ -85,43 +85,34 @@ async function runPipeline(submissionId: string) {
   let text = ""
   let truncated = false
   try {
-    // Use the @vercel/blob SDK to read private blobs — raw fetch() does not
-    // work on private stores even with an Authorization header in all runtimes.
+    // Step 1: Fetch the private blob via the SDK (handles auth automatically).
     const { get: getBlob } = await import("@vercel/blob")
+    console.log("[pipeline] fetching blob for", submissionId, "mime:", submission.mime_type)
+
     const blobResult = await getBlob(submission.blob_url, {
       access: "private" as const,
       token: process.env.BLOB_READ_WRITE_TOKEN,
     })
-    if (!blobResult) {
-      console.error("[pipeline] blob not found at", submission.blob_url)
-      throw new Error("blob not found")
+    if (!blobResult || blobResult.statusCode !== 200) {
+      throw new Error(`blob not found or error: ${blobResult?.statusCode}`)
     }
 
-    // Read the stream into a Buffer for the parsers.
+    // Step 2: Read the stream into a Buffer for the parsers.
     const chunks: Uint8Array[] = []
-    const stream = blobResult.stream ?? (blobResult as unknown as { body: ReadableStream }).body
-    if (stream) {
-      const reader = stream.getReader()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        chunks.push(value)
-      }
-    } else {
-      // Fallback: re-fetch with auth header
-      const blobMeta = blobResult.blob ?? blobResult
-      const fetchUrl = (blobMeta as unknown as { url: string }).url ?? submission.blob_url
-      const resp = await fetch(fetchUrl, {
-        headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
-      })
-      if (!resp.ok) throw new Error(`blob fetch fallback ${resp.status} ${resp.statusText}`)
-      chunks.push(new Uint8Array(await resp.arrayBuffer()))
+    const reader = blobResult.stream.getReader()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
     }
     const buf = Buffer.concat(chunks)
+    console.log("[pipeline] downloaded", buf.length, "bytes")
 
+    // Step 3: Extract text from the document.
     const parsed = await extractText(buf, submission.mime_type)
     text = parsed.text
     truncated = parsed.truncated
+    console.log("[pipeline] extracted text length:", text.length, "truncated:", truncated)
 
     // Vision fallback for low-confidence OCR / sparse text on images.
     const isImage = submission.mime_type.startsWith("image/")
@@ -157,7 +148,7 @@ async function runPipeline(submissionId: string) {
       return
     }
   } catch (err) {
-    console.error("[pipeline] parse error for submission", submissionId, err)
+    console.error("[pipeline] parse error for submission", submissionId, "error:", err instanceof Error ? err.message : err, err instanceof Error ? err.stack : "")
     await admin
       .from("submissions")
       .update({

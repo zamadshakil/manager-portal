@@ -29,17 +29,18 @@ export interface ParseResult {
 }
 
 async function parsePdf(buf: Buffer): Promise<ParseResult> {
-  // Import the inner module directly: pdf-parse's index.js eagerly reads a
-  // local test fixture during dev builds which crashes serverless runtimes.
-  const mod = (await import(
-    /* webpackIgnore: true */
-    "pdf-parse/lib/pdf-parse.js" as string
-  )) as unknown as {
-    default: (b: Buffer) => Promise<{ text: string; numpages: number }>
-  }
-  const result = await mod.default(buf)
-  const clamped = clamp(result.text || "")
-  return { text: clamped.text, pages: result.numpages, truncated: clamped.truncated }
+  // pdf-parse v2 uses a class-based API — the old v1 subpath import no longer works.
+  const { PDFParse } = await import("pdf-parse")
+  const parser = new PDFParse({ data: buf })
+  const result = await parser.getText()
+  await parser.destroy()
+  // result is { pages: [...], text: string, total: number }
+  const fullText = typeof result === "string" ? result : (result as { text?: string }).text ?? ""
+  const pageCount = Array.isArray((result as { pages?: unknown[] }).pages)
+    ? (result as { pages: unknown[] }).pages.length
+    : undefined
+  const clamped = clamp(fullText)
+  return { text: clamped.text, pages: pageCount, truncated: clamped.truncated }
 }
 
 async function parseDocx(buf: Buffer): Promise<ParseResult> {
@@ -54,10 +55,9 @@ async function parseDocx(buf: Buffer): Promise<ParseResult> {
 }
 
 async function parsePptx(buf: Buffer): Promise<ParseResult> {
-  const officeparser = (await import("officeparser")) as unknown as {
-    parseOfficeAsync: (b: Buffer) => Promise<string>
-  }
-  const text = await officeparser.parseOfficeAsync(buf)
+  // officeparser v6+ exports `parseOffice` (not `parseOfficeAsync`).
+  const { parseOffice } = await import("officeparser")
+  const text = String(await parseOffice(buf))
   const clamped = clamp(text || "")
   return { text: clamped.text, truncated: clamped.truncated }
 }
