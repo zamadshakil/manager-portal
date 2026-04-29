@@ -93,15 +93,14 @@ async function runPipeline(submissionId: string) {
       access: "private" as const,
       token: process.env.BLOB_READ_WRITE_TOKEN,
     })
-    if (!blobResult) {
-      throw new Error(`blob not found at: ${submission.blob_url}`)
+    console.log("[pipeline] getBlob completed")
+    if (!blobResult || !blobResult.stream) {
+      throw new Error(`blob stream is missing for: ${submission.blob_url}`)
     }
 
     // Step 2: Read the stream into a Buffer for the parsers.
+    console.log("[pipeline] reading stream")
     const chunks: Uint8Array[] = []
-    if (!blobResult.stream) {
-      throw new Error(`blob stream is missing for: ${submission.blob_url}`)
-    }
     const reader = blobResult.stream.getReader()
     while (true) {
       const { done, value } = await reader.read()
@@ -112,7 +111,9 @@ async function runPipeline(submissionId: string) {
     console.log("[pipeline] downloaded", buf.length, "bytes")
 
     // Step 3: Extract text from the document.
+    console.log("[pipeline] starting extractText...")
     const parsed = await extractText(buf, submission.mime_type)
+    console.log("[pipeline] extractText completed")
     text = parsed.text
     truncated = parsed.truncated
     console.log("[pipeline] extracted text length:", text.length, "truncated:", truncated)
