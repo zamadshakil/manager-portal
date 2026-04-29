@@ -1,5 +1,5 @@
 import "server-only"
-import { generateObject } from "ai"
+import { generateObject, generateText } from "ai"
 import { groq } from "@ai-sdk/groq"
 import { z } from "zod"
 import type { ValidationRule } from "@/lib/types"
@@ -189,27 +189,26 @@ export async function describeImage(
   buffer: Uint8Array,
   mimeType: string,
 ): Promise<{ text: string; notes?: string }> {
-  const VISION_MODEL = process.env.GROQ_VISION_MODEL || "llama-3.2-11b-vision-preview"
-  const { object } = await withRetry(() =>
-    generateObject({
+  const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
+  const { text: rawText } = await withRetry(() =>
+    generateText({
       model: groq(VISION_MODEL),
       temperature: 0,
-      schema: VisionSchema,
       system:
-        "You are a vision OCR assistant. Transcribe all readable text from the image and provide a brief description of any diagrams, tables, or signatures.",
+        "You are a vision OCR assistant. Transcribe ALL readable text from the image exactly as it appears. Preserve line breaks and formatting. If there are diagrams, tables, or signatures, describe them briefly after the transcribed text. Output plain text only, no JSON wrapping.",
       messages: [
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: "Extract all readable text from this image. Preserve line breaks. Return JSON only.",
+              text: "Extract all readable text from this image. Preserve line breaks.",
             },
-            { type: "image", image: buffer, mediaType: mimeType },
+            { type: "image", image: buffer, mediaType: mimeType as `image/${string}` },
           ],
         },
       ],
     }),
   )
-  return object
+  return { text: rawText.trim(), notes: undefined }
 }
