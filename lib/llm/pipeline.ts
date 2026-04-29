@@ -187,8 +187,17 @@ async function runPipeline(submissionId: string) {
   const rules = (rulesData ?? []) as ValidationRule[]
   const task = (taskRow?.data as Task | null) ?? null
 
+  // If the task explicitly lists rule_ids, restrict to only those rules.
+  // null  → no restriction (use all enabled rules — backward-compatible default)
+  // []    → skip all standing rules entirely
+  // [id…] → keep only the rules whose id appears in the list
+  const filteredRules: ValidationRule[] =
+    task && task.rule_ids !== null
+      ? rules.filter((r) => (task.rule_ids as string[]).includes(r.id))
+      : [...rules]
+
   if (task && task.instructions && task.instructions.trim().length > 0) {
-    rules.push({
+    filteredRules.push({
       id: `task:${task.id}`,
       team_id: submission.team_id,
       rule_name: `Task brief: ${task.title}`,
@@ -207,7 +216,7 @@ async function runPipeline(submissionId: string) {
   await admin.from("validation_runs").delete().eq("submission_id", submissionId)
 
   const ruleOutputs = await Promise.all(
-    rules.map(async (rule) => {
+    filteredRules.map(async (rule) => {
       try {
         return await runRule(text, rule, { truncated })
       } catch (err) {

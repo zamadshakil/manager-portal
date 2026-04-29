@@ -29,6 +29,8 @@ const CreateTaskSchema = z.object({
   // "all" assigns to every member of the team; otherwise a comma-separated
   // list of profile UUIDs (multiple <input name="assignee_ids">).
   assign_mode: z.enum(["all", "selected"]).default("all"),
+  // Explicit rule IDs to run. null = use all enabled team rules.
+  rule_ids: z.array(z.string().uuid()).nullable().default(null),
 })
 
 /**
@@ -39,6 +41,9 @@ const CreateTaskSchema = z.object({
  */
 export async function createTask(formData: FormData): Promise<TaskActionResult> {
   const profile = await requireRole(["main_admin", "manager"])
+
+  // Collect rule_ids from the form — multiple checkboxes named "rule_ids".
+  const rawRuleIds = formData.getAll("rule_ids").map((v) => String(v)).filter(Boolean)
 
   const parsed = CreateTaskSchema.safeParse({
     team_id: formData.get("team_id"),
@@ -51,6 +56,13 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
       formData.get("require_late_reason") === "on" ||
       formData.get("require_late_reason") === "true",
     assign_mode: formData.get("assign_mode") ?? "all",
+    // If the form sent the "rules_section_shown" flag but no rule_ids, treat
+    // as an intentional empty selection (skip all standing rules).
+    // If the section wasn't rendered at all, default to null (all rules).
+    rule_ids:
+      formData.get("rules_section_shown") === "1"
+        ? rawRuleIds.length > 0 ? rawRuleIds : []
+        : null,
   })
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
@@ -72,6 +84,7 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
       due_at: parsed.data.due_at,
       allow_late: parsed.data.allow_late,
       require_late_reason: parsed.data.require_late_reason,
+      rule_ids: parsed.data.rule_ids,
     })
     .select("id")
     .single()

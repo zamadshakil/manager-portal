@@ -73,6 +73,12 @@ export interface Task {
   due_at: string | null
   allow_late: boolean
   require_late_reason: boolean
+  /** Explicit list of validation rule IDs to run for this task's submissions.
+   *  null  → run all enabled team rules (default / backward-compatible)
+   *  []    → skip all standing rules (only task instructions run, if any)
+   *  [id…] → run only these specific rules
+   */
+  rule_ids: string[] | null
   created_at: string
   updated_at: string
 }

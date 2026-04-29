@@ -2,19 +2,22 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Loader2, ListChecks, Sparkles } from "lucide-react"
+import { Loader2, ListChecks, Sparkles, ShieldCheck, ChevronDown, ChevronUp, CheckSquare, Square } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { createTask } from "@/app/actions/tasks"
-import type { Profile, Team } from "@/lib/types"
+import type { Profile, Team, ValidationRule } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 interface TaskComposerProps {
   teams: Team[]
   defaultTeamId: string | null
   /** Members the manager can target. Provide all team members; we filter. */
   members: Profile[]
+  /** All validation rules for the team to allow per-task selection. */
+  rules: ValidationRule[]
 }
 
 /**
@@ -23,8 +26,9 @@ interface TaskComposerProps {
  *  - bulk assigning to all members or a hand-picked subset
  *  - configuring deadline + late-submission policy
  *  - optional `instructions` that the AI pipeline evaluates per submission
+ *  - selecting which validation rules apply to this specific task
  */
-export function TaskComposer({ teams, defaultTeamId, members }: TaskComposerProps) {
+export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskComposerProps) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -32,6 +36,13 @@ export function TaskComposer({ teams, defaultTeamId, members }: TaskComposerProp
   const [teamId, setTeamId] = useState<string>(defaultTeamId ?? teams[0]?.id ?? "")
   const [mode, setMode] = useState<"all" | "selected">("all")
   const [selected, setSelected] = useState<Set<string>>(new Set())
+
+  // Validation rules selection — default: all enabled rules pre-checked
+  const enabledRules = rules.filter((r) => r.enabled)
+  const [selectedRuleIds, setSelectedRuleIds] = useState<Set<string>>(
+    new Set(enabledRules.map((r) => r.id)),
+  )
+  const [rulesExpanded, setRulesExpanded] = useState(false)
 
   const teamMembers = members.filter((m) => m.team_id === teamId && m.role === "member")
 
@@ -44,6 +55,26 @@ export function TaskComposer({ teams, defaultTeamId, members }: TaskComposerProp
     })
   }
 
+  function toggleRule(id: string) {
+    setSelectedRuleIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAllRules() {
+    setSelectedRuleIds(new Set(rules.map((r) => r.id)))
+  }
+
+  function clearAllRules() {
+    setSelectedRuleIds(new Set())
+  }
+
+  const allRulesSelected = rules.length > 0 && selectedRuleIds.size === rules.length
+  const noRulesSelected = selectedRuleIds.size === 0
+
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
@@ -55,6 +86,12 @@ export function TaskComposer({ teams, defaultTeamId, members }: TaskComposerProp
       fd.delete("assignee_ids")
       for (const id of selected) fd.append("assignee_ids", id)
     }
+    // Signal that the rules section was visible so the server action can
+    // distinguish "all rules" (section not shown) from an intentional selection.
+    fd.set("rules_section_shown", "1")
+    fd.delete("rule_ids")
+    for (const id of selectedRuleIds) fd.append("rule_ids", id)
+
     startTransition(async () => {
       const res = await createTask(fd)
       if (!res.ok) {
@@ -63,6 +100,8 @@ export function TaskComposer({ teams, defaultTeamId, members }: TaskComposerProp
       }
       setSuccess(`Task created and assigned to ${res.assignedCount ?? 0} member(s).`)
       setSelected(new Set())
+      // Reset rule selection back to all enabled rules
+      setSelectedRuleIds(new Set(enabledRules.map((r) => r.id)))
       ;(e.target as HTMLFormElement).reset()
       router.refresh()
     })
@@ -138,12 +177,166 @@ export function TaskComposer({ teams, defaultTeamId, members }: TaskComposerProp
             name="instructions"
             rows={4}
             maxLength={8000}
-            placeholder="What should the AI check? E.g. &quot;Confirm the document includes a root-cause analysis, a timeline, and at least three preventative actions.&quot;"
+            placeholder={`What should the AI check? E.g. "Confirm the document includes a root-cause analysis, a timeline, and at least three preventative actions."`}
           />
           <p className="text-[11.5px] text-muted-foreground">
-            Run alongside your team's standing rules whenever someone submits this task.
+            Run alongside your team&apos;s standing rules whenever someone submits this task.
           </p>
         </div>
+
+        {/* ── Validation Rules Section ─────────────────────────────────── */}
+        <div className="rounded-lg border border-border overflow-hidden">
+          {/* Header / toggle */}
+          <button
+            type="button"
+            onClick={() => setRulesExpanded((v) => !v)}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2.5 bg-muted/40 hover:bg-muted/70 transition-colors text-left"
+          >
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#f2f9ff] text-primary shrink-0">
+              <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <span className="text-[13px] font-semibold">Validation rules</span>
+              <span className="ml-2 text-[11.5px] text-muted-foreground">
+                {rules.length === 0
+                  ? "No rules configured"
+                  : allRulesSelected
+                    ? `All ${rules.length} rule${rules.length === 1 ? "" : "s"} selected`
+                    : noRulesSelected
+                      ? "No rules selected — skip all standing rules"
+                      : `${selectedRuleIds.size} of ${rules.length} rule${rules.length === 1 ? "" : "s"} selected`}
+              </span>
+            </div>
+            {rulesExpanded ? (
+              <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            )}
+          </button>
+
+          {rulesExpanded && (
+            <div className="border-t border-border">
+              {rules.length === 0 ? (
+                <div className="px-4 py-5 text-center">
+                  <ShieldCheck className="mx-auto h-6 w-6 text-muted-foreground mb-2" aria-hidden="true" />
+                  <p className="text-[12.5px] font-semibold text-muted-foreground">
+                    No validation rules configured yet.
+                  </p>
+                  <p className="text-[11.5px] text-muted-foreground mt-0.5">
+                    Go to{" "}
+                    <a href="/dashboard/rules" className="text-primary underline underline-offset-2">
+                      Validation Rules
+                    </a>{" "}
+                    to add some.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Select all / clear controls */}
+                  <div className="flex items-center gap-2 px-3.5 py-2 border-b border-border bg-background">
+                    <button
+                      type="button"
+                      onClick={selectAllRules}
+                      disabled={allRulesSelected}
+                      className="text-[11.5px] font-semibold text-primary hover:underline disabled:opacity-40 disabled:no-underline"
+                    >
+                      Select all
+                    </button>
+                    <span className="text-muted-foreground text-[11px]">·</span>
+                    <button
+                      type="button"
+                      onClick={clearAllRules}
+                      disabled={noRulesSelected}
+                      className="text-[11.5px] font-semibold text-muted-foreground hover:text-foreground hover:underline disabled:opacity-40 disabled:no-underline"
+                    >
+                      Clear all
+                    </button>
+                    <span className="ml-auto text-[11px] text-muted-foreground">
+                      {selectedRuleIds.size}/{rules.length} selected
+                    </span>
+                  </div>
+
+                  {/* Rule checklist */}
+                  <ul className="divide-y divide-border max-h-56 overflow-y-auto">
+                    {rules.map((rule) => {
+                      const checked = selectedRuleIds.has(rule.id)
+                      return (
+                        <li key={rule.id}>
+                          <label className="flex items-start gap-3 px-3.5 py-2.5 hover:bg-muted/40 cursor-pointer transition-colors">
+                            {/* Hidden form input — only submitted when checked */}
+                            <span className="mt-0.5 shrink-0">
+                              {checked ? (
+                                <CheckSquare
+                                  className="h-4 w-4 text-primary"
+                                  aria-hidden="true"
+                                />
+                              ) : (
+                                <Square
+                                  className="h-4 w-4 text-muted-foreground"
+                                  aria-hidden="true"
+                                />
+                              )}
+                            </span>
+                            <input
+                              type="checkbox"
+                              className="sr-only"
+                              checked={checked}
+                              onChange={() => toggleRule(rule.id)}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span
+                                  className={cn(
+                                    "text-[13px] font-semibold truncate",
+                                    !checked && "opacity-50",
+                                  )}
+                                >
+                                  {rule.rule_name}
+                                </span>
+                                <span
+                                  className={cn(
+                                    "rounded-full px-1.5 py-0.5 text-[10px] font-semibold shrink-0",
+                                    rule.enabled
+                                      ? "bg-[#e6f4eb] text-[#1aae39]"
+                                      : "bg-muted text-muted-foreground",
+                                  )}
+                                >
+                                  {rule.enabled ? "ENABLED" : "DISABLED"}
+                                </span>
+                              </div>
+                              {rule.description ? (
+                                <p
+                                  className={cn(
+                                    "text-[11.5px] text-muted-foreground mt-0.5 line-clamp-2",
+                                    !checked && "opacity-50",
+                                  )}
+                                >
+                                  {rule.description}
+                                </p>
+                              ) : null}
+                              <p className={cn("text-[10.5px] font-mono text-muted-foreground mt-0.5", !checked && "opacity-40")}>
+                                threshold {Number(rule.threshold).toFixed(1)} · weight {Number(rule.weight).toFixed(2)}
+                              </p>
+                            </div>
+                          </label>
+                        </li>
+                      )
+                    })}
+                  </ul>
+
+                  {noRulesSelected && (
+                    <div className="px-3.5 py-2 bg-amber-50 border-t border-amber-200">
+                      <p className="text-[11.5px] text-amber-700 font-medium">
+                        ⚠ No standing rules selected. Only task-specific AI instructions (if any) will run for this task&apos;s submissions.
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        {/* ── End Validation Rules Section ─────────────────────────────── */}
 
         <div className="grid gap-1.5 sm:grid-cols-2 sm:gap-3">
           <div className="grid gap-1.5">

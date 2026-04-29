@@ -4,6 +4,7 @@ import {
   listMyTasks,
   listTeams,
   listTeamMembers,
+  listRules,
 } from "@/lib/data"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { TaskComposer } from "@/components/dashboard/task-composer"
@@ -42,10 +43,11 @@ export default async function TasksPage() {
   }
 
   // Manager + main_admin view: composer + list of team tasks.
-  const [tasks, teams, members] = await Promise.all([
+  const [tasks, teams, members, rules] = await Promise.all([
     listTasksForManager(profile),
     profile.role === "main_admin" ? listTeams() : Promise.resolve([]),
     listTeamMembers(profile),
+    listRules(profile),
   ])
 
   // For managers, expose only their own team in the composer.
@@ -77,6 +79,7 @@ export default async function TasksPage() {
         teams={composerTeams}
         defaultTeamId={profile.team_id}
         members={members}
+        rules={rules}
       />
 
       <section>
