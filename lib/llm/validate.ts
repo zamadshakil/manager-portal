@@ -109,6 +109,7 @@ export async function runRule(
   const { object } = await withRetry(() =>
     generateObject({
       model: groq(MODEL),
+      mode: "json",
       schema: RuleResultSchema,
       system: [
         "You are a strict but fair document validator.",
@@ -150,6 +151,7 @@ export async function summarize(
   const { object } = await withRetry(() =>
     generateObject({
       model: groq(SUMMARY_MODEL),
+      mode: "json",
       schema: SummarySchema,
       system:
         "You generate concise executive summaries of business documents. Return JSON only matching the schema.",
@@ -175,10 +177,11 @@ export async function describeImage(
   buffer: Uint8Array,
   mimeType: string,
 ): Promise<{ text: string; notes?: string }> {
-  const VISION_MODEL = process.env.GROQ_VISION_MODEL || "llama-3.2-90b-vision-preview"
+  const VISION_MODEL = process.env.GROQ_VISION_MODEL || "llama-3.2-11b-vision-preview"
   const { object } = await withRetry(() =>
     generateObject({
       model: groq(VISION_MODEL),
+      mode: "json",
       schema: VisionSchema,
       system:
         "You are a vision OCR assistant. Transcribe all readable text from the image and provide a brief description of any diagrams, tables, or signatures.",
