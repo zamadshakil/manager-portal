@@ -53,9 +53,13 @@ export async function GET(
 
   if (!blobUrl) return NextResponse.json({ error: "No file" }, { status: 404 })
 
-  const upstream = await fetch(blobUrl)
+  const upstream = await fetch(blobUrl, {
+    headers: {
+      Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`,
+    },
+  })
   if (!upstream.ok) {
-    return NextResponse.json({ error: "Upstream fetch failed" }, { status: 502 })
+    return NextResponse.json({ error: `Upstream fetch failed: ${upstream.status} ${upstream.statusText}` }, { status: 502 })
   }
 
   const safeName = (fileName ?? "download").replace(/[^\w.\-]+/g, "_")

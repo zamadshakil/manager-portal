@@ -61,7 +61,7 @@ export function Materials({ rows, emptyHint, canDelete = false }: MaterialsProps
                       ))}
                     </div>
                   ) : null}
-                  <h3 className="mt-1.5 text-[13.5px] font-semibold leading-snug">{m.title}</h3>
+                  <h3 className="mt-1.5 text-[13.5px] font-semibold leading-snug truncate">{m.title}</h3>
                   <p className="mt-0.5 text-[11.5px] text-muted-foreground">
                     {formatBytes(m.size_bytes)} · {formatRelative(m.created_at)}
                   </p>
