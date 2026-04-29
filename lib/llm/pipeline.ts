@@ -225,7 +225,7 @@ async function runPipeline(submissionId: string) {
         rule_id: r.rule_id,
         model: r.model,
         prompt_version: PROMPT_VERSION,
-        raw_output: r.raw as Record<string, unknown>,
+        raw_output: { ...(r.raw as Record<string, unknown>), rule_name: r.rule_name },
         pass: r.pass,
         score: r.score,
         reasons: r.reasons,

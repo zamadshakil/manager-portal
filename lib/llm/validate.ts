@@ -9,7 +9,7 @@ const SUMMARY_MODEL = process.env.GROQ_SUMMARY_MODEL || "meta-llama/llama-4-scou
 
 // Bumped whenever the system prompt or schema changes so we can compare
 // historical runs in `validation_runs.prompt_version`.
-export const PROMPT_VERSION = "v2"
+export const PROMPT_VERSION = "v3"
 
 const RuleResultSchema = z.object({
   pass: z.boolean(),
@@ -85,6 +85,10 @@ function buildRulePrompt(rule: ValidationRule, text: string, truncated: boolean)
         `Threshold: ${rule.threshold}`,
         `Instructions: ${template}`,
         "",
+        "IMPORTANT: Evaluate the document ONLY against the criteria stated above in Instructions.",
+        "Do NOT invent, assume, or check for requirements that are not explicitly mentioned.",
+        "If the instructions ask to check for specific items (e.g. specific sections), only check for those exact items.",
+        "",
         "Document text:",
         "---",
         text,
@@ -109,14 +113,19 @@ export async function runRule(
   const { object } = await withRetry(() =>
     generateObject({
       model: groq(MODEL),
-      mode: "json",
+      temperature: 0,
       schema: RuleResultSchema,
       system: [
         "You are a strict but fair document validator.",
         "Return ONLY structured JSON matching the schema.",
         "Score is 0-100 where 100 is fully compliant.",
         `Pass=true only if score >= ${rule.threshold}.`,
-        "Be specific in `reasons`; cite excerpts where possible.",
+        "CRITICAL RULES:",
+        "1. Evaluate ONLY what the rule instructions explicitly ask for. Do NOT invent or assume additional requirements.",
+        "2. If the document is a different type than what the rule expects (e.g. a technical spec checked against academic formatting), score based only on what the rule asks, not what the document 'should' have.",
+        "3. If the rule criteria are not applicable to this document type, set pass=true, score=100, and explain it is not applicable.",
+        "4. Be specific in `reasons`; cite short excerpts from the document where possible.",
+        "5. Do NOT hallucinate content that is not in the document.",
       ].join(" "),
       prompt,
     }),
@@ -151,10 +160,13 @@ export async function summarize(
   const { object } = await withRetry(() =>
     generateObject({
       model: groq(SUMMARY_MODEL),
-      mode: "json",
+      temperature: 0,
       schema: SummarySchema,
-      system:
+      system: [
         "You generate concise executive summaries of business documents. Return JSON only matching the schema.",
+        "Only describe what is actually in the document. Do NOT invent or assume content that is not present.",
+        "For predictive_flags, only flag genuine risks that are directly supported by the document content.",
+      ].join(" "),
       prompt: promptParts.join("\n"),
     }),
   )
@@ -181,7 +193,7 @@ export async function describeImage(
   const { object } = await withRetry(() =>
     generateObject({
       model: groq(VISION_MODEL),
-      mode: "json",
+      temperature: 0,
       schema: VisionSchema,
       system:
         "You are a vision OCR assistant. Transcribe all readable text from the image and provide a brief description of any diagrams, tables, or signatures.",

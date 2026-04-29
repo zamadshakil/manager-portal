@@ -151,7 +151,7 @@ export default async function SubmissionDetail({ params }: PageProps) {
                 Validation rule results
               </h2>
               <p className="text-[12px] text-muted-foreground">
-                Per-rule LLM judgments for this submission.
+                AI-powered checks applied to this submission.
               </p>
             </header>
             {runRows.length === 0 ? (
@@ -181,7 +181,7 @@ export default async function SubmissionDetail({ params }: PageProps) {
                               ))}
                             </ul>
                           ) : null}
-                          {r.latency_ms !== null ? (
+                          {r.latency_ms !== null && (profile.role === "main_admin" || profile.role === "manager") ? (
                             <p className="mt-1 text-[10.5px] font-mono text-muted-foreground">
                               {r.model} · {r.latency_ms}ms
                             </p>
