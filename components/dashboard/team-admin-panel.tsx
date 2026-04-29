@@ -34,19 +34,9 @@ export function TeamAdminPanel({ teams, managers }: TeamAdminPanelProps) {
   }
 
   return (
-    <div className="space-y-8">
-      {/* Create/Edit Form */}
-      <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-        <div />
-        <TeamCreatorForm
-          teams={teams}
-          managers={managers}
-          editingTeam={editingTeam}
-        />
-      </div>
-
+    <div className="grid gap-6 lg:gap-8 lg:grid-cols-[minmax(0,1fr)_360px] items-start">
       {/* Teams List */}
-      <div>
+      <div className="min-w-0">
         <div className="mb-4">
           <h3 className="text-sm font-semibold text-foreground">Existing teams</h3>
           <p className="text-xs text-muted-foreground mt-1">
@@ -60,18 +50,18 @@ export function TeamAdminPanel({ teams, managers }: TeamAdminPanelProps) {
           </div>
         )}
 
-        <div className="max-w-2xl">
-          <TeamList
-            teams={teams}
-            profiles={managers}
-            onEdit={(team) => {
-              setDeleteError(null)
-              setEditingTeam(team)
+        <TeamList
+          teams={teams}
+          profiles={managers}
+          onEdit={(team) => {
+            setDeleteError(null)
+            setEditingTeam(team)
+            if (typeof window !== "undefined" && window.innerWidth < 1024) {
               window.scrollTo({ top: 0, behavior: "smooth" })
-            }}
-            onDelete={handleDeleteTeam}
-          />
-        </div>
+            }
+          }}
+          onDelete={handleDeleteTeam}
+        />
 
         {editingTeam && (
           <div className="mt-4">
@@ -83,6 +73,15 @@ export function TeamAdminPanel({ teams, managers }: TeamAdminPanelProps) {
             </button>
           </div>
         )}
+      </div>
+
+      {/* Create/Edit Form */}
+      <div className="min-w-0 lg:sticky lg:top-6">
+        <TeamCreatorForm
+          teams={teams}
+          managers={managers}
+          editingTeam={editingTeam}
+        />
       </div>
     </div>
   )
