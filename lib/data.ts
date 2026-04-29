@@ -260,19 +260,45 @@ export async function getDailyMetrics(
 
 export async function listRules(profile: Profile): Promise<ValidationRule[]> {
   const supabase = await createClient()
-  const { data } = await supabase
+
+  let q = supabase
     .from("validation_rules")
     .select("*")
     .order("created_at", { ascending: false })
+
+  // Scope rules by team:
+  // - main_admin sees all rules (no filter)
+  // - manager sees only their team's rules
+  // - member should not access this directly
+  if (profile.role === "manager" && profile.team_id) {
+    q = q.eq("team_id", profile.team_id)
+  } else if (profile.role !== "main_admin") {
+    return [] // Members don't have access to rules
+  }
+
+  const { data } = await q
   return (data ?? []) as ValidationRule[]
 }
 
 export async function listTeamMembers(profile: Profile): Promise<Profile[]> {
   const supabase = await createClient()
-  const { data } = await supabase
+
+  let q = supabase
     .from("profiles")
     .select("*")
     .order("created_at", { ascending: true })
+
+  // Scope members by team:
+  // - main_admin sees all members (no filter)
+  // - manager sees only their team's members
+  // - members should not access this directly
+  if (profile.role === "manager" && profile.team_id) {
+    q = q.eq("team_id", profile.team_id)
+  } else if (profile.role !== "main_admin") {
+    return [] // Members don't have access to member listings
+  }
+
+  const { data } = await q
   return (data ?? []) as Profile[]
 }
 
