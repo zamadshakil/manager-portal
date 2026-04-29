@@ -10,9 +10,10 @@ interface TeamCreatorFormProps {
   teams: Team[]
   managers: Profile[]
   editingTeam?: Team | null
+  onCancelEdit?: () => void
 }
 
-export function TeamCreatorForm({ teams, managers, editingTeam }: TeamCreatorFormProps) {
+export function TeamCreatorForm({ teams, managers, editingTeam, onCancelEdit }: TeamCreatorFormProps) {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -135,7 +136,17 @@ export function TeamCreatorForm({ teams, managers, editingTeam }: TeamCreatorFor
           </p>
         ) : null}
 
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-2">
+          {isEditing && onCancelEdit ? (
+            <button
+              type="button"
+              onClick={onCancelEdit}
+              disabled={pending}
+              className="inline-flex items-center rounded-xl border border-border bg-background px-3.5 h-9 text-[13px] font-semibold text-foreground transition-colors hover:bg-muted disabled:opacity-60"
+            >
+              Cancel
+            </button>
+          ) : null}
           <button
             type="submit"
             disabled={pending}

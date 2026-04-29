@@ -62,17 +62,6 @@ export function TeamAdminPanel({ teams, managers }: TeamAdminPanelProps) {
           }}
           onDelete={handleDeleteTeam}
         />
-
-        {editingTeam && (
-          <div className="mt-4">
-            <button
-              onClick={() => setEditingTeam(null)}
-              className="text-[12px] font-semibold text-muted-foreground hover:text-foreground transition-colors"
-            >
-              ← Cancel edit
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Create/Edit Form */}
@@ -81,6 +70,7 @@ export function TeamAdminPanel({ teams, managers }: TeamAdminPanelProps) {
           teams={teams}
           managers={managers}
           editingTeam={editingTeam}
+          onCancelEdit={() => setEditingTeam(null)}
         />
       </div>
     </div>
