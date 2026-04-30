@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
+import { useCallback, useRef } from "react"
 import {
   BarChart3,
   LayoutDashboard,
@@ -37,7 +38,24 @@ const MAX_VISIBLE = 5
 
 export function MobileNav({ role }: { role: UserRole }) {
   const pathname = usePathname()
+  const router = useRouter()
   const visible = items.filter((i) => i.roles.includes(role)).slice(0, MAX_VISIBLE)
+
+  // De-dupe prefetches per route so a quick scrub across the bar doesn't
+  // trigger N redundant RSC fetches.
+  const warmed = useRef<Set<string>>(new Set())
+  const warm = useCallback(
+    (href: string) => {
+      if (warmed.current.has(href)) return
+      warmed.current.add(href)
+      try {
+        router.prefetch(href)
+      } catch {
+        // Prefetch is best-effort.
+      }
+    },
+    [router],
+  )
 
   return (
     <nav
@@ -57,6 +75,8 @@ export function MobileNav({ role }: { role: UserRole }) {
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
+                onTouchStart={() => warm(item.href)}
+                onFocus={() => warm(item.href)}
                 className={cn(
                   "flex flex-col items-center gap-0.5 py-2.5 text-[10.5px] font-semibold",
                   active ? "text-primary" : "text-muted-foreground",

@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import { Inter, JetBrains_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
+import { WebVitalsReporter } from "@/components/web-vitals-reporter"
 import "./globals.css"
 
 const inter = Inter({
@@ -22,15 +23,49 @@ export const metadata: Metadata = {
   generator: "v0.app",
 }
 
+// Best-effort derivation of the Supabase origin from the public URL so we can
+// preconnect during HTML streaming. This shaves 100-300ms off the first
+// auth/data round-trip on a cold load. Falls back gracefully if the env var
+// is missing (e.g. during local builds without secrets).
+function getSupabaseOrigin(): string | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!url) return null
+  try {
+    return new URL(url).origin
+  } catch {
+    return null
+  }
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const supabaseOrigin = getSupabaseOrigin()
+
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} bg-background`}>
+      <head>
+        {/*
+          Resource hints. React 19 auto-hoists <link> tags to <head>, but
+          declaring them inside an explicit <head> guarantees ordering above
+          the body so the browser can act on them before parsing the rest of
+          the document. Vercel Blob serves uploaded files (downloads, avatar
+          previews) so a DNS warm-up pays off the first time a user opens a
+          submission.
+        */}
+        {supabaseOrigin ? (
+          <>
+            <link rel="preconnect" href={supabaseOrigin} crossOrigin="anonymous" />
+            <link rel="dns-prefetch" href={supabaseOrigin} />
+          </>
+        ) : null}
+        <link rel="dns-prefetch" href="https://blob.vercel-storage.com" />
+      </head>
       <body className="font-sans antialiased">
         {children}
+        <WebVitalsReporter />
         {process.env.NODE_ENV === "production" && <Analytics />}
       </body>
     </html>
