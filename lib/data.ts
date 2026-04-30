@@ -331,6 +331,85 @@ export async function listTeams(): Promise<Team[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Departments (Main Admin specific extensions)
+// ---------------------------------------------------------------------------
+
+export interface DepartmentWithStats extends Team {
+  manager: { full_name: string | null; email: string } | null
+  member_count: number
+}
+
+export async function listDepartmentsWithStats(): Promise<DepartmentWithStats[]> {
+  const supabase = await createClient()
+  
+  // Fetch teams, then fetch members and managers separately to avoid FK join ambiguity
+  const { data: teams } = await supabase.from("teams").select("*").order("name", { ascending: true })
+  if (!teams) return []
+
+  const { data: profiles } = await supabase.from("profiles").select("id, team_id, full_name, email")
+  if (!profiles) return []
+
+  return teams.map((t: any) => {
+    const members = profiles.filter(p => p.team_id === t.id)
+    const manager = profiles.find(p => p.id === t.manager_id)
+    return {
+      ...t,
+      manager: manager ? { full_name: manager.full_name, email: manager.email } : null,
+      member_count: members.length,
+    }
+  })
+}
+
+export async function getDepartmentById(id: string): Promise<DepartmentWithStats | null> {
+  const supabase = await createClient()
+  
+  const { data: team, error } = await supabase
+    .from("teams")
+    .select("*")
+    .eq("id", id)
+    .single()
+
+  if (error || !team) {
+    if (error) console.error("getDepartmentById error:", error)
+    return null
+  }
+
+  // Fetch members
+  const { data: members } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("team_id", id)
+
+  // Fetch manager
+  let manager = null
+  if (team.manager_id) {
+    const { data: managerData } = await supabase
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", team.manager_id)
+      .single()
+    if (managerData) manager = managerData
+  }
+
+  return {
+    ...team,
+    manager,
+    member_count: members?.length || 0,
+  }
+}
+
+export async function listUnassignedMembers(): Promise<Profile[]> {
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from("profiles")
+    .select("*")
+    .is("team_id", null)
+    .order("full_name", { ascending: true })
+  return (data ?? []) as Profile[]
+}
+
+
+// ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------
 

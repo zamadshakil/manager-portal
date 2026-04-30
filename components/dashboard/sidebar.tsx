@@ -99,6 +99,12 @@ const NAV: NavGroup[] = [
         roles: ["main_admin", "manager"],
       },
       {
+        label: "Departments",
+        icon: Users,
+        href: "/dashboard/departments",
+        roles: ["main_admin"],
+      },
+      {
         label: "Settings",
         icon: Settings,
         href: "/dashboard/settings",
