@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
+import { useCallback, useRef } from "react"
 import {
   LayoutDashboard,
   Megaphone,
@@ -116,6 +117,23 @@ const NAV: NavGroup[] = [
 
 export function DashboardSidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
+  const router = useRouter()
+
+  // Track which routes we've already warmed in this session so a single
+  // hover or focus only triggers one prefetch per route per page.
+  const warmed = useRef<Set<string>>(new Set())
+  const warm = useCallback(
+    (href: string) => {
+      if (warmed.current.has(href)) return
+      warmed.current.add(href)
+      try {
+        router.prefetch(href)
+      } catch {
+        // prefetch is best-effort — never let it break navigation.
+      }
+    },
+    [router],
+  )
 
   return (
     <aside
@@ -157,6 +175,8 @@ export function DashboardSidebar({ role }: { role: UserRole }) {
                     <li key={item.label}>
                       <Link
                         href={item.href}
+                        onMouseEnter={() => warm(item.href)}
+                        onFocus={() => warm(item.href)}
                         className={cn(
                           "group flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[14px] font-medium transition-colors",
                           active

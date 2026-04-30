@@ -1,3 +1,4 @@
+import { Suspense } from "react"
 import { requireProfile } from "@/lib/auth"
 import {
   getDashboardSummary,
@@ -14,18 +15,20 @@ import { Materials } from "@/components/dashboard/materials"
 import { ActivityLog } from "@/components/dashboard/activity-log"
 import { MyTasks } from "@/components/dashboard/my-tasks"
 import { roleLabel } from "@/lib/auth-shared"
+import type { Profile } from "@/lib/types"
+
+// ---------------------------------------------------------------------------
+// Streaming dashboard overview
+//
+// Each section below is its own async Server Component wrapped in Suspense,
+// so the page shell paints immediately and each region streams in as its own
+// data resolves — instead of blocking on the slowest of five queries via
+// Promise.all. StatCards and RecentSubmissions both call the cached
+// getDashboardSummary, so they share one round-trip.
+// ---------------------------------------------------------------------------
 
 export default async function OverviewPage() {
   const profile = await requireProfile()
-  const [summary, announcements, materials, activity, myTasks] = await Promise.all([
-    getDashboardSummary(profile),
-    listAnnouncements(profile, 5),
-    listMaterials(profile, 6),
-    profile.role !== "member" ? listActivity(profile, 8) : Promise.resolve([]),
-    profile.role === "member" ? listMyTasks(profile) : Promise.resolve([]),
-  ])
-
-  const openTasks = myTasks.filter((t) => t.status === "assigned")
 
   const greeting = profile.full_name?.split(" ")[0] ?? profile.email
   const roleline =
@@ -48,31 +51,124 @@ export default async function OverviewPage() {
         }
       />
 
-      <StatCards
-        total={summary.total}
-        passRate={summary.passRate}
-        avgScore={summary.avgScore}
-        needsReview={summary.needsReview}
-      />
+      <Suspense fallback={<StatCardsSkeleton />}>
+        <StatCardsSection profile={profile} />
+      </Suspense>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 lg:gap-6">
         <div className="xl:col-span-2 space-y-4 lg:space-y-6 min-w-0">
-          {profile.role === "member" && openTasks.length > 0 ? (
-            <section>
-              <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-3">
-                Open tasks ({openTasks.length})
-              </h2>
-              <MyTasks tasks={openTasks.slice(0, 3)} />
-            </section>
+          {profile.role === "member" ? (
+            <Suspense fallback={null}>
+              <OpenTasksSection profile={profile} />
+            </Suspense>
           ) : null}
-          <SubmissionsTable rows={summary.recent} />
-          <Materials rows={materials} />
+          <Suspense fallback={<TableSkeleton />}>
+            <RecentSubmissionsSection profile={profile} />
+          </Suspense>
+          <Suspense fallback={<TableSkeleton />}>
+            <MaterialsSection profile={profile} />
+          </Suspense>
         </div>
         <div className="space-y-4 lg:space-y-6 min-w-0">
-          <Announcements rows={announcements} />
-          {profile.role !== "member" ? <ActivityLog rows={activity} /> : null}
+          <Suspense fallback={<PanelSkeleton />}>
+            <AnnouncementsSection profile={profile} />
+          </Suspense>
+          {profile.role !== "member" ? (
+            <Suspense fallback={<PanelSkeleton />}>
+              <ActivitySection profile={profile} />
+            </Suspense>
+          ) : null}
         </div>
       </div>
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sections
+// ---------------------------------------------------------------------------
+
+async function StatCardsSection({ profile }: { profile: Profile }) {
+  const summary = await getDashboardSummary(profile)
+  return (
+    <StatCards
+      total={summary.total}
+      passRate={summary.passRate}
+      avgScore={summary.avgScore}
+      needsReview={summary.needsReview}
+    />
+  )
+}
+
+async function RecentSubmissionsSection({ profile }: { profile: Profile }) {
+  // Reuses the React.cache'd summary — no second query.
+  const summary = await getDashboardSummary(profile)
+  return <SubmissionsTable rows={summary.recent} />
+}
+
+async function MaterialsSection({ profile }: { profile: Profile }) {
+  const rows = await listMaterials(profile, 6)
+  return <Materials rows={rows} />
+}
+
+async function AnnouncementsSection({ profile }: { profile: Profile }) {
+  const rows = await listAnnouncements(profile, 5)
+  return <Announcements rows={rows} />
+}
+
+async function ActivitySection({ profile }: { profile: Profile }) {
+  const rows = await listActivity(profile, 8)
+  return <ActivityLog rows={rows} />
+}
+
+async function OpenTasksSection({ profile }: { profile: Profile }) {
+  const myTasks = await listMyTasks(profile)
+  const openTasks = myTasks.filter((t) => t.status === "assigned")
+  if (openTasks.length === 0) return null
+  return (
+    <section>
+      <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-3">
+        Open tasks ({openTasks.length})
+      </h2>
+      <MyTasks tasks={openTasks.slice(0, 3)} />
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Skeleton fallbacks (kept inline to avoid a new file for one-off shapes)
+// ---------------------------------------------------------------------------
+
+function StatCardsSkeleton() {
+  return (
+    <section
+      aria-hidden="true"
+      className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 animate-pulse"
+    >
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div
+          key={i}
+          className="rounded-xl border border-border bg-card p-4 lg:p-5 shadow-card h-[112px]"
+        />
+      ))}
+    </section>
+  )
+}
+
+function TableSkeleton() {
+  return (
+    <div
+      aria-hidden="true"
+      className="rounded-xl border border-border bg-card shadow-card h-72 animate-pulse"
+    />
+  )
+}
+
+function PanelSkeleton() {
+  return (
+    <div
+      aria-hidden="true"
+      className="rounded-xl border border-border bg-card shadow-card h-64 animate-pulse"
+    />
   )
 }

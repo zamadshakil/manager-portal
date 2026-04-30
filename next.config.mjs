@@ -48,4 +48,26 @@ const nextConfig = {
   },
 }
 
-export default nextConfig
+// ---------------------------------------------------------------------------
+// Bundle analyzer (opt-in).
+//
+// Run `ANALYZE=true pnpm build` to produce client / server / edge bundle
+// reports. The wrapper is loaded lazily so the package is only required when
+// the flag is set; if `@next/bundle-analyzer` isn't installed we fall back to
+// the plain config silently. To enable for real, install the dev dep:
+//
+//   pnpm add -D @next/bundle-analyzer
+// ---------------------------------------------------------------------------
+async function withOptionalAnalyzer(config) {
+  if (process.env.ANALYZE !== "true") return config
+  try {
+    const mod = await import("@next/bundle-analyzer")
+    const withBundleAnalyzer = mod.default({ enabled: true })
+    return withBundleAnalyzer(config)
+  } catch {
+    // Package not installed — keep going without analysis.
+    return config
+  }
+}
+
+export default await withOptionalAnalyzer(nextConfig)
