@@ -155,8 +155,15 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   // Mirror initial state onto the assignment immediately so manager dashboards
   // reflect the submission within their next refresh — the pipeline will
   // overwrite this with the final status when it finishes.
+  //
+  // We deliberately use the service-role client here. RLS on
+  // task_assignments no longer permits members to write the row directly
+  // (that was a self-mark-submitted vector — see migration 006). The action
+  // has already verified ownership and deadline above, so a service-role
+  // write is safe and authoritative.
   if (taskAssignmentId) {
-    await supabase
+    const adminClient = createAdminClient()
+    await adminClient
       .from("task_assignments")
       .update({
         status: isLate ? "late_submitted" : "submitted",
@@ -165,6 +172,7 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
         submitted_at: new Date().toISOString(),
       })
       .eq("id", taskAssignmentId)
+      .eq("assignee_id", profile.id)
   }
 
   await logActivity({

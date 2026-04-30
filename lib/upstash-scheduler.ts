@@ -1,85 +1,42 @@
 import { getRedis } from "@/lib/redis"
 
 /**
- * Upstash Scheduler Utility
+ * Cron observability helpers.
  *
- * Manages 15-minute interval scheduling for the mark-missed cron task.
- * Since Vercel Cron only allows one job per day, we use Upstash Redis
- * to trigger task marking every 15 minutes.
+ * Historical context: this module used to gate the `mark-missed` cron behind
+ * a Redis-tracked 15-minute interval because Vercel Cron on the Hobby plan
+ * could only run jobs once per day. We now schedule the cron natively at
+ * `*/15 * * * *` in `vercel.json`, so the gate is removed. What remains is a
+ * lightweight execution recorder used for monitoring / debugging in the
+ * Upstash console.
  *
- * Uses the shared `getRedis()` factory from `lib/redis` so the entire app
- * shares a single Upstash Redis client (and a single TLS connection pool)
- * instead of constructing a new one per module.
+ * The Redis client is resolved lazily inside `recordTaskExecution` so a
+ * cold start with missing env vars never crashes the route — the recorder
+ * silently no-ops instead of taking the request down.
  */
-const redis = getRedis()
 
 /**
- * Initialize the 15-minute recurring schedule in Upstash
- * This should be called once during deployment
- */
-export async function initializeSchedule() {
-  try {
-    const scheduleKey = "cron:mark-missed:last-run"
-    const intervalMs = 15 * 60 * 1000 // 15 minutes
-
-    // Set initial timestamp
-    const now = Date.now()
-    await redis.set(scheduleKey, now, { ex: 3600 }) // Expire after 1 hour
-
-    console.log("[Upstash] Schedule initialized for 15-minute intervals")
-    return { success: true, interval: intervalMs }
-  } catch (error) {
-    console.error("[Upstash] Failed to initialize schedule:", error)
-    throw error
-  }
-}
-
-/**
- * Check if 15 minutes have passed since last execution
- * Use this in your API route to gate execution
- */
-export async function shouldRunCronTask(): Promise<boolean> {
-  try {
-    const scheduleKey = "cron:mark-missed:last-run"
-    const intervalMs = 15 * 60 * 1000 // 15 minutes
-
-    const lastRun = await redis.get<number>(scheduleKey)
-    const now = Date.now()
-
-    if (!lastRun) {
-      // First run
-      await redis.set(scheduleKey, now, { ex: 3600 })
-      return true
-    }
-
-    if (now - lastRun >= intervalMs) {
-      // 15 minutes have passed
-      await redis.set(scheduleKey, now, { ex: 3600 })
-      return true
-    }
-
-    return false
-  } catch (error) {
-    console.error("[Upstash] Error checking schedule:", error)
-    // Fail open - allow execution if Redis check fails
-    return true
-  }
-}
-
-/**
- * Record task execution for monitoring
+ * Record a cron execution for monitoring. No-ops on Redis errors so a flaky
+ * Upstash quota does not affect the cron's primary job.
  */
 export async function recordTaskExecution(
   taskName: string,
-  metadata: Record<string, any>
+  metadata: Record<string, unknown>,
 ) {
+  let redis: ReturnType<typeof getRedis>
+  try {
+    redis = getRedis()
+  } catch (err) {
+    console.warn(`[Upstash] redis not configured, skipping ${taskName} record`, err)
+    return
+  }
+
   try {
     const key = `cron:${taskName}:executions`
     const entry = {
       timestamp: new Date().toISOString(),
       ...metadata,
     }
-
     // Keep last 100 executions
     await redis.lpush(key, JSON.stringify(entry))
     await redis.ltrim(key, 0, 99)
@@ -87,4 +44,3 @@ export async function recordTaskExecution(
     console.error(`[Upstash] Failed to record execution for ${taskName}:`, error)
   }
 }
-
