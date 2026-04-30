@@ -24,9 +24,20 @@ const nextConfig = {
     // Tree-shake icon and date libraries that we import individually.
     // Without this, `import { Plus } from "lucide-react"` pulls the whole
     // 1k+ icon barrel file into the bundle. With it, Next rewrites the
-    // import to the specific module path.
+    // import to the specific module path. We also include the Radix and
+    // common chart packages we touch the most.
     // ------------------------------------------------------------------
-    optimizePackageImports: ["lucide-react", "date-fns", "recharts"],
+    optimizePackageImports: [
+      "lucide-react",
+      "date-fns",
+      "recharts",
+      "@radix-ui/react-tabs",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-alert-dialog",
+      "@radix-ui/react-dropdown-menu",
+      "@radix-ui/react-popover",
+      "@radix-ui/react-select",
+    ],
   },
   serverExternalPackages: ["unpdf", "mammoth", "officeparser", "tesseract.js"],
 
@@ -48,4 +59,27 @@ const nextConfig = {
   },
 }
 
-export default nextConfig
+// ---------------------------------------------------------------------------
+// Optional bundle analyzer.
+//
+// Run `ANALYZE=true pnpm build` to emit `.next/analyze/*.html` reports for
+// the client and server bundles. The analyzer is a dev dependency that we
+// import lazily and defensively — if `@next/bundle-analyzer` isn't
+// installed (e.g. on Vercel preview deployments), the build still succeeds
+// and just skips the analysis step.
+// ---------------------------------------------------------------------------
+let exported = nextConfig
+if (process.env.ANALYZE === "true") {
+  try {
+    const { default: withBundleAnalyzer } = await import("@next/bundle-analyzer")
+    exported = withBundleAnalyzer({ enabled: true, openAnalyzer: false })(nextConfig)
+  } catch {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[next.config] ANALYZE=true was set but `@next/bundle-analyzer` is not installed. " +
+        "Run `pnpm add -D @next/bundle-analyzer` to enable bundle reports.",
+    )
+  }
+}
+
+export default exported

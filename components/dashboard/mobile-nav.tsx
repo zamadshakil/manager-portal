@@ -1,7 +1,8 @@
 "use client"
 
+import { useCallback, useEffect, useRef } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import {
   BarChart3,
   LayoutDashboard,
@@ -37,7 +38,42 @@ const MAX_VISIBLE = 5
 
 export function MobileNav({ role }: { role: UserRole }) {
   const pathname = usePathname()
+  const router = useRouter()
   const visible = items.filter((i) => i.roles.includes(role)).slice(0, MAX_VISIBLE)
+
+  // Pre-warm every visible mobile-nav route on idle. The bar only carries
+  // 5 items so the prefetch budget is bounded; mobile users typically
+  // navigate by tapping these icons, and warming them on idle eliminates
+  // the cold-start RSC fetch on the first tap of each tab.
+  const prefetchedRef = useRef<Set<string>>(new Set())
+  const prefetchOnce = useCallback(
+    (href: string) => {
+      if (prefetchedRef.current.has(href)) return
+      prefetchedRef.current.add(href)
+      try {
+        router.prefetch(href)
+      } catch {
+        /* ignore */
+      }
+    },
+    [router],
+  )
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const idle =
+      (window as Window & { requestIdleCallback?: (cb: () => void) => number })
+        .requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 200))
+    const id = idle(() => {
+      visible.forEach((item) => prefetchOnce(item.href))
+    })
+    return () => {
+      const cancelIdle = (
+        window as Window & { cancelIdleCallback?: (id: number) => void }
+      ).cancelIdleCallback
+      if (cancelIdle) cancelIdle(id as number)
+      else window.clearTimeout(id as number)
+    }
+  }, [visible, prefetchOnce])
 
   return (
     <nav
@@ -56,6 +92,8 @@ export function MobileNav({ role }: { role: UserRole }) {
             <li key={item.href}>
               <Link
                 href={item.href}
+                prefetch
+                onTouchStart={() => prefetchOnce(item.href)}
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex flex-col items-center gap-0.5 py-2.5 text-[10.5px] font-semibold",

@@ -1,3 +1,4 @@
+import { cache } from "react"
 import { createClient } from "@/lib/supabase/server"
 import type {
   ActivityLogEntry,
@@ -38,7 +39,15 @@ interface RecentRow {
   updated_at: string
 }
 
-export async function getDashboardSummary(profile: Profile): Promise<DashboardSummary> {
+/**
+ * `React.cache()` dedupes per-request: when several Suspense boundaries on
+ * the same page each call `getDashboardSummary(profile)` to render their
+ * own slice of the data, only one set of Supabase queries actually fires.
+ * The second caller resolves with the already-in-flight promise.
+ */
+export const getDashboardSummary = cache(_getDashboardSummary)
+
+async function _getDashboardSummary(profile: Profile): Promise<DashboardSummary> {
   const supabase = await createClient()
 
   // Build a base query factory so role scoping stays consistent across counts.

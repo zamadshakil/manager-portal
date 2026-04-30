@@ -1,7 +1,8 @@
 "use client"
 
+import { useCallback, useRef } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import {
   LayoutDashboard,
   Megaphone,
@@ -110,6 +111,28 @@ const NAV: NavGroup[] = [
 
 export function DashboardSidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
+  const router = useRouter()
+
+  // Track hrefs we've already prefetched in this session so the same hover
+  // event doesn't queue redundant prefetches. The default `<Link prefetch>`
+  // viewport-based prefetcher already covers visible links, but hover is the
+  // strongest signal that a click is imminent — prefetching there warms
+  // both the RSC payload AND the JS chunk before the user releases the
+  // mouse, which combined with Next's `staleTimes` Router Cache makes the
+  // navigation feel instant.
+  const prefetchedRef = useRef<Set<string>>(new Set())
+  const handlePrefetch = useCallback(
+    (href: string) => {
+      if (prefetchedRef.current.has(href)) return
+      prefetchedRef.current.add(href)
+      try {
+        router.prefetch(href)
+      } catch {
+        /* router may be unavailable during fast-refresh; ignore */
+      }
+    },
+    [router],
+  )
 
   return (
     <aside
@@ -151,6 +174,10 @@ export function DashboardSidebar({ role }: { role: UserRole }) {
                     <li key={item.label}>
                       <Link
                         href={item.href}
+                        prefetch
+                        onMouseEnter={() => handlePrefetch(item.href)}
+                        onFocus={() => handlePrefetch(item.href)}
+                        onTouchStart={() => handlePrefetch(item.href)}
                         className={cn(
                           "group flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[14px] font-medium transition-colors",
                           active
