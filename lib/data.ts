@@ -341,19 +341,50 @@ export interface DepartmentWithStats extends Team {
 
 export async function listDepartmentsWithStats(): Promise<DepartmentWithStats[]> {
   const supabase = await createClient()
-  
-  // Fetch teams, then fetch members and managers separately to avoid FK join ambiguity
-  const { data: teams } = await supabase.from("teams").select("*").order("name", { ascending: true })
+
+  // Fast path: use the SQL RPC `list_departments_with_stats` which joins
+  // teams + manager profile + member counts in a single round trip
+  // (migration 006). This avoids the O(teams) member-scan fallback that
+  // pulled every profile across every team into Node memory.
+  const { data, error } = await supabase.rpc("list_departments_with_stats")
+  if (!error && data) {
+    return data.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      manager_id: row.manager_id,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      manager: row.manager_email
+        ? { full_name: row.manager_full_name, email: row.manager_email }
+        : null,
+      member_count: row.member_count,
+    }))
+  }
+
+  // Fallback for environments where the migration has not run yet. We log a
+  // warning so the operator knows to apply 006_security_hardening_and_indexes.
+  if (error) {
+    console.warn(
+      "[listDepartmentsWithStats] RPC missing, falling back to client-side join. Apply migration 006.",
+      error.message,
+    )
+  }
+  const { data: teams } = await supabase
+    .from("teams")
+    .select("*")
+    .order("name", { ascending: true })
   if (!teams) return []
-
-  const { data: profiles } = await supabase.from("profiles").select("id, team_id, full_name, email")
-  if (!profiles) return []
-
-  return teams.map((t: any) => {
-    const members = profiles.filter(p => p.team_id === t.id)
-    const manager = profiles.find(p => p.id === t.manager_id)
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, team_id, full_name, email")
+  const profs = profiles ?? []
+  return teams.map((t) => {
+    const team = t as Team
+    const members = profs.filter((p) => p.team_id === team.id)
+    const manager = profs.find((p) => p.id === team.manager_id)
     return {
-      ...t,
+      ...team,
       manager: manager ? { full_name: manager.full_name, email: manager.email } : null,
       member_count: members.length,
     }

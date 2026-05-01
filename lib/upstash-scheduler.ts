@@ -6,7 +6,7 @@ import { getRedis } from "@/lib/redis"
  * Historical context: this module used to gate the `mark-missed` cron behind
  * a Redis-tracked 15-minute interval because Vercel Cron on the Hobby plan
  * could only run jobs once per day. We now schedule the cron natively at
- * `*/15 * * * *` in `vercel.json`, so the gate is removed. What remains is a
+ * a 15-minute cadence in `vercel.json`, so the gate is removed. What remains is a
  * lightweight execution recorder used for monitoring / debugging in the
  * Upstash console.
  *

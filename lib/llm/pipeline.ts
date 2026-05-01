@@ -1,9 +1,17 @@
 import "server-only"
+import pLimit from "p-limit"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { extractText } from "@/lib/parse"
 import { runRule, summarize, describeImage, PROMPT_VERSION } from "@/lib/llm/validate"
 import { llmLimiter, getRedis } from "@/lib/redis"
 import type { Submission, SubmissionFlag, ValidationRule, Task } from "@/lib/types"
+
+/**
+ * Max rules to evaluate concurrently per submission. Tuned for the Groq free
+ * tier (RPM cap ~30) and our retry budget — going higher trades token throughput
+ * for an avalanche of 429s. Override via env if a paid tier is in use.
+ */
+const RULE_CONCURRENCY = Number(process.env.LLM_RULE_CONCURRENCY ?? 3)
 
 /**
  * End-to-end async validation pipeline. Called from `after()` in the upload
@@ -20,7 +28,6 @@ import type { Submission, SubmissionFlag, ValidationRule, Task } from "@/lib/typ
  * `after()` invocation, manual retry collisions, or cron rescues).
  */
 export async function processSubmission(submissionId: string) {
-  const admin = createAdminClient()
   const redis = (() => {
     try {
       return getRedis()
@@ -215,15 +222,22 @@ async function runPipeline(submissionId: string) {
   // Clean up any old runs before generating new ones.
   await admin.from("validation_runs").delete().eq("submission_id", submissionId)
 
+  // Bound concurrency: with no cap, a team that has 30+ rules would fan out
+  // 30 simultaneous Groq calls per submission and tip the rate limiter into
+  // failure mode. p-limit serialises overflow without losing parallelism for
+  // small rulesets.
+  const ruleLimit = pLimit(Math.max(1, RULE_CONCURRENCY))
   const ruleOutputs = await Promise.all(
-    filteredRules.map(async (rule) => {
-      try {
-        return await runRule(text, rule, { truncated })
-      } catch (err) {
-        console.error("[pipeline] rule failed", rule.rule_name, err)
-        return null
-      }
-    }),
+    filteredRules.map((rule) =>
+      ruleLimit(async () => {
+        try {
+          return await runRule(text, rule, { truncated })
+        } catch (err) {
+          console.error("[pipeline] rule failed", rule.rule_name, err)
+          return null
+        }
+      }),
+    ),
   )
 
   const successful = ruleOutputs.filter((r): r is NonNullable<typeof r> => Boolean(r))
