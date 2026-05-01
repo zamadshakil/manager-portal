@@ -346,23 +346,42 @@ export interface DepartmentWithStats extends Team {
 
 export async function listDepartmentsWithStats(): Promise<DepartmentWithStats[]> {
   const supabase = await createClient()
-  
-  // Fetch teams, then fetch members and managers separately to avoid FK join ambiguity
-  const { data: teams } = await supabase.from("teams").select("*").order("name", { ascending: true })
-  if (!teams) return []
 
-  const { data: profiles } = await supabase.from("profiles").select("id, team_id, full_name, email")
-  if (!profiles) return []
+  // Aggregate runs in Postgres via the `list_departments_with_stats()` RPC
+  // (migration 006) so we don't ship every profile to Node just to count
+  // members. Authorization is re-enforced inside the function: members get
+  // zero rows, managers see their own team, main_admin sees everything.
+  const { data, error } = await supabase.rpc("list_departments_with_stats")
+  if (error) {
+    console.error("listDepartmentsWithStats rpc error:", error)
+    return []
+  }
 
-  return teams.map((t: any) => {
-    const members = profiles.filter(p => p.team_id === t.id)
-    const manager = profiles.find(p => p.id === t.manager_id)
-    return {
-      ...t,
-      manager: manager ? { full_name: manager.full_name, email: manager.email } : null,
-      member_count: members.length,
-    }
-  })
+  type Row = {
+    id: string
+    name: string
+    description: string | null
+    manager_id: string | null
+    created_at: string
+    updated_at: string
+    manager_full_name: string | null
+    manager_email: string | null
+    member_count: number | string
+  }
+
+  return ((data ?? []) as unknown as Row[]).map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    manager_id: r.manager_id,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    manager: r.manager_email
+      ? { full_name: r.manager_full_name, email: r.manager_email }
+      : null,
+    // Postgres BIGINT comes through as a string in some PostgREST versions.
+    member_count: Number(r.member_count) || 0,
+  })) as DepartmentWithStats[]
 }
 
 export async function getDepartmentById(id: string): Promise<DepartmentWithStats | null> {
