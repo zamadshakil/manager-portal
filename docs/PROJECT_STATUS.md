@@ -15,8 +15,8 @@ Last reviewed: 2026-04-29 (full end-to-end flow audit)
 - **Auth:** Supabase Auth (email/password). Provision-only — no public sign-up.
 - **Database:** Supabase Postgres with RLS on every table.
 - **Files:** Vercel Blob, fronted by an authenticated download proxy.
-- **AI:** Groq (via the Vercel AI SDK) for validation + summarisation; Tesseract OCR with a Groq Vision fallback for images.
-- **Background work:** Next.js `after()` for the validation pipeline; Vercel Cron (daily) + Upstash Redis (15-minute intervals) for missed-deadline sweeps and stuck-submission recovery.
+- **AI:** DigitalOcean AI Inference (via Vercel AI SDK) for validation + summarisation (DeepSeek V3); Tesseract OCR with Nemotron VL fallback for images.
+- **Background work:** Inngest durable background jobs for the validation pipeline; Vercel Cron (daily) + Upstash Redis (15-minute intervals) for missed-deadline sweeps and stuck-submission recovery.
 - **Rate limit / idempotency:** Upstash Redis.
 - **Roles:** `main_admin`, `manager`, `member`. Three different views of the same dashboard.
 
@@ -34,7 +34,7 @@ Hierarchia is a portal where managers assign document-style tasks (PDF, DOCX, PP
 | **Manager** | Owns one team. Configures validation rules, creates tasks (single or bulk-assigned), reviews submissions, posts team announcements/materials. |
 | **Member** | Sees their assigned tasks, uploads submissions, reads announcements, downloads materials, sees their own performance. |
 
-Authentication is **Supabase Auth** (email + password) with **provision-only onboarding**. There is no public sign-up. Data lives in **Supabase Postgres** behind RLS. Files live in **Vercel Blob** with download proxied through a server route that re-checks RLS. The AI pipeline runs on **Groq via the AI SDK**, with **Tesseract.js + Groq Vision** for OCR fallback. Per-user/per-team rate-limiting and per-submission idempotency live in **Upstash Redis**.
+Authentication is **Supabase Auth** (email + password) with **provision-only onboarding**. There is no public sign-up. Data lives in **Supabase Postgres** behind RLS. Files live in **Vercel Blob** with download proxied through a server route that re-checks RLS. The AI pipeline runs on **DigitalOcean AI (DeepSeek)**, with **Tesseract.js + Nemotron VL** for OCR fallback. Per-user/per-team rate-limiting and per-submission idempotency live in **Upstash Redis**.
 
 ---
 
@@ -198,7 +198,7 @@ Each row below is a verified path through the codebase as of this audit.
 | Manager creates a task | `/dashboard/tasks` → `TaskComposer` | `app/actions/tasks.ts → createTask` → Zod + `canManageTeam` → insert `tasks` (session client) → bulk insert `task_assignments` (admin client) | `tasks`, `task_assignments`, `activity_log` |
 | Re-assign on an existing task | (no UI yet) | `app/actions/tasks.ts → assignTask` → `assign_task_to_team(p_task_id, p_team_id)` RPC (SECURITY DEFINER) | `task_assignments`, `activity_log` |
 | Member opens a task | `/dashboard/tasks/[id]` | RSC reads via `getTaskById`, `getMyAssignmentForTask`, `listAssignmentsForTask` | none |
-| Member submits to a task | `TaskSubmissionForm` on task detail | `app/actions/submissions.ts → createSubmission` (rate-limit, deadline check, blob upload, insert submission, mirror assignment, queue `after(processSubmission)`) | `submissions`, `task_assignments`, Blob, `activity_log` |
+| Member submits to a task | `TaskSubmissionForm` on task detail | `app/actions/submissions.ts → createSubmission` (rate-limit, deadline check, blob upload, insert submission, mirror assignment, send `app/submission.process` to Inngest) | `submissions`, `task_assignments`, Blob, `activity_log` |
 | AI pipeline runs | (background) | `lib/llm/pipeline.ts → processSubmission` (Redis lock → parse → optional vision fallback → run rules + task brief → write `validation_runs` → update submission + assignment) | `submissions`, `task_assignments`, `validation_runs` |
 | Manager retries a submission | submission detail → `SubmissionActions` | `app/actions/submissions.ts → retrySubmission` resets status to `queued` then `after(processSubmission)` | `submissions`, `activity_log` |
 | Manager deletes a submission | submission detail → `SubmissionActions` | `app/actions/submissions.ts → deleteSubmission` deletes row + Blob | `submissions`, Blob, `activity_log` |
@@ -250,10 +250,10 @@ Every action returns a discriminated `ActionResult` (`{ ok: true, … } | { ok: 
    4. Uploads to Vercel Blob with `addRandomSuffix: true`. The URL is unguessable; the client never receives it directly — they go through `/api/download/[id]?type=submission`.
    5. Inserts the `submissions` row with `task_id`, `task_assignment_id`, `is_late`, `late_reason`, `submitted_at`.
    6. **Eagerly mirrors** the matching `task_assignment` to `submitted` / `late_submitted` so manager dashboards reflect status without waiting for the pipeline.
-   7. `after(processSubmission(id))` schedules the AI pipeline.
+   7. `inngest.send` schedules the AI pipeline.
 4. `revalidatePath` for the dashboard, submissions list, the task list, and the specific task detail page.
 
-### 6.4 AI validation pipeline (`lib/llm/pipeline.ts`)
+### 6.4 AI validation pipeline (`lib/inngest/functions.ts`)
 
 1. **Idempotency.** `redis.set("pipeline:lock:{id}", "1", { nx: true, ex: 600 })` — first writer wins for 10 minutes. Releases in `finally`. Prevents duplicate `after()` invocations and racing retries.
 2. **LLM rate limit.** `llmLimiter` (60 / 1 min per team). If the team is over budget, the submission is parked at `needs_review` with a warning flag instead of failing.
@@ -264,7 +264,7 @@ Every action returns a discriminated `ActionResult` (`{ ok: true, … } | { ok: 
    - Images → Tesseract; if confidence is low or the text is sparse, falls back to **Groq Vision** (`describeImage`).
    - Output is clamped to 60 KB with a `[...truncated...]` marker.
 4. **Vision fallback** triggers when the file is an image AND (text length < 60 OR OCR confidence < 60). The vision result wins only if it's longer than the OCR result.
-5. **Validate.** Pulls all `enabled` `validation_rules` for the team. If the submission is for a task with `instructions`, a **synthetic rule** is appended (id `task:{taskId}`, weight 2, threshold 70). All rules run **in parallel** via `Promise.all`. Each call is wrapped in `withRetry(3, exp-backoff)` against Groq 429/5xx.
+5. **Validate.** Pulls all `enabled` `validation_rules` for the team. If the submission is for a task with `instructions`, a **synthetic rule** is appended (id `task:{taskId}`, weight 2, threshold 70). All rules run **in parallel** via `Promise.all`. Each call is wrapped in `withRetry(3, exp-backoff)` against DigitalOcean 429/5xx.
 6. **Persist runs.** Synthetic `task:` rules are filtered out before writing `validation_runs` (they don't have a real FK target).
 7. **Aggregate.** Weighted average of rule scores. `passed` requires every rule to pass and no `fail`-severity flag. Any hard fail → `failed`. Otherwise → `needs_review`.
 8. **Late preserves late.** If `submission.is_late` was already `true`, the final status is `late_submitted` regardless of the LLM verdict. The aggregate score, summary, and flags still reflect the AI's judgement and surface in the submission detail page.
@@ -277,7 +277,7 @@ Every action returns a discriminated `ActionResult` (`{ ok: true, … } | { ok: 
 The handler is protected by `Authorization: Bearer ${CRON_SECRET}` (see §8). It runs two queries via the admin client:
 
 1. **Mark missed.** `task_assignments.status = 'assigned'` join `tasks` where `due_at < now()` AND `tasks.allow_late = false` → flip to `missed`.
-2. **Recover stuck.** Any `submissions.status IN ('queued','parsing','validating')` whose `updated_at` is older than 30 minutes → flip to `failed` with a `"Validation pipeline timed out. Please retry."` flag. This is the failsafe for `after()` invocations that crashed silently.
+2. **Recover stuck.** Any `submissions.status IN ('queued','parsing','validating')` whose `updated_at` is older than 30 minutes → flip to `failed` with a `"Validation pipeline timed out. Please retry."` flag. This is the failsafe for pipelines that crashed silently.
 
 The endpoint returns `{ ok, missedCount, stuckRecovered, skipped }` so it's easy to verify with curl. Executions are logged in `cron:mark-missed:executions` in Redis for monitoring.
 
@@ -297,7 +297,7 @@ The endpoint returns `{ ok, missedCount, stuckRecovered, skipped }` so it's easy
 | Module | Imports from | Imported by | Server-only? |
 |---|---|---|---|
 | `lib/upstash-scheduler.ts` | `@upstash/redis` | `app/api/cron/mark-missed`, monitoring tools | yes |
-| `lib/supabase/admin.ts` | `@supabase/supabase-js` | `app/actions/*`, `lib/llm/pipeline.ts`, `lib/activity.ts`, `app/api/cron/*` | yes |
+| `lib/supabase/admin.ts` | `@supabase/supabase-js` | `app/actions/*`, `lib/inngest/functions.ts`, `lib/activity.ts`, `app/api/cron/*` | yes |
 | `lib/supabase/server.ts` | `@supabase/ssr`, `next/headers` | RSC pages, `lib/auth.ts`, `lib/data.ts`, action handlers | no (RSC compatible) |
 | `lib/supabase/client.ts` | `@supabase/ssr` | `components/auth/login-form.tsx` | no (browser) |
 | `lib/supabase/proxy.ts` | `@supabase/ssr`, `next/server` | `proxy.ts` (edge) | edge runtime |
@@ -305,10 +305,10 @@ The endpoint returns `{ ok, missedCount, stuckRecovered, skipped }` so it's easy
 | `lib/auth-shared.ts` | `lib/types.ts` | client components (sidebar/top-bar/etc) | no — safe for client |
 | `lib/data.ts` | `lib/supabase/server.ts`, `lib/types.ts` | RSC pages only | no |
 | `lib/activity.ts` | `lib/supabase/admin.ts`, `next/headers` | every action | yes |
-| `lib/redis.ts` | `@upstash/redis`, `@upstash/ratelimit` | `lib/llm/pipeline.ts`, `app/actions/submissions.ts` | yes |
-| `lib/llm/pipeline.ts` | `lib/supabase/admin.ts`, `lib/parse`, `lib/llm/validate.ts`, `lib/redis.ts` | `app/actions/submissions.ts` (via `after()`) | yes |
-| `lib/llm/validate.ts` | `ai`, `@ai-sdk/groq`, `zod` | `lib/llm/pipeline.ts` | yes |
-| `lib/parse/index.ts` | `pdf-parse`, `mammoth`, `officeparser`, `tesseract.js` | `lib/llm/pipeline.ts` | yes |
+| `lib/redis.ts` | `@upstash/redis`, `@upstash/ratelimit` | `lib/inngest/functions.ts`, `app/actions/submissions.ts` | yes |
+| `lib/inngest/functions.ts` | `lib/supabase/admin.ts`, `lib/parse`, `lib/llm/validate.ts`, `lib/redis.ts` | `app/actions/submissions.ts` (via `after()`) | yes |
+| `lib/llm/validate.ts` | `ai`, `@ai-sdk/groq`, `zod` | `lib/inngest/functions.ts` | yes |
+| `lib/parse/index.ts` | `pdf-parse`, `mammoth`, `officeparser`, `tesseract.js` | `lib/inngest/functions.ts` | yes |
 
 The "yes" rows all start their files with `import "server-only"` so the bundler hard-fails on accidental client imports.
 
@@ -326,10 +326,10 @@ These must be set on Vercel (Production + Preview). Locally they go in `.env.loc
 | `BLOB_READ_WRITE_TOKEN` | server only | Vercel Blob (auto-injected on Vercel) |
 | `UPSTASH_REDIS_REST_URL` | server only | rate limit + idempotency |
 | `UPSTASH_REDIS_REST_TOKEN` | server only | as above |
-| `GROQ_API_KEY` | server only | used by the AI SDK Groq provider |
-| `GROQ_VALIDATION_MODEL` | optional | defaults to `llama-3.3-70b-versatile` |
-| `GROQ_SUMMARY_MODEL` | optional | defaults to `llama-3.3-70b-versatile` |
-| `GROQ_VISION_MODEL` | optional | defaults to `llama-3.2-90b-vision-preview` |
+| `DO_AI_API_KEY` | server only | used by the AI SDK Groq provider |
+| `DO_VALIDATION_MODEL` | optional | defaults to `deepseek-3.2` |
+| `DO_SUMMARY_MODEL` | optional | defaults to `deepseek-3.2` |
+| `DO_VISION_MODEL` | optional | defaults to `nemotron-nano-12b-v2-vl` |
 | `CRON_SECRET` | server only | shared secret for the cron endpoint — see below |
 
 ### About `CRON_SECRET` and `UPSTASH_REDIS_*`
