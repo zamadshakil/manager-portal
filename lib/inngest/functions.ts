@@ -145,15 +145,17 @@ export const processSubmissionFn = inngest.createFunction(
       return { status: "no rules" };
     }
 
-    // Stage 4: Run Rules Concurrently
-    const ruleOutputs = await Promise.all(
-      filteredRules.map(rule => 
-        // Inngest steps run independently. If one rule fails (rate limit), Inngest retries just that step.
-        step.run(`run-rule-${rule.id.replace(/[^a-zA-Z0-9-]/g, '-')}`, async () => {
-          return await runRule(text, rule, { truncated });
-        })
-      )
-    );
+    // Stage 4: Run Rules Sequentially
+    // Running one at a time avoids slamming Gemini with concurrent requests
+    // which triggers "high demand" rate limits. Each rule is still its own
+    // Inngest step, so failures are retried independently.
+    const ruleOutputs = [];
+    for (const rule of filteredRules) {
+      const result = await step.run(`run-rule-${rule.id.replace(/[^a-zA-Z0-9-]/g, '-')}`, async () => {
+        return await runRule(text, rule, { truncated });
+      });
+      ruleOutputs.push(result);
+    }
 
     const successful = ruleOutputs.filter((r): r is NonNullable<typeof r> => Boolean(r));
 
