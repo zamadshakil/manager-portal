@@ -1,5 +1,6 @@
 import "server-only"
 import { after } from "next/server"
+import { randomUUID } from "node:crypto"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { extractText } from "@/lib/parse"
 import { runRule, summarize, describeImage, PROMPT_VERSION, type RunRuleOutput } from "@/lib/llm/validate"
@@ -36,6 +37,12 @@ const STATE_TTL_SECONDS = 60 * 60
 // ── Pipeline state (Redis-backed across stage chain) ────────────────────────
 
 interface PipelineState {
+  /**
+   * Fresh nonce per pipeline attempt. Stages compare this to the attemptId
+   * in their incoming QStash message — if they don't match, a newer attempt
+   * has superseded this one and the stage exits cleanly without writing.
+   */
+  attemptId: string
   text: string
   truncated: boolean
   task: Task | null
@@ -127,10 +134,19 @@ function pLimit(concurrency: number) {
  * dev or emergency fallback), we run the next stage inline in the same
  * process via `after()` to keep the pipeline functional but bounded by the
  * current function's budget.
+ *
+ * `attemptId` is the per-attempt nonce — it makes the QStash dedup ID
+ * unique across retries (otherwise QStash would silently drop the second
+ * publish of `${submissionId}:parse` and the user would see "stuck in
+ * queued" forever after clicking Re-run validation).
  */
-async function transitionTo(submissionId: string, stage: string): Promise<void> {
+async function transitionTo(
+  submissionId: string,
+  stage: string,
+  attemptId: string,
+): Promise<void> {
   if (isQStashConfigured()) {
-    await publishStage({ submissionId, stage })
+    await publishStage({ submissionId, stage, attemptId })
     return
   }
   // Fallback: same-process execution. Will share the current function budget.
@@ -141,7 +157,7 @@ async function transitionTo(submissionId: string, stage: string): Promise<void> 
   )
   after(async () => {
     try {
-      await runStage(submissionId, stage)
+      await runStage(submissionId, stage, attemptId)
     } catch (err) {
       console.error("[pipeline] inline stage failed", stage, err)
     }
@@ -151,13 +167,21 @@ async function transitionTo(submissionId: string, stage: string): Promise<void> 
 // ── Public entry: kick off a pipeline run ───────────────────────────────────
 
 /**
- * Enqueue the pipeline for a submission. Replaces the old
- * `processSubmission` entry. Idempotent via QStash deduplicationId.
+ * Enqueue the pipeline for a submission. Generates a fresh `attemptId`
+ * nonce so this run is decoupled from any previous attempt — QStash dedup
+ * IDs are scoped to `${submissionId}:${attemptId}:${stage}` so retries are
+ * never silently dropped.
  *
- * - Acquires a Redis lock so a duplicate enqueue doesn't double-run.
- * - Publishes the "parse" stage to QStash (or runs inline if not configured).
+ * Concurrency control: we set a short Redis lock holding the *current*
+ * attemptId. If a previous lock is still held (rare race — same submission
+ * being enqueued twice within seconds), we overwrite it because the calling
+ * site (`createSubmission` / `retrySubmission`) already validated the row
+ * is in a re-runnable state. Stale stages from the previous attempt will
+ * fence themselves out via the attemptId mismatch check in `loadState`.
  */
 export async function enqueueSubmission(submissionId: string): Promise<void> {
+  const attemptId = randomUUID()
+
   const redis = (() => {
     try {
       return getRedis()
@@ -167,17 +191,14 @@ export async function enqueueSubmission(submissionId: string): Promise<void> {
   })()
 
   if (redis) {
-    const acquired = await redis.set(`pipeline:lock:${submissionId}`, "1", {
-      nx: true,
-      ex: 600,
-    })
-    if (!acquired) {
-      console.warn("[pipeline] another worker holds the lock for", submissionId)
-      return
-    }
+    // Use a regular set (not NX): a fresh enqueue should always supersede
+    // any prior in-flight attempt. The lock TTL is short — it's just a
+    // soft signal that "an attempt is in progress" for observability.
+    await redis.set(`pipeline:lock:${submissionId}`, attemptId, { ex: 600 })
   }
 
-  await transitionTo(submissionId, "parse")
+  console.log("[pipeline] enqueue", submissionId, "attempt:", attemptId)
+  await transitionTo(submissionId, "parse", attemptId)
 }
 
 /**
@@ -190,17 +211,21 @@ export async function processSubmission(submissionId: string): Promise<void> {
 
 // ── Stage dispatcher (called by the QStash webhook) ─────────────────────────
 
-export async function runStage(submissionId: string, stage: string): Promise<void> {
+export async function runStage(
+  submissionId: string,
+  stage: string,
+  attemptId: string,
+): Promise<void> {
   // Catch-all so a stage error always writes a terminal state.
   try {
     if (stage === "parse") {
-      await stageParse(submissionId)
+      await stageParse(submissionId, attemptId)
     } else if (stage.startsWith("rules:")) {
       const idx = Number(stage.slice("rules:".length))
       if (Number.isNaN(idx)) throw new Error(`Invalid rules stage: ${stage}`)
-      await stageRules(submissionId, idx)
+      await stageRules(submissionId, idx, attemptId)
     } else if (stage === "finalize") {
-      await stageFinalize(submissionId)
+      await stageFinalize(submissionId, attemptId)
     } else {
       throw new Error(`Unknown stage: ${stage}`)
     }
@@ -239,7 +264,7 @@ async function markFailedSafe(submissionId: string, reason: string) {
 
 // ── Stage 1: Parse ──────────────────────────────────────────────────────────
 
-async function stageParse(submissionId: string): Promise<void> {
+async function stageParse(submissionId: string, attemptId: string): Promise<void> {
   const admin = createAdminClient()
   const startedAt = Date.now()
 
@@ -475,8 +500,10 @@ async function stageParse(submissionId: string): Promise<void> {
   // Wipe any prior runs so retries don't double-count.
   await admin.from("validation_runs").delete().eq("submission_id", submissionId)
 
-  // Persist state for subsequent stages.
+  // Persist state for subsequent stages. The attemptId is what fences out
+  // stale stages from a previous attempt that may still be in flight.
   const state: PipelineState = {
+    attemptId,
     text,
     truncated,
     task,
@@ -489,17 +516,33 @@ async function stageParse(submissionId: string): Promise<void> {
   await saveState(submissionId, state)
 
   // Hand off to the first rules batch.
-  await transitionTo(submissionId, "rules:0")
+  await transitionTo(submissionId, "rules:0", attemptId)
 }
 
 // ── Stage 2: Rules (chained, batch by batch) ────────────────────────────────
 
-async function stageRules(submissionId: string, batchIdx: number): Promise<void> {
+async function stageRules(
+  submissionId: string,
+  batchIdx: number,
+  attemptId: string,
+): Promise<void> {
   const state = await loadState(submissionId)
   if (!state) {
     console.error("[pipeline:rules] state missing for", submissionId, "batch", batchIdx)
     await markFailedSafe(submissionId, "Pipeline state was lost between stages. Please retry.")
     await clearLock(submissionId)
+    return
+  }
+
+  // Fence: if a newer attempt has superseded us, exit cleanly without
+  // writing — the newer attempt will produce the authoritative result.
+  if (state.attemptId !== attemptId) {
+    console.warn(
+      "[pipeline:rules] superseded — incoming attempt",
+      attemptId,
+      "vs state attempt",
+      state.attemptId,
+    )
     return
   }
 
@@ -596,21 +639,32 @@ async function stageRules(submissionId: string, batchIdx: number): Promise<void>
   await saveState(submissionId, next)
 
   if (batchEnd < state.rules.length) {
-    await transitionTo(submissionId, `rules:${batchIdx + 1}`)
+    await transitionTo(submissionId, `rules:${batchIdx + 1}`, attemptId)
   } else {
-    await transitionTo(submissionId, "finalize")
+    await transitionTo(submissionId, "finalize", attemptId)
   }
 }
 
 // ── Stage 3: Finalize ───────────────────────────────────────────────────────
 
-async function stageFinalize(submissionId: string): Promise<void> {
+async function stageFinalize(submissionId: string, attemptId: string): Promise<void> {
   const admin = createAdminClient()
   const state = await loadState(submissionId)
   if (!state) {
     console.error("[pipeline:finalize] state missing for", submissionId)
     await markFailedSafe(submissionId, "Pipeline state was lost before finalize. Please retry.")
     await clearLock(submissionId)
+    return
+  }
+
+  // Fence: stale stage from a superseded attempt.
+  if (state.attemptId !== attemptId) {
+    console.warn(
+      "[pipeline:finalize] superseded — incoming attempt",
+      attemptId,
+      "vs state attempt",
+      state.attemptId,
+    )
     return
   }
 

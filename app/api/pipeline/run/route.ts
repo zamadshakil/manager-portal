@@ -1,22 +1,19 @@
 import { NextResponse, after } from "next/server"
 import { runStage } from "@/lib/llm/pipeline"
-import { getReceiver } from "@/lib/qstash"
+import { getReceiver, getAppUrl } from "@/lib/qstash"
+import type { StagePayload } from "@/lib/qstash"
 
 /**
  * QStash webhook target. Each pipeline stage transition publishes a
  * message to QStash, which then calls back into this route with a fresh
  * 60s function budget.
  *
- * Auth: HMAC signature verification using QStash's signing keys. Without
- * this, anyone could trigger pipeline runs by posting to this URL.
+ * Auth: HMAC signature verification using QStash's signing keys, plus
+ * URL-claim verification so a captured signature can't be replayed against
+ * a different endpoint. Without this, anyone could trigger pipeline runs.
  */
 export const maxDuration = 60
 export const runtime = "nodejs"
-
-interface StagePayload {
-  submissionId: string
-  stage: string
-}
 
 export async function POST(request: Request) {
   // Read the raw body once for signature verification.
@@ -29,11 +26,15 @@ export async function POST(request: Request) {
 
   try {
     const receiver = getReceiver()
+    // QStash signs the URL it called; pass it explicitly so the JWT's
+    // `sub` claim is verified. We reconstruct the URL from APP_URL +
+    // path because Vercel's request.url may use the internal hostname.
+    const appUrl = getAppUrl()
+    const verifyUrl = appUrl ? `${appUrl}/api/pipeline/run` : undefined
     const valid = await receiver.verify({
       signature,
       body: raw,
-      // url verification: QStash signs the URL it called; if a proxy rewrites
-      // it we'd fail. We trust the signature alone here.
+      url: verifyUrl,
     })
     if (!valid) {
       return NextResponse.json({ error: "invalid signature" }, { status: 401 })
@@ -52,17 +53,27 @@ export async function POST(request: Request) {
   if (
     !payload ||
     typeof payload.submissionId !== "string" ||
-    typeof payload.stage !== "string"
+    typeof payload.stage !== "string" ||
+    typeof payload.attemptId !== "string"
   ) {
     return NextResponse.json({ error: "invalid payload" }, { status: 400 })
   }
 
+  console.log(
+    "[pipeline:webhook] dispatch",
+    payload.submissionId,
+    payload.stage,
+    "attempt:",
+    payload.attemptId,
+  )
+
   // Acknowledge immediately so QStash doesn't time out on us, and keep
   // running the stage in the same function via after(). If we throw, QStash
-  // will retry the message — `runStage` is idempotent (state-checked).
+  // will retry the message — `runStage` is idempotent (state-checked +
+  // attempt-fenced).
   after(async () => {
     try {
-      await runStage(payload.submissionId, payload.stage)
+      await runStage(payload.submissionId, payload.stage, payload.attemptId)
     } catch (err) {
       console.error(
         "[pipeline:webhook] runStage error",

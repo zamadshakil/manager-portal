@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getReceiver } from "@/lib/qstash"
+import { getReceiver, getAppUrl } from "@/lib/qstash"
 import { clearPipelineLock } from "@/lib/llm/pipeline"
 
 /**
@@ -29,7 +29,13 @@ export async function POST(request: Request) {
   }
   try {
     const receiver = getReceiver()
-    const valid = await receiver.verify({ signature, body: raw })
+    const appUrl = getAppUrl()
+    const verifyUrl = appUrl ? `${appUrl}/api/pipeline/failed` : undefined
+    const valid = await receiver.verify({
+      signature,
+      body: raw,
+      url: verifyUrl,
+    })
     if (!valid) {
       return NextResponse.json({ error: "invalid signature" }, { status: 401 })
     }

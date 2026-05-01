@@ -64,27 +64,43 @@ export function isQStashConfigured(): boolean {
 }
 
 /**
+ * Pipeline-stage message payload. `attemptId` is a fresh nonce generated
+ * by `enqueueSubmission` for each pipeline attempt, then threaded through
+ * every stage so the dedup ID is unique per-attempt (QStash stores dedup
+ * IDs for 90 days — without the nonce, retries would silently no-op).
+ *
+ * Stages also use `attemptId` to fence out stale work from a previous
+ * attempt that may still be in flight when a user retries.
+ */
+export interface StagePayload {
+  submissionId: string
+  stage: string
+  attemptId: string
+}
+
+/**
  * Publish a single pipeline-stage message. Returns the QStash message id
  * on success, or null when QStash is not configured (caller will fall back).
  *
- * `deduplicationId` ensures that if the same submission/stage is published
- * twice within QStash's dedup window (24h), the second publish is a no-op —
- * idempotency for free.
+ * The dedup ID is `${submissionId}:${attemptId}:${stage}` — unique per
+ * attempt so retries never collide, but stable within an attempt so QStash
+ * delivery retries don't double-run a stage.
  *
- * `failureCallback` is invoked by QStash when ALL retries are exhausted, so
- * the submission row never lingers in a non-terminal state.
+ * `failureCallback` is invoked by QStash when ALL retries are exhausted,
+ * so the submission row never lingers in a non-terminal state.
  */
-export async function publishStage(opts: {
-  submissionId: string
-  stage: string
-}): Promise<string | null> {
+export async function publishStage(opts: StagePayload): Promise<string | null> {
   if (!isQStashConfigured()) return null
   const appUrl = getAppUrl()!
   const client = getClient()
   const res = await client.publishJSON({
     url: `${appUrl}/api/pipeline/run`,
-    body: { submissionId: opts.submissionId, stage: opts.stage },
-    deduplicationId: `${opts.submissionId}:${opts.stage}`,
+    body: {
+      submissionId: opts.submissionId,
+      stage: opts.stage,
+      attemptId: opts.attemptId,
+    } satisfies StagePayload,
+    deduplicationId: `${opts.submissionId}:${opts.attemptId}:${opts.stage}`,
     retries: 3,
     failureCallback: `${appUrl}/api/pipeline/failed`,
   })
