@@ -49,33 +49,58 @@ export const processSubmissionFn = inngest.createFunction(
     });
 
     // Stage 2: Extract Text
-    const { text, truncated } = await step.run("extract-text", async () => {
+    const extractResult = await step.run("extract-text", async () => {
       let extracted = "";
       let isTruncated = false;
 
-      const res = await fetch(submission.blob_url);
-      const buffer = Buffer.from(await res.arrayBuffer());
-
-      if (submission.blob_url.startsWith("data:image/") || submission.mime_type.startsWith("image/")) {
-        const { text: visionText, notes } = await describeImage(buffer, submission.mime_type || "image/jpeg");
-        extracted = visionText + (notes ? `\n\n[Vision Notes: ${notes}]` : "");
-      } else {
-        const { text: parsed, truncated: t } = await extractText(buffer, submission.mime_type);
-        extracted = parsed;
-        isTruncated = t;
+      const { get: getBlob } = await import("@vercel/blob");
+      const blobResult = await getBlob(submission.blob_url, {
+        access: "private" as const,
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
+      if (!blobResult || !blobResult.stream) {
+        return { text: "", truncated: false, error: "Blob stream is missing or inaccessible." };
       }
-      return { text: extracted, truncated: isTruncated };
+      const chunks: Uint8Array[] = [];
+      const reader = blobResult.stream.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+      const buffer = Buffer.concat(chunks);
+
+      try {
+        if (submission.blob_url.startsWith("data:image/") || submission.mime_type.startsWith("image/")) {
+          const { text: visionText, notes } = await describeImage(buffer, submission.mime_type || "image/jpeg");
+          extracted = visionText + (notes ? `\n\n[Vision Notes: ${notes}]` : "");
+        } else {
+          const { text: parsed, truncated: t } = await extractText(buffer, submission.mime_type);
+          extracted = parsed;
+          isTruncated = t;
+        }
+      } catch (err: any) {
+        return { text: "", truncated: false, error: `Extraction failed: ${err.message || 'Unknown error'}` };
+      }
+      return { text: extracted, truncated: isTruncated, error: null };
     });
 
-    if (!text || text.trim().length === 0) {
-      await step.run("fail-empty-text", async () => {
+    const { text, truncated } = extractResult;
+    let extractError: string | null = extractResult.error ?? null;
+
+    if (!extractError && (!text || text.trim().length === 0)) {
+      extractError = "No text could be extracted from the document.";
+    }
+
+    if (extractError) {
+      await step.run("fail-extraction", async () => {
         const admin = createAdminClient();
         await admin.from("submissions").update({
           status: "needs_review",
-          flags: [{ severity: "fail", message: "Failed to extract text from the document." }]
+          flags: [{ severity: "fail", message: extractError! }]
         }).eq("id", submissionId);
       });
-      return { status: "empty text" };
+      return { status: "extraction_failed", error: extractError };
     }
 
     // Set status to validating
@@ -157,17 +182,21 @@ export const processSubmissionFn = inngest.createFunction(
       if (aggregateFlags.some(f => f.severity === "fail" || f.severity === "warn")) finalStatus = "needs_review";
 
       await admin.from("validation_runs").delete().eq("submission_id", submissionId);
-      if (successful.length > 0) {
+      // Only persist real rules (not synthetic task-brief rules)
+      const persistable = successful.filter(r => !r.rule_id.startsWith("task:"));
+      if (persistable.length > 0) {
         await admin.from("validation_runs").insert(
-          successful.map(r => ({
+          persistable.map(r => ({
             submission_id: submissionId,
-            rule_id: r.rule_id.startsWith("task:") ? null : r.rule_id,
-            rule_name: r.rule_name,
+            rule_id: r.rule_id,
+            model: r.model,
+            prompt_version: PROMPT_VERSION,
+            raw_output: { ...(r.raw as Record<string, unknown>), rule_name: r.rule_name },
             pass: r.pass,
             score: r.score,
             reasons: r.reasons,
             flags: r.flags,
-            prompt_version: PROMPT_VERSION,
+            latency_ms: r.latency_ms,
           }))
         );
       }

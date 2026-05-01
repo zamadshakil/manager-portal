@@ -17,9 +17,10 @@ const MODEL = process.env.GEMINI_VALIDATION_MODEL || "gemini-flash-lite-latest"
 const SUMMARY_MODEL = process.env.GEMINI_SUMMARY_MODEL || "gemini-flash-lite-latest"
 const VISION_MODEL = process.env.GEMINI_VISION_MODEL || "gemini-flash-latest"
 
-// Per-LLM-call hard timeout. Any single Gemini request that exceeds this is
-// aborted so it cannot monopolise the function's 60s budget.
-const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS ?? 20_000)
+// Per-LLM-call hard timeout. With Inngest, each step runs in its own
+// serverless invocation, so we no longer need to squeeze into a shared 60s
+// budget. 60s per individual LLM call is generous but safe.
+const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS ?? 60_000)
 
 // Bumped whenever the system prompt or schema changes so we can compare
 // historical runs in `validation_runs.prompt_version`.
