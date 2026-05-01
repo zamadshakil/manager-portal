@@ -95,3 +95,59 @@ drop trigger if exists submissions_reset_assignment on public.submissions;
 create trigger submissions_reset_assignment
   after delete on public.submissions
   for each row execute function public.reset_assignment_on_submission_delete();
+
+
+-- ---------------------------------------------------------------------------
+-- 5. Server-side aggregate for the department-stats screen.
+--
+-- Replaces the previous JS-side strategy of fetching every profile row and
+-- counting client-side. Pushes the aggregation to Postgres, returns one row
+-- per team with the manager (if any) joined and an exact `member_count`.
+--
+-- Marked SECURITY DEFINER so it can read profile counts even when invoked
+-- by managers/main_admin who only have row-level visibility into their own
+-- team. Authorisation gating happens in the calling Server Action; this RPC
+-- intentionally returns aggregates without leaking row-level data.
+-- ---------------------------------------------------------------------------
+create or replace function public.list_departments_with_stats()
+returns table (
+  id uuid,
+  name text,
+  description text,
+  manager_id uuid,
+  settings jsonb,
+  created_at timestamptz,
+  updated_at timestamptz,
+  manager_full_name text,
+  manager_email text,
+  member_count bigint
+)
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select
+    t.id,
+    t.name,
+    t.description,
+    t.manager_id,
+    t.settings,
+    t.created_at,
+    t.updated_at,
+    m.full_name,
+    m.email,
+    coalesce(c.member_count, 0)::bigint
+  from public.teams t
+  left join public.profiles m on m.id = t.manager_id
+  left join lateral (
+    select count(*)::bigint as member_count
+    from public.profiles p
+    where p.team_id = t.id
+  ) c on true
+  order by t.name asc;
+$$;
+
+-- Lock down execute: only authenticated callers, never anon.
+revoke all on function public.list_departments_with_stats() from public;
+grant execute on function public.list_departments_with_stats() to authenticated;

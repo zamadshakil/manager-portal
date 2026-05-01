@@ -1,9 +1,16 @@
 import "server-only"
+import pLimit from "p-limit"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { extractText } from "@/lib/parse"
 import { runRule, summarize, describeImage, PROMPT_VERSION } from "@/lib/llm/validate"
 import { llmLimiter, getRedis } from "@/lib/redis"
 import type { Submission, SubmissionFlag, ValidationRule, Task } from "@/lib/types"
+
+// Cap concurrent LLM calls per submission. Without this, a team with 20+
+// rules would issue 20+ simultaneous Groq requests and trip rate limits
+// despite our own per-team Upstash limiter (which gates submissions, not
+// fan-out within a single submission).
+const RULE_CONCURRENCY = 5
 
 /**
  * End-to-end async validation pipeline. Called from `after()` in the upload
@@ -212,26 +219,33 @@ async function runPipeline(submissionId: string) {
     })
   }
 
-  // Clean up any old runs before generating new ones.
-  await admin.from("validation_runs").delete().eq("submission_id", submissionId)
-
+  // Run rules with bounded concurrency. p-limit lets fast rules complete
+  // while slower ones are still in-flight, without all of them racing the
+  // Groq quota at once.
+  const limit = pLimit(RULE_CONCURRENCY)
   const ruleOutputs = await Promise.all(
-    filteredRules.map(async (rule) => {
-      try {
-        return await runRule(text, rule, { truncated })
-      } catch (err) {
-        console.error("[pipeline] rule failed", rule.rule_name, err)
-        return null
-      }
-    }),
+    filteredRules.map((rule) =>
+      limit(async () => {
+        try {
+          return await runRule(text, rule, { truncated })
+        } catch (err) {
+          console.error("[pipeline] rule failed", rule.rule_name, err)
+          return null
+        }
+      }),
+    ),
   )
 
   const successful = ruleOutputs.filter((r): r is NonNullable<typeof r> => Boolean(r))
 
-  // Persist validation_runs only for real (non-synthetic) rule rows.
+  // Persist validation_runs only for real (non-synthetic) rule rows. We
+  // INSERT the new rows *first* and only delete the prior history once the
+  // new rows are durable — that way a transient Postgres failure can never
+  // leave a submission with zero run history (which previously broke the
+  // submission detail page until a manual re-run).
   const persistable = successful.filter((r) => !r.rule_id.startsWith("task:"))
   if (persistable.length > 0) {
-    await admin.from("validation_runs").insert(
+    const { error: insertErr } = await admin.from("validation_runs").insert(
       persistable.map((r) => ({
         submission_id: submissionId,
         rule_id: r.rule_id,
@@ -245,6 +259,22 @@ async function runPipeline(submissionId: string) {
         latency_ms: r.latency_ms,
       })),
     )
+    if (insertErr) {
+      console.error("[pipeline] failed to insert validation_runs", insertErr)
+      // Bail out rather than nuking the existing run history below.
+      throw insertErr
+    }
+    // Now safe to drop older runs. We keep only the most recent batch by
+    // matching on submission_id + a `created_at` cutoff right before our
+    // INSERT timestamp range; in practice all rows we just inserted have
+    // a later created_at than the previous batch, so the simpler form is
+    // safe and idempotent.
+    await admin
+      .from("validation_runs")
+      .delete()
+      .eq("submission_id", submissionId)
+      .not("prompt_version", "is", null)
+      .lt("created_at", new Date(Date.now() - 1000).toISOString())
   }
 
   // Weighted aggregate score.

@@ -344,63 +344,64 @@ export interface DepartmentWithStats extends Team {
   member_count: number
 }
 
+// Row shape returned by the `list_departments_with_stats()` SQL function
+// added in migration 006. Aggregation runs in Postgres, so we transfer one
+// row per team instead of every profile in the org.
+interface DepartmentStatsRow {
+  id: string
+  name: string
+  description: string | null
+  manager_id: string | null
+  settings: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+  manager_full_name: string | null
+  manager_email: string | null
+  member_count: number
+}
+
+function mapDepartmentRow(r: DepartmentStatsRow): DepartmentWithStats {
+  return {
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    manager_id: r.manager_id,
+    settings: (r.settings ?? {}) as Record<string, unknown>,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    manager: r.manager_email
+      ? { full_name: r.manager_full_name, email: r.manager_email }
+      : null,
+    member_count: Number(r.member_count) || 0,
+  }
+}
+
 export async function listDepartmentsWithStats(): Promise<DepartmentWithStats[]> {
   const supabase = await createClient()
-  
-  // Fetch teams, then fetch members and managers separately to avoid FK join ambiguity
-  const { data: teams } = await supabase.from("teams").select("*").order("name", { ascending: true })
-  if (!teams) return []
 
-  const { data: profiles } = await supabase.from("profiles").select("id, team_id, full_name, email")
-  if (!profiles) return []
-
-  return teams.map((t: any) => {
-    const members = profiles.filter(p => p.team_id === t.id)
-    const manager = profiles.find(p => p.id === t.manager_id)
-    return {
-      ...t,
-      manager: manager ? { full_name: manager.full_name, email: manager.email } : null,
-      member_count: members.length,
-    }
-  })
+  // Server-side aggregate via RPC: one row per team, member_count computed in
+  // SQL. Replaces the previous strategy of fetching every profile row and
+  // counting client-side, which was O(profiles) bandwidth per dashboard load.
+  const { data, error } = await supabase.rpc("list_departments_with_stats")
+  if (error) {
+    console.error("[data] list_departments_with_stats failed:", error)
+    return []
+  }
+  return ((data ?? []) as DepartmentStatsRow[]).map(mapDepartmentRow)
 }
 
 export async function getDepartmentById(id: string): Promise<DepartmentWithStats | null> {
   const supabase = await createClient()
-  
-  const { data: team, error } = await supabase
-    .from("teams")
-    .select("*")
-    .eq("id", id)
-    .single()
 
-  if (error || !team) {
-    if (error) console.error("getDepartmentById error:", error)
+  // Reuse the aggregate RPC, then pluck the one team. Cheaper than three
+  // separate queries (team + manager + count) and keeps a single code path.
+  const { data, error } = await supabase.rpc("list_departments_with_stats")
+  if (error) {
+    console.error("[data] getDepartmentById failed:", error)
     return null
   }
-
-  // Fetch members
-  const { data: members } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("team_id", id)
-
-  // Fetch manager
-  let manager = null
-  if (team.manager_id) {
-    const { data: managerData } = await supabase
-      .from("profiles")
-      .select("full_name, email")
-      .eq("id", team.manager_id)
-      .single()
-    if (managerData) manager = managerData
-  }
-
-  return {
-    ...team,
-    manager,
-    member_count: members?.length || 0,
-  }
+  const row = ((data ?? []) as DepartmentStatsRow[]).find((r) => r.id === id)
+  return row ? mapDepartmentRow(row) : null
 }
 
 export async function listUnassignedMembers(): Promise<Profile[]> {

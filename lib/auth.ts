@@ -60,13 +60,6 @@ export function canManageTeam(profile: Profile, teamId: string | null): boolean 
   return false
 }
 
-export function roleLabel(role: UserRole): string {
-  switch (role) {
-    case "main_admin":
-      return "Main Admin"
-    case "manager":
-      return "Manager"
-    case "member":
-      return "Team Member"
-  }
-}
+// `roleLabel` lives in `lib/auth-shared.ts` so client components can import
+// it without pulling in `server-only` deps. Re-import from there if you need
+// it on the server too — do NOT redefine it here.

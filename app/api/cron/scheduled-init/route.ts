@@ -11,8 +11,6 @@ import { getRedis } from "@/lib/redis"
  * to trigger the mark-missed task every 15 minutes instead.
  */
 
-const redis = getRedis()
-
 export async function POST(request: Request) {
   const authHeader = request.headers.get("authorization")
   const expectedSecret = process.env.CRON_SECRET
@@ -21,6 +19,11 @@ export async function POST(request: Request) {
   if (!expectedSecret || authHeader !== `Bearer ${expectedSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+
+  // Lazy-init the Redis client inside the handler so a missing
+  // UPSTASH_REDIS_* env var only fails this route — not the whole build /
+  // cold-start of every other route that lives behind the same edge.
+  const redis = getRedis()
 
   try {
     // Schedule task to run every 15 minutes
