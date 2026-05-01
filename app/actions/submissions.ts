@@ -46,7 +46,7 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   }
 
   const parsed = UploadSchema.safeParse({
-    title: formData.get("title"),
+    title: formData.get("title") || "",
     taskId: formData.get("taskId") || undefined,
     lateReason: formData.get("lateReason") || undefined,
   })

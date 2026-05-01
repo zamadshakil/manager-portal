@@ -28,7 +28,7 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
   }
 
   const parsed = MetaSchema.safeParse({
-    title: formData.get("title"),
+    title: formData.get("title") || "",
     description: formData.get("description") ?? "",
     tags: formData.get("tags") ?? "",
   })

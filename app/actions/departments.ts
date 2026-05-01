@@ -28,7 +28,7 @@ export async function createDepartment(
   const actor = await requireRole(["main_admin"])
 
   const parsed = CreateSchema.safeParse({
-    name: formData.get("name"),
+    name: formData.get("name") || "",
     description: formData.get("description") ?? "",
   })
   if (!parsed.success)
@@ -76,8 +76,8 @@ export async function updateDepartment(
   const actor = await requireRole(["main_admin"])
 
   const parsed = UpdateSchema.safeParse({
-    id: formData.get("id"),
-    name: formData.get("name"),
+    id: formData.get("id") || undefined,
+    name: formData.get("name") || "",
     description: formData.get("description") ?? "",
   })
   if (!parsed.success)
@@ -161,8 +161,8 @@ export async function assignMemberToDepartment(
   const actor = await requireRole(["main_admin"])
 
   const parsed = AssignMemberSchema.safeParse({
-    department_id: formData.get("department_id"),
-    profile_id: formData.get("profile_id"),
+    department_id: formData.get("department_id") || undefined,
+    profile_id: formData.get("profile_id") || undefined,
   })
   if (!parsed.success)
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
@@ -205,8 +205,8 @@ export async function removeMemberFromDepartment(
   const actor = await requireRole(["main_admin"])
 
   const parsed = RemoveMemberSchema.safeParse({
-    department_id: formData.get("department_id"),
-    profile_id: formData.get("profile_id"),
+    department_id: formData.get("department_id") || undefined,
+    profile_id: formData.get("profile_id") || undefined,
   })
   if (!parsed.success)
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
@@ -265,7 +265,7 @@ export async function setDepartmentManager(
   const actor = await requireRole(["main_admin"])
 
   const parsed = SetManagerSchema.safeParse({
-    department_id: formData.get("department_id"),
+    department_id: formData.get("department_id") || undefined,
     profile_id: formData.get("profile_id") ?? "",
   })
   if (!parsed.success)

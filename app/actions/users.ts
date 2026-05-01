@@ -30,11 +30,11 @@ const Schema = z
 export async function provisionUser(formData: FormData) {
   const actor = await requireRole(["main_admin"])
   const parsed = Schema.safeParse({
-    email: formData.get("email"),
-    full_name: formData.get("full_name"),
-    role: formData.get("role"),
-    team_id: formData.get("team_id") || "",
-    password: formData.get("password"),
+    email: formData.get("email") || "",
+    full_name: formData.get("full_name") || "",
+    role: formData.get("role") || undefined,
+    team_id: formData.get("team_id") ?? "",
+    password: formData.get("password") || "",
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
 

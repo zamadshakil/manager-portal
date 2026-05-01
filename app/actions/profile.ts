@@ -48,8 +48,8 @@ const PasswordSchema = z
 export async function updatePassword(formData: FormData) {
   const profile = await requireProfile()
   const parsed = PasswordSchema.safeParse({
-    new_password: formData.get("new_password"),
-    confirm_password: formData.get("confirm_password"),
+    new_password: formData.get("new_password") || "",
+    confirm_password: formData.get("confirm_password") || "",
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
 

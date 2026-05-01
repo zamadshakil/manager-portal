@@ -46,8 +46,8 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
   const rawRuleIds = formData.getAll("rule_ids").map((v) => String(v)).filter(Boolean)
 
   const parsed = CreateTaskSchema.safeParse({
-    team_id: formData.get("team_id"),
-    title: formData.get("title"),
+    team_id: formData.get("team_id") || undefined,
+    title: formData.get("title") || "",
     description: formData.get("description") ?? "",
     instructions: formData.get("instructions") ?? "",
     due_at: formData.get("due_at") ?? "",

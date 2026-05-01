@@ -21,9 +21,9 @@ export interface ActionResult {
 export async function createAnnouncement(formData: FormData): Promise<ActionResult> {
   const profile = await requireRole(["main_admin", "manager"])
   const parsed = Schema.safeParse({
-    title: formData.get("title"),
-    body: formData.get("body"),
-    priority: formData.get("priority"),
+    title: formData.get("title") || "",
+    body: formData.get("body") || "",
+    priority: formData.get("priority") || undefined,
     scope: formData.get("scope") || "team",
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }

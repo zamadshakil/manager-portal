@@ -20,12 +20,12 @@ export async function upsertRule(formData: FormData) {
   const profile = await requireRole(["main_admin", "manager"])
 
   const parsed = Schema.safeParse({
-    team_id: formData.get("team_id"),
-    rule_name: formData.get("rule_name"),
+    team_id: formData.get("team_id") || undefined,
+    rule_name: formData.get("rule_name") || "",
     description: formData.get("description") ?? "",
-    prompt_template: formData.get("prompt_template"),
-    threshold: formData.get("threshold"),
-    weight: formData.get("weight"),
+    prompt_template: formData.get("prompt_template") || "",
+    threshold: formData.get("threshold") || "0",
+    weight: formData.get("weight") || "0",
     enabled: formData.get("enabled") === "on" || formData.get("enabled") === "true",
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }

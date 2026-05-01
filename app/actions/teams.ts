@@ -27,7 +27,7 @@ export async function createTeam(formData: FormData) {
   const profile = await requireRole(["main_admin"])
 
   const parsed = CreateTeamSchema.safeParse({
-    name: formData.get("name"),
+    name: formData.get("name") || "",
     description: formData.get("description") ?? "",
     manager_id: formData.get("manager_id") ?? "",
   })
@@ -78,8 +78,8 @@ export async function updateTeam(formData: FormData) {
   const profile = await requireRole(["main_admin"])
 
   const parsed = UpdateTeamSchema.safeParse({
-    team_id: formData.get("team_id"),
-    name: formData.get("name"),
+    team_id: formData.get("team_id") || undefined,
+    name: formData.get("name") || "",
     description: formData.get("description") ?? "",
     manager_id: formData.get("manager_id") ?? "",
   })
