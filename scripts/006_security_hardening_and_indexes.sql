@@ -1,30 +1,35 @@
 -- ============================================================================
--- Migration 006 — Security hardening, performance indexes, and a server-side
--- aggregate for the departments page.
+-- Migration 006 — Security hardening and performance indexes.
 --
--- Idempotent. Safe to re-run.
+-- Audit follow-ups (P0 / P1):
+--   * task_assignments_member_self lets members self-mark status=submitted.
+--     Drop it: members go through the server action which uses the service
+--     role for the authoritative status transition (after the action verifies
+--     the deadline/uploader). Defense in depth lives at the action boundary.
+--   * rules_select leaks prompt_template to members. Tighten to managers/admin.
+--   * Deleting a submission left task_assignments in 'submitted' state with no
+--     underlying file. Add a trigger to flip it back to 'assigned'.
+--   * Missing FK / partial indexes on tasks.manager_id, validation_runs lookups,
+--     and the active-assignments scan that the cron job runs.
+--   * listDepartmentsWithStats fetched every profile to compute per-team
+--     counts. Replace with a SECURITY DEFINER function that aggregates in SQL.
 --
--- Goals:
---   1. Tighten RLS so members cannot read validation rule prompt templates.
---   2. Restore submission ↔ task_assignment consistency when a submission is
---      deleted (the assignment must not stay marked "submitted" with no row).
---   3. Add a SECURITY DEFINER RPC that computes per-team member counts in
---      SQL so the dashboard does not have to ship every profile to the
---      Node runtime to count rows.
---   4. Add covering indexes for the hottest read paths.
---
--- Authorization note for `list_departments_with_stats()`:
---   The function exposes manager full_name and email. We deliberately gate
---   the team-scoped branch on `current_user_role() = 'manager'` so plain
---   members cannot enumerate manager contact info via the RPC, even though
---   `current_user_team()` would otherwise resolve their team for them.
+-- Idempotent: re-runnable on a partially-applied database.
 -- ============================================================================
 
 
 -- ---------------------------------------------------------------------------
--- 1. Tighten validation_rules SELECT — members must NOT read rule prompts.
---    The previous policy let any authenticated user whose team_id matched
---    read prompt_template, leaking the AI grading rubric.
+-- 1. Drop member self-update policy on task_assignments
+--    Members never update task_assignments directly via the anon client now —
+--    the server action (`createSubmission`) writes the assignment row through
+--    the service-role client after verifying ownership and deadline.
+-- ---------------------------------------------------------------------------
+drop policy if exists task_assignments_member_self on public.task_assignments;
+
+
+-- ---------------------------------------------------------------------------
+-- 2. Tighten validation_rules SELECT so members cannot read prompt templates.
+--    Only managers of the rule's team and main_admin should see them.
 -- ---------------------------------------------------------------------------
 drop policy if exists rules_select on public.validation_rules;
 create policy rules_select on public.validation_rules for select
@@ -35,11 +40,9 @@ create policy rules_select on public.validation_rules for select
 
 
 -- ---------------------------------------------------------------------------
--- 2. Submission ↔ task_assignment integrity:
---    If a submission row is deleted, any task_assignment that pointed at it
---    is left with status='submitted' and submission_id=NULL — a phantom
---    "submitted on time" with no underlying file. Flip it back so reports
---    don't lie.
+-- 3. When a submission row is deleted, reset its parent task_assignment back
+--    to 'assigned' so the member can re-submit and the manager dashboard
+--    doesn't show a "submitted" assignment with no file.
 -- ---------------------------------------------------------------------------
 create or replace function public.reset_assignment_on_submission_delete()
 returns trigger
@@ -48,17 +51,16 @@ security definer
 set search_path = public
 as $$
 begin
-  -- Only reset rows that were pointing at the deleted submission. We pick
-  -- 'assigned' (rather than 'missed') so the cron / member can decide based
-  -- on the task's due_at whether it has now lapsed.
-  update public.task_assignments
-     set status = 'assigned',
-         submitted_at = null,
-         late_reason = null
-   where submission_id = old.id;
+  if old.task_assignment_id is not null then
+    update public.task_assignments
+       set status = 'assigned',
+           submission_id = null,
+           submitted_at = null,
+           late_reason = null
+     where id = old.task_assignment_id;
+  end if;
   return old;
-end;
-$$;
+end $$;
 
 drop trigger if exists submissions_reset_assignment on public.submissions;
 create trigger submissions_reset_assignment
@@ -67,26 +69,45 @@ create trigger submissions_reset_assignment
 
 
 -- ---------------------------------------------------------------------------
--- 3. SQL aggregate replacement for `listDepartmentsWithStats`. Returning a
---    set lets the caller `from(...).select('*')` it through PostgREST.
---
---    SECURITY DEFINER: bypasses RLS so the join is efficient. We re-impose
---    authorization in the WHERE clause:
---      - main_admin: all teams
---      - manager:    only their own team
---      - member:     nothing (no rows)
+-- 4. Performance indexes
+-- ---------------------------------------------------------------------------
+
+-- "latest runs for a submission" pattern in the validation pipeline + UI.
+create index if not exists idx_validation_runs_submission_created
+  on public.validation_runs (submission_id, created_at desc);
+
+-- FK column without an index — slow for cascades and "tasks I created" queries.
+create index if not exists idx_tasks_manager
+  on public.tasks (manager_id);
+
+-- The mark-missed cron scans only 'assigned' rows; a partial index keeps it
+-- index-only as the table grows.
+create index if not exists idx_task_assignments_active
+  on public.task_assignments (created_at desc)
+  where status = 'assigned';
+
+-- listSubmissions uses (created_at desc, id desc) tuple pagination now —
+-- this composite index supports both single-team and tenant-wide pages.
+create index if not exists idx_submissions_team_created_id
+  on public.submissions (team_id, created_at desc, id desc);
+
+
+-- ---------------------------------------------------------------------------
+-- 5. SQL-side aggregation for the Departments dashboard.
+--    Returns one row per team with the manager profile and member count
+--    pre-computed, so the UI doesn't have to fetch every profile.
 -- ---------------------------------------------------------------------------
 create or replace function public.list_departments_with_stats()
 returns table (
-  id uuid,
-  name text,
-  description text,
-  manager_id uuid,
-  created_at timestamptz,
-  updated_at timestamptz,
+  id           uuid,
+  name         text,
+  description  text,
+  manager_id   uuid,
+  created_at   timestamptz,
+  updated_at   timestamptz,
   manager_full_name text,
-  manager_email text,
-  member_count bigint
+  manager_email     text,
+  member_count int
 )
 language sql
 stable
@@ -101,46 +122,23 @@ as $$
     t.created_at,
     t.updated_at,
     p.full_name as manager_full_name,
-    p.email as manager_email,
-    (
-      select count(*) from public.profiles mp
-      where mp.team_id = t.id
-    ) as member_count
+    p.email     as manager_email,
+    coalesce(mc.cnt, 0)::int as member_count
   from public.teams t
   left join public.profiles p on p.id = t.manager_id
-  -- Only main_admin sees the cross-team directory; managers see their own
-  -- team. Members are excluded entirely so the manager-contact columns are
-  -- never returned to them. (Per Copilot review — `current_user_team()`
-  -- alone would have leaked the row to the manager's own members.)
+  left join (
+    select team_id, count(*)::int as cnt
+    from public.profiles
+    where team_id is not null
+    group by team_id
+  ) mc on mc.team_id = t.id
+  -- Only main_admin should see the cross-team directory; managers see their
+  -- own team. This mirrors the page-level authorization gate.
   where public.is_main_admin()
-     or (
-       public.current_user_role() = 'manager'
-       and t.id = public.current_user_team()
-     )
+     or t.id = public.current_user_team()
+     or t.manager_id = auth.uid()
   order by t.name asc;
 $$;
 
 revoke all on function public.list_departments_with_stats() from public;
 grant execute on function public.list_departments_with_stats() to authenticated;
-
-
--- ---------------------------------------------------------------------------
--- 4. Performance indexes for the hottest read paths.
--- ---------------------------------------------------------------------------
--- Latest-first runs per submission (Reports drawer, debug pages).
-create index if not exists idx_validation_runs_submission_created
-  on public.validation_runs (submission_id, created_at desc);
-
--- mark-missed cron: filters task_assignments by status='assigned'.
-create index if not exists idx_task_assignments_assigned
-  on public.task_assignments (status)
-  where status = 'assigned';
-
--- FK columns without indexes hurt cascades. tasks.manager_id wasn't covered.
-create index if not exists idx_tasks_manager_id
-  on public.tasks (manager_id);
-
--- listSubmissions paginates by (created_at desc, id desc) — make the index
--- match for stable cursor pagination across millisecond ties.
-create index if not exists idx_submissions_team_created_id
-  on public.submissions (team_id, created_at desc, id desc);

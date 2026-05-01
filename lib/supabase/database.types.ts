@@ -38,6 +38,20 @@ export interface Database {
         }
         Returns: number
       }
+      list_departments_with_stats: {
+        Args: Record<string, never>
+        Returns: Array<{
+          id: string
+          name: string
+          description: string | null
+          manager_id: string | null
+          created_at: string
+          updated_at: string
+          manager_full_name: string | null
+          manager_email: string | null
+          member_count: number
+        }>
+      }
     }
     Enums: {
       user_role: "main_admin" | "manager" | "member"
@@ -48,6 +62,13 @@ export interface Database {
         | "passed"
         | "failed"
         | "needs_review"
+        | "late_submitted"
+        | "missed"
+      task_assignment_status:
+        | "assigned"
+        | "submitted"
+        | "late_submitted"
+        | "missed"
       announcement_priority: "low" | "normal" | "high" | "urgent"
       report_period: "day" | "month" | "year"
     }

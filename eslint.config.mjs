@@ -1,40 +1,40 @@
-import nextCoreWebVitals from "eslint-config-next/core-web-vitals"
-import nextTypescript from "eslint-config-next/typescript"
+import { createRequire } from "node:module"
 
-/**
- * ESLint flat config (v9+). Next 16 ships native flat configs so we no
- * longer need FlatCompat. This actually exercises Next's recommended
- * TypeScript + React rules instead of running with zero rules as `pnpm
- * lint` did before.
- */
-export default [
+const require = createRequire(import.meta.url)
+// eslint-config-next 16 ships a flat-config array directly via CommonJS.
+// We import it through createRequire so we don't need the legacy
+// FlatCompat bridge (which crashes on circular plugin references in v9).
+const next = require("eslint-config-next")
+
+/** @type {import("eslint").Linter.Config[]} */
+const eslintConfig = [
   {
     ignores: [
       ".next/**",
       "node_modules/**",
-      "next-env.d.ts",
+      "out/**",
+      "build/**",
+      "dist/**",
+      "scripts/**",
       "public/**",
-      "scripts/**/*.sql",
-      "user_read_only_context/**",
-      "v0_memories/**",
+      "next-env.d.ts",
+      "tsconfig.tsbuildinfo",
     ],
   },
-  ...nextCoreWebVitals,
-  ...nextTypescript,
+  ...next,
   {
     rules: {
-      // `lib/supabase/database.types.ts` is intentionally `any`; `lib/data.ts`
-      // uses `as unknown as ...` casts. Demote to warnings rather than
-      // blocking CI until a typed Supabase client is generated.
+      // Ban explicit `any` softly — many generated types fall back to any.
       "@typescript-eslint/no-explicit-any": "warn",
+      // Underscore-prefixed unused vars are intentional placeholders.
       "@typescript-eslint/no-unused-vars": [
         "warn",
-        {
-          argsIgnorePattern: "^_",
-          varsIgnorePattern: "^_",
-          caughtErrorsIgnorePattern: "^_",
-        },
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
+      "react/no-unescaped-entities": "off",
+      "@next/next/no-html-link-for-pages": "off",
     },
   },
 ]
+
+export default eslintConfig

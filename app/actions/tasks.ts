@@ -193,12 +193,27 @@ export async function assignTask(formData: FormData): Promise<TaskActionResult> 
   } else {
     const ids = formData.getAll("assignee_ids").map((v) => String(v)).filter(Boolean)
     if (ids.length === 0) return { ok: false, error: "Select at least one member." }
-    const rows = ids.map((id) => ({ task_id: task.id, assignee_id: id }))
+
+    // Defense in depth: confirm every supplied profile id actually belongs to
+    // THIS task's team before inserting. Prevents an authenticated manager
+    // from spraying assignments across other teams by spoofing the form.
+    const { data: validMembers } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("team_id", task.team_id)
+      .in("id", ids)
+    const validIds = new Set((validMembers ?? []).map((m) => (m as { id: string }).id))
+    const rows = ids
+      .filter((id) => validIds.has(id))
+      .map((id) => ({ task_id: task.id, assignee_id: id }))
+    if (rows.length === 0) {
+      return { ok: false, error: "None of the selected members belong to this task's team." }
+    }
     await admin.from("task_assignments").upsert(rows, {
       onConflict: "task_id,assignee_id",
       ignoreDuplicates: true,
     })
-    added = ids.length
+    added = rows.length
   }
 
   await logActivity({

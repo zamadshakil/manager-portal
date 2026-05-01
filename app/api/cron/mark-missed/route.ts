@@ -1,17 +1,13 @@
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import {
-  shouldRunCronTask,
-  recordTaskExecution,
-} from "@/lib/upstash-scheduler"
+import { recordTaskExecution } from "@/lib/upstash-scheduler"
 
 /**
  * Cron entrypoint for marking missed task assignments.
  *
- * SCHEDULING: Uses Upstash Redis to maintain 15-minute intervals.
- * Since Vercel allows only ONE daily cron job, this route is called
- * by the daily Vercel cron, but only executes every 15 minutes via
- * Upstash-based rate limiting.
+ * SCHEDULING: configured in `vercel.json` to run every 15 minutes
+ * (`*\/15 * * * *`). Vercel Cron handles the cadence directly — there is no
+ * Redis-side gate.
  *
  * Behavior:
  *   1. Find every `task_assignment` whose status is still 'assigned' but whose
@@ -30,17 +26,6 @@ export async function GET(request: Request) {
   const expected = process.env.CRON_SECRET
   if (expected && auth !== `Bearer ${expected}`) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  }
-
-  // Check if 15 minutes have passed since last execution
-  // This allows Vercel to call us daily while we execute every 15 minutes
-  const shouldRun = await shouldRunCronTask()
-  if (!shouldRun) {
-    return NextResponse.json({
-      ok: true,
-      skipped: true,
-      message: "Execution skipped - waiting for 15-minute interval",
-    })
   }
 
   const admin = createAdminClient()

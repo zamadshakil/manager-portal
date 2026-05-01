@@ -1,4 +1,3 @@
-import { cache } from "react"
 import { createClient } from "@/lib/supabase/server"
 import type {
   ActivityLogEntry,
@@ -39,11 +38,7 @@ interface RecentRow {
   updated_at: string
 }
 
-// Wrapped in React.cache so multiple Suspense boundaries on the same page
-// (StatCards + SubmissionsTable) share a single fetch within one render.
-export const getDashboardSummary = cache(_getDashboardSummary)
-
-async function _getDashboardSummary(profile: Profile): Promise<DashboardSummary> {
+export async function getDashboardSummary(profile: Profile): Promise<DashboardSummary> {
   const supabase = await createClient()
 
   // Build a base query factory so role scoping stays consistent across counts.
@@ -347,41 +342,54 @@ export interface DepartmentWithStats extends Team {
 export async function listDepartmentsWithStats(): Promise<DepartmentWithStats[]> {
   const supabase = await createClient()
 
-  // Aggregate runs in Postgres via the `list_departments_with_stats()` RPC
-  // (migration 006) so we don't ship every profile to Node just to count
-  // members. Authorization is re-enforced inside the function: members get
-  // zero rows, managers see their own team, main_admin sees everything.
+  // Fast path: use the SQL RPC `list_departments_with_stats` which joins
+  // teams + manager profile + member counts in a single round trip
+  // (migration 006). This avoids the O(teams) member-scan fallback that
+  // pulled every profile across every team into Node memory.
   const { data, error } = await supabase.rpc("list_departments_with_stats")
+  if (!error && data) {
+    return data.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      manager_id: row.manager_id,
+      settings: {} as Record<string, unknown>,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      manager: row.manager_email
+        ? { full_name: row.manager_full_name, email: row.manager_email }
+        : null,
+      member_count: row.member_count,
+    }))
+  }
+
+  // Fallback for environments where the migration has not run yet. We log a
+  // warning so the operator knows to apply 006_security_hardening_and_indexes.
   if (error) {
-    console.error("listDepartmentsWithStats rpc error:", error)
-    return []
+    console.warn(
+      "[listDepartmentsWithStats] RPC missing, falling back to client-side join. Apply migration 006.",
+      error.message,
+    )
   }
-
-  type Row = {
-    id: string
-    name: string
-    description: string | null
-    manager_id: string | null
-    created_at: string
-    updated_at: string
-    manager_full_name: string | null
-    manager_email: string | null
-    member_count: number | string
-  }
-
-  return ((data ?? []) as unknown as Row[]).map((r) => ({
-    id: r.id,
-    name: r.name,
-    description: r.description,
-    manager_id: r.manager_id,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-    manager: r.manager_email
-      ? { full_name: r.manager_full_name, email: r.manager_email }
-      : null,
-    // Postgres BIGINT comes through as a string in some PostgREST versions.
-    member_count: Number(r.member_count) || 0,
-  })) as DepartmentWithStats[]
+  const { data: teams } = await supabase
+    .from("teams")
+    .select("*")
+    .order("name", { ascending: true })
+  if (!teams) return []
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, team_id, full_name, email")
+  const profs = profiles ?? []
+  return teams.map((t) => {
+    const team = t as Team
+    const members = profs.filter((p) => p.team_id === team.id)
+    const manager = profs.find((p) => p.id === team.manager_id)
+    return {
+      ...team,
+      manager: manager ? { full_name: manager.full_name, email: manager.email } : null,
+      member_count: members.length,
+    }
+  })
 }
 
 export async function getDepartmentById(id: string): Promise<DepartmentWithStats | null> {
