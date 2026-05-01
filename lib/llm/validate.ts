@@ -168,7 +168,6 @@ export async function runRule(
       (signal) =>
         generateObject({
           model: doai.chat(MODEL),
-          mode: "json",
           temperature: 0,
           schema: RuleResultSchema,
           system: [
@@ -232,7 +231,6 @@ export async function summarize(
       (signal) =>
         generateObject({
           model: doai.chat(SUMMARY_MODEL),
-          mode: "json",
           temperature: 0,
           schema: SummarySchema,
           system: [
