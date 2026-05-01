@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server"
+import { NextResponse, after } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { processSubmission } from "@/lib/llm/pipeline"
@@ -74,26 +74,22 @@ export async function POST(
     })
   }
 
-  // Run the pipeline synchronously in this function's 60s budget.
-  try {
-    await processSubmission(submissionId)
-  } catch (err) {
-    console.error("[pipeline-route] pipeline error", submissionId, err)
-    // The pipeline itself handles status updates on failure, so we just
-    // acknowledge the error here.
-  }
+  // Run the pipeline asynchronously in this function's 60s budget.
+  // Using after() ensures that if the client disconnects or aborts the
+  // fetch request, Vercel will not terminate the pipeline mid-flight.
+  after(async () => {
+    try {
+      await processSubmission(submissionId)
+    } catch (err) {
+      console.error("[pipeline-route] pipeline error", submissionId, err)
+    }
+  })
 
-  // Fetch the final status to return to the caller.
-  const { data: result } = await admin
-    .from("submissions")
-    .select("status, score, summary")
-    .eq("id", submissionId)
-    .single()
-
+  // Return immediately so the client can begin polling.
   return NextResponse.json({
     ok: true,
-    status: result?.status ?? "unknown",
-    score: result?.score,
+    status: sub.status,
+    queued: true,
   })
 }
 
