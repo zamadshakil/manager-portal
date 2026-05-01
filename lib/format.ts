@@ -13,11 +13,11 @@ export function formatRelative(iso: string | Date | null | undefined): string {
   const sec = Math.round(diff / 1000)
   if (sec < 5) return "just now"
   if (sec < 60) return `${sec}s ago`
-  const min = Math.round(sec / 60)
+  const min = Math.floor(sec / 60)
   if (min < 60) return `${min}m ago`
-  const hr = Math.round(min / 60)
+  const hr = Math.floor(min / 60)
   if (hr < 24) return `${hr}h ago`
-  const day = Math.round(hr / 24)
+  const day = Math.floor(hr / 24)
   if (day < 7) return `${day}d ago`
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }

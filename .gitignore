@@ -16,3 +16,6 @@ local.env
 node_modules
 .next/
 .DS_Store
+
+# Large binary assets
+eng.traineddata

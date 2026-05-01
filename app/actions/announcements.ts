@@ -70,6 +70,11 @@ export async function deleteAnnouncement(formData: FormData): Promise<ActionResu
   const { data: row } = await supabase.from("announcements").select("id, team_id").eq("id", id).single()
   if (!row) return { ok: false, error: "Not found" }
 
+  // Managers can only delete announcements from their own team.
+  if (profile.role === "manager" && row.team_id !== profile.team_id) {
+    return { ok: false, error: "Not authorized to delete this announcement." }
+  }
+
   const { error } = await supabase.from("announcements").delete().eq("id", id)
   if (error) return { ok: false, error: error.message }
 

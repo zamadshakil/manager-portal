@@ -4,11 +4,10 @@ import { getRedis } from "@/lib/redis"
  * Cron observability helpers.
  *
  * Historical context: this module used to gate the `mark-missed` cron behind
- * a Redis-tracked 15-minute interval because Vercel Cron on the Hobby plan
- * could only run jobs once per day. We now schedule the cron natively at
- * a 15-minute cadence in `vercel.json`, so the gate is removed. What remains is a
- * lightweight execution recorder used for monitoring / debugging in the
- * Upstash console.
+ * a Redis-tracked 15-minute interval. We now schedule the cron natively
+ * in `vercel.json` (once daily on Hobby, or every 15 min on Pro), so the
+ * gate is removed. What remains is a lightweight execution recorder used
+ * for monitoring / debugging in the Upstash console.
  *
  * The Redis client is resolved lazily inside `recordTaskExecution` so a
  * cold start with missing env vars never crashes the route — the recorder

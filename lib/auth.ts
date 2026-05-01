@@ -60,13 +60,5 @@ export function canManageTeam(profile: Profile, teamId: string | null): boolean 
   return false
 }
 
-export function roleLabel(role: UserRole): string {
-  switch (role) {
-    case "main_admin":
-      return "Main Admin"
-    case "manager":
-      return "Manager"
-    case "member":
-      return "Team Member"
-  }
-}
+// Re-export from the shared module so server code can `import { roleLabel } from "@/lib/auth"`.
+export { roleLabel } from "@/lib/auth-shared"

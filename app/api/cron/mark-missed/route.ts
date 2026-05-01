@@ -5,9 +5,12 @@ import { recordTaskExecution } from "@/lib/upstash-scheduler"
 /**
  * Cron entrypoint for marking missed task assignments.
  *
- * SCHEDULING: configured in `vercel.json` to run every 15 minutes
- * (`*\/15 * * * *`). Vercel Cron handles the cadence directly — there is no
- * Redis-side gate.
+ * SCHEDULING: configured in `vercel.json` to run once daily at midnight
+ * UTC (`0 0 * * *`). Vercel Hobby plan supports daily cron only. Upgrade
+ * to Pro for a 15-minute cadence (every-15-min cron expression).
+ *
+ * The Redis-side execution gate has been removed; the cron runs on its native
+ * schedule.
  *
  * Behavior:
  *   1. Find every `task_assignment` whose status is still 'assigned' but whose
@@ -22,9 +25,13 @@ import { recordTaskExecution } from "@/lib/upstash-scheduler"
  * fallback bearer check so curl / staging triggers still work.
  */
 export async function GET(request: Request) {
-  const auth = request.headers.get("authorization")
   const expected = process.env.CRON_SECRET
-  if (expected && auth !== `Bearer ${expected}`) {
+  if (!expected) {
+    console.error("[Cron] CRON_SECRET is not configured — rejecting request.")
+    return NextResponse.json({ error: "CRON_SECRET not configured" }, { status: 500 })
+  }
+  const auth = request.headers.get("authorization")
+  if (auth !== `Bearer ${expected}`) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   }
 

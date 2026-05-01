@@ -97,6 +97,11 @@ export async function deleteMaterial(formData: FormData): Promise<{ ok: boolean;
     .single()
   if (!row) return { ok: false, error: "Not found" }
 
+  // Managers can only delete materials from their own team.
+  if (profile.role === "manager" && row.team_id !== profile.team_id) {
+    return { ok: false, error: "Not authorized to delete this material." }
+  }
+
   const { error } = await supabase.from("materials").delete().eq("id", id)
   if (error) return { ok: false, error: error.message }
 
