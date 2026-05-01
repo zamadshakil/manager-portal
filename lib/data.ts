@@ -272,12 +272,12 @@ export async function listRules(profile: Profile): Promise<ValidationRule[]> {
     .select("*")
     .order("created_at", { ascending: false })
 
-  // Scope rules by team:
+  // Scope rules:
   // - main_admin sees all rules (no filter)
-  // - manager sees only their team's rules
+  // - manager sees their team's rules AND global rules (team_id is null)
   // - member should not access this directly
   if (profile.role === "manager" && profile.team_id) {
-    q = q.eq("team_id", profile.team_id)
+    q = q.or(`team_id.eq.${profile.team_id},team_id.is.null`)
   } else if (profile.role !== "main_admin") {
     return [] // Members don't have access to rules
   }

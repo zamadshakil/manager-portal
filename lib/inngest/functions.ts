@@ -29,7 +29,7 @@ export const processSubmissionFn = inngest.createFunction(
       }
 
       const [{ data: rulesData }, taskRow] = await Promise.all([
-        admin.from("validation_rules").select("*").eq("team_id", sub.team_id).eq("enabled", true),
+        admin.from("validation_rules").select("*").or(`team_id.eq.${sub.team_id},team_id.is.null`).eq("enabled", true),
         sub.task_id ? admin.from("tasks").select("*").eq("id", sub.task_id).maybeSingle() : Promise.resolve({ data: null })
       ]);
 

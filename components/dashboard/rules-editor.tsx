@@ -94,24 +94,7 @@ export function RulesEditor({ rules, teams, profile }: Props) {
 
       {creating || editing ? (
         <form onSubmit={onSubmit} className="border-b border-border bg-warm-white p-4 lg:p-5 space-y-3">
-          {profile?.role === "main_admin" && teams && teams.length > 0 && (
-            <label className="block mb-3">
-              <span className="text-[12px] font-semibold text-muted-foreground">Target Team</span>
-              <select
-                name="team_id"
-                required
-                defaultValue={editing?.team_id ?? ""}
-                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="" disabled>Select a team...</option>
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
               <span className="text-[12px] font-semibold text-muted-foreground">Rule name</span>
