@@ -46,7 +46,13 @@ export async function POST(
     return NextResponse.json({ error: "Profile not found" }, { status: 403 })
   }
 
-  const admin = createAdminClient()
+  let admin;
+  try {
+    admin = createAdminClient()
+  } catch (err: any) {
+    return NextResponse.json({ error: "Admin client init failed", details: err.message }, { status: 500 })
+  }
+
   const { data: sub } = await admin
     .from("submissions")
     .select("id, team_id, uploader_id, status")
@@ -65,29 +71,37 @@ export async function POST(
     return NextResponse.json({ error: "Not authorized" }, { status: 403 })
   }
 
-  // Only process if the submission is in a processable state.
-  if (!["queued", "parsing", "validating"].includes(sub.status)) {
+  try {
+    // Only process if the submission is in a processable state.
+    if (!["queued", "parsing", "validating"].includes(sub.status)) {
+      return NextResponse.json({
+        ok: true,
+        status: sub.status,
+        message: "Submission already processed.",
+      })
+    }
+
+    // Trigger the background job via Inngest.
+    // This bypasses the Vercel 60s timeout entirely because Inngest orchestrates
+    // the execution across multiple serverless invocations and handles retries.
+    await inngest.send({
+      name: "app/submission.process",
+      data: { submissionId },
+    })
+
+    // Return immediately so the client can begin polling.
     return NextResponse.json({
       ok: true,
       status: sub.status,
-      message: "Submission already processed.",
+      queued: true,
     })
+  } catch (error: any) {
+    console.error("Pipeline trigger error:", error)
+    return NextResponse.json(
+      { error: "Internal Server Error", details: error.message || String(error) },
+      { status: 500 }
+    )
   }
-
-  // Trigger the background job via Inngest.
-  // This bypasses the Vercel 60s timeout entirely because Inngest orchestrates
-  // the execution across multiple serverless invocations and handles retries.
-  await inngest.send({
-    name: "app/submission.process",
-    data: { submissionId },
-  })
-
-  // Return immediately so the client can begin polling.
-  return NextResponse.json({
-    ok: true,
-    status: sub.status,
-    queued: true,
-  })
 }
 
 /**
