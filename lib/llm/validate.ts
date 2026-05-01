@@ -1,20 +1,28 @@
 import "server-only"
 import { generateObject, generateText } from "ai"
-import { groq } from "@ai-sdk/groq"
+import { google } from "@ai-sdk/google"
 import { z } from "zod"
 import type { ValidationRule } from "@/lib/types"
 
-const MODEL = process.env.GROQ_VALIDATION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
-const SUMMARY_MODEL = process.env.GROQ_SUMMARY_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
+// ── Model configuration ────────────────────────────────────────────────────
+// Gemini Flash Lite: fast, cheap, excellent JSON-schema & vision support.
+// Override via env vars for A/B testing or model upgrades.
+const MODEL = process.env.GEMINI_VALIDATION_MODEL || "gemini-3.1-flash-lite-preview"
+const SUMMARY_MODEL = process.env.GEMINI_SUMMARY_MODEL || "gemini-3.1-flash-lite-preview"
+const VISION_MODEL = process.env.GEMINI_VISION_MODEL || "gemini-3.1-flash-lite-preview"
 
 // Bumped whenever the system prompt or schema changes so we can compare
 // historical runs in `validation_runs.prompt_version`.
-export const PROMPT_VERSION = "v3"
+export const PROMPT_VERSION = "v4"
 
+// ── Schemas ────────────────────────────────────────────────────────────────
+// IMPORTANT: `reasons` uses `.min(0)` at the schema level. We enforce at
+// least one reason in post-processing so the LLM's JSON output never trips
+// server-side schema validation (the root cause of Groq's hard 400 errors).
 const RuleResultSchema = z.object({
   pass: z.boolean(),
   score: z.number().min(0).max(100),
-  reasons: z.array(z.string()).min(1).max(8),
+  reasons: z.array(z.string()).max(8),
   flags: z
     .array(
       z.object({
@@ -45,10 +53,10 @@ export interface RunRuleOutput extends RuleResult {
   raw: unknown
 }
 
+// ── Retry logic ────────────────────────────────────────────────────────────
 /**
- * Wrap a flaky network/LLM call with bounded exponential backoff. Groq returns
- * 429s under load and occasional 5xx; this lets us absorb the noise without
- * flagging a submission as failed.
+ * Wrap a flaky network/LLM call with bounded exponential backoff.
+ * Handles transient 429s, 5xx, and network errors.
  */
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   let lastErr: unknown
@@ -59,10 +67,9 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
       lastErr = err
       const transient =
         err instanceof Error &&
-        /(429|rate limit|timeout|fetch failed|ECONN|5\d\d)/i.test(err.message)
+        /(429|rate limit|timeout|fetch failed|ECONN|5\d\d|RESOURCE_EXHAUSTED)/i.test(err.message)
       if (!transient || i === attempts - 1) break
-      // Groq rate limits often require 5-15s to reset if token limits are hit.
-      // Use a larger backoff: ~2s, then ~5s, then ~12s.
+      // Backoff: ~2s, ~5s, ~12s — gives Gemini quota time to reset.
       const backoff = 2000 * Math.pow(2.5, i) + Math.floor(Math.random() * 500)
       await new Promise((r) => setTimeout(r, backoff))
     }
@@ -70,11 +77,11 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   throw lastErr instanceof Error ? lastErr : new Error("LLM call failed")
 }
 
+// ── Prompt builder ─────────────────────────────────────────────────────────
 /**
  * Build the per-rule user prompt. We substitute the canonical `{{TEXT}}`
  * placeholder if the manager wrote a self-contained prompt; otherwise we
- * append the document at the end. This fixes the prior bug where the literal
- * marker was sent to the model and the document was duplicated.
+ * append the document at the end.
  */
 function buildRulePrompt(rule: ValidationRule, text: string, truncated: boolean): string {
   const template = rule.prompt_template ?? ""
@@ -104,6 +111,7 @@ function buildRulePrompt(rule: ValidationRule, text: string, truncated: boolean)
     : filled
 }
 
+// ── Rule runner ────────────────────────────────────────────────────────────
 export async function runRule(
   text: string,
   rule: ValidationRule,
@@ -114,7 +122,7 @@ export async function runRule(
 
   const { object } = await withRetry(() =>
     generateObject({
-      model: groq(MODEL),
+      model: google(MODEL),
       temperature: 0,
       schema: RuleResultSchema,
       system: [
@@ -133,6 +141,14 @@ export async function runRule(
     }),
   )
 
+  // Post-process: guarantee at least one reason so downstream code never
+  // has to deal with an empty array. The schema allows 0 to avoid hard
+  // server-side validation failures, but we fix it here.
+  const reasons =
+    object.reasons.length > 0
+      ? object.reasons
+      : [object.pass ? "Document meets the rule criteria." : "Document does not meet the rule criteria."]
+
   return {
     rule_id: rule.id,
     rule_name: rule.rule_name,
@@ -142,9 +158,11 @@ export async function runRule(
     model: MODEL,
     raw: object,
     ...object,
+    reasons,
   }
 }
 
+// ── Summariser ─────────────────────────────────────────────────────────────
 export async function summarize(
   text: string,
   opts: { truncated?: boolean } = {},
@@ -161,7 +179,7 @@ export async function summarize(
 
   const { object } = await withRetry(() =>
     generateObject({
-      model: groq(SUMMARY_MODEL),
+      model: google(SUMMARY_MODEL),
       temperature: 0,
       schema: SummarySchema,
       system: [
@@ -176,25 +194,18 @@ export async function summarize(
   return { ...object, latency_ms: Date.now() - started }
 }
 
+// ── Vision / OCR ───────────────────────────────────────────────────────────
 /**
- * Vision fallback: when OCR returns very little text from an image upload, ask
- * a multimodal Groq model to describe the document directly. We surface the
- * description back to the caller as plain text the rest of the pipeline can
- * treat normally.
+ * Use Gemini's native vision to extract text from an image. Much faster and
+ * more reliable than Tesseract.js in serverless environments.
  */
-const VisionSchema = z.object({
-  text: z.string(),
-  notes: z.string().optional(),
-})
-
 export async function describeImage(
   buffer: Uint8Array,
   mimeType: string,
 ): Promise<{ text: string; notes?: string }> {
-  const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
   const { text: rawText } = await withRetry(() =>
     generateText({
-      model: groq(VISION_MODEL),
+      model: google(VISION_MODEL),
       temperature: 0,
       system:
         "You are a vision OCR assistant. Transcribe ALL readable text from the image exactly as it appears. Preserve line breaks and formatting. If there are diagrams, tables, or signatures, describe them briefly after the transcribed text. Output plain text only, no JSON wrapping.",
