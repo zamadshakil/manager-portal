@@ -52,6 +52,7 @@ const nextConfig = {
           "img-src 'self' blob: data: https://*.vercel-storage.com",
           "font-src 'self' https://fonts.gstatic.com https://frontend-cdn.perplexity.ai",
           "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.vercel-storage.com https://va.vercel-scripts.com https://vercel.live",
+          "frame-src 'self' https://vercel.live",
           "frame-ancestors 'none'",
         ].join("; "),
       },

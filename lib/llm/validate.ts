@@ -4,8 +4,8 @@ import { groq } from "@ai-sdk/groq"
 import { z } from "zod"
 import type { ValidationRule } from "@/lib/types"
 
-const MODEL = process.env.GROQ_VALIDATION_MODEL || "llama-3.3-70b-versatile"
-const SUMMARY_MODEL = process.env.GROQ_SUMMARY_MODEL || "llama-3.3-70b-versatile"
+const MODEL = process.env.GROQ_VALIDATION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
+const SUMMARY_MODEL = process.env.GROQ_SUMMARY_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
 
 // Bumped whenever the system prompt or schema changes so we can compare
 // historical runs in `validation_runs.prompt_version`.
@@ -61,7 +61,9 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
         err instanceof Error &&
         /(429|rate limit|timeout|fetch failed|ECONN|5\d\d)/i.test(err.message)
       if (!transient || i === attempts - 1) break
-      const backoff = 400 * Math.pow(2, i) + Math.floor(Math.random() * 250)
+      // Groq rate limits often require 5-15s to reset if token limits are hit.
+      // Use a larger backoff: ~2s, then ~5s, then ~12s.
+      const backoff = 2000 * Math.pow(2.5, i) + Math.floor(Math.random() * 500)
       await new Promise((r) => setTimeout(r, backoff))
     }
   }
@@ -189,7 +191,7 @@ export async function describeImage(
   buffer: Uint8Array,
   mimeType: string,
 ): Promise<{ text: string; notes?: string }> {
-  const VISION_MODEL = process.env.GROQ_VISION_MODEL || "llama-3.2-11b-vision-preview"
+  const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
   const { text: rawText } = await withRetry(() =>
     generateText({
       model: groq(VISION_MODEL),
