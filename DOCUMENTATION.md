@@ -27,26 +27,22 @@ Start here if you're setting up the project for the first time:
    - Security design
    - Module dependencies
 
-### For Code Review
-If you're reviewing the audit fixes or understanding implementation:
+### For Pipeline / AI Validation work
+If you're touching the validation pipeline (the most common production hot spot):
 
-1. **[FIXES_COMPLETED.md](./FIXES_COMPLETED.md)** ⭐ START HERE
-   - Summary of 3 audit fixes
-   - Implementation details
-   - Testing checklist
-   - Quality assurance
+1. **[docs/PIPELINE_ARCHITECTURE.md](./docs/PIPELINE_ARCHITECTURE.md)** ⭐ CANONICAL
+   - Why the pipeline is staged
+   - Stage-by-stage description (parse / validate_batch / finalize)
+   - Failure handling, retry, DLQ, cron rescue
+   - Configuration knobs and tuning advice
 
-2. **[docs/IMPLEMENTATION_CHANGES.md](./docs/IMPLEMENTATION_CHANGES.md)**
-   - Detailed changelog
-   - How each fix works
-   - File-by-file changes
-   - Verification steps
+### For Historical Context (Audit / April 2026)
+These were authored before the Gemini + QStash migration. Non-pipeline
+findings (security, RLS, RSC patterns) still apply.
 
-3. **[docs/CODEBASE_AUDIT.md](./docs/CODEBASE_AUDIT.md)**
-   - Comprehensive code audit
-   - Quality metrics
-   - Security assessment
-   - Recommendations
+1. **[FIXES_COMPLETED.md](./FIXES_COMPLETED.md)** — April 2026 audit fixes
+2. **[docs/IMPLEMENTATION_CHANGES.md](./docs/IMPLEMENTATION_CHANGES.md)** — April 2026 changelog
+3. **[docs/CODEBASE_AUDIT.md](./docs/CODEBASE_AUDIT.md)** — April 2026 quality audit
 
 ### For Deployment & Operations
 If you're deploying or managing the production system:
@@ -285,16 +281,23 @@ All documentation should include:
 
 ---
 
-## ✅ Audit Completion Status
+## Major Milestones
 
-**All audit fixes completed on April 30, 2026:**
-- ✅ Cron schedule solution (Upstash Redis)
-- ✅ Tailwind configuration (Design tokens)
-- ✅ Environment & documentation (Complete overhaul)
+**May 1, 2026 — Validation pipeline migration**
+- Replaced Groq with Google Gemini (`@ai-sdk/google`).
+- Removed Tesseract.js — image OCR is now vision-only via Gemini.
+- Re-platformed the pipeline onto Upstash QStash with staged messages
+  (`parse → validate_batch_N → finalize`).
+- Added per-LLM-call timeouts and a function-level abort budget.
+- See [docs/PIPELINE_ARCHITECTURE.md](./docs/PIPELINE_ARCHITECTURE.md).
 
-See [FIXES_COMPLETED.md](./FIXES_COMPLETED.md) for details.
+**April 30, 2026 — Initial audit fixes**
+- Cron schedule via Upstash Redis interval gating.
+- Tailwind config wired to design tokens.
+- Environment and README overhaul.
+- See [FIXES_COMPLETED.md](./FIXES_COMPLETED.md).
 
 ---
 
-**Last Updated:** April 30, 2026  
-**Status:** All documentation current and complete
+**Last Updated:** May 1, 2026  
+**Status:** Documentation current with the staged QStash + Gemini pipeline.

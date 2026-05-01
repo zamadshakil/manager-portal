@@ -5,7 +5,7 @@
 > should be able to read just this file plus `README.md` and orient
 > themselves in under fifteen minutes.
 
-Last reviewed: 2026-04-29 (full end-to-end flow audit) 
+Last reviewed: 2026-05-01 (Gemini + QStash pipeline migration)
 
 ---
 
@@ -15,12 +15,14 @@ Last reviewed: 2026-04-29 (full end-to-end flow audit)
 - **Auth:** Supabase Auth (email/password). Provision-only — no public sign-up.
 - **Database:** Supabase Postgres with RLS on every table.
 - **Files:** Vercel Blob, fronted by an authenticated download proxy.
-- **AI:** Groq (via the Vercel AI SDK) for validation + summarisation; Tesseract OCR with a Groq Vision fallback for images.
-- **Background work:** Next.js `after()` for the validation pipeline; Vercel Cron (daily) + Upstash Redis (15-minute intervals) for missed-deadline sweeps and stuck-submission recovery.
-- **Rate limit / idempotency:** Upstash Redis.
+- **AI:** **Google Gemini** via the Vercel AI SDK (`@ai-sdk/google`) — Flash-Lite for rule evaluation and summary, Flash for vision/OCR. (No Tesseract anymore — vision-only for images.)
+- **Background work:** **Upstash QStash** runs the validation pipeline as a chain of staged messages (`parse → validate_batch_N → finalize`), each its own function invocation with retry + DLQ. Vercel Cron + Upstash Redis still drive the daily missed-deadline / stuck-recovery sweep as a safety net.
+- **Pipeline state / rate limit / idempotency:** Upstash Redis.
 - **Roles:** `main_admin`, `manager`, `member`. Three different views of the same dashboard.
 
 If you only remember one thing: **every mutation is a Server Action that validates with Zod, re-checks the role with `requireRole`, writes to Supabase, then `revalidatePath`s the affected routes.** Anything that bypasses that pattern is a bug.
+
+For the full pipeline design, see [PIPELINE_ARCHITECTURE.md](./PIPELINE_ARCHITECTURE.md).
 
 ---
 
@@ -34,7 +36,7 @@ Hierarchia is a portal where managers assign document-style tasks (PDF, DOCX, PP
 | **Manager** | Owns one team. Configures validation rules, creates tasks (single or bulk-assigned), reviews submissions, posts team announcements/materials. |
 | **Member** | Sees their assigned tasks, uploads submissions, reads announcements, downloads materials, sees their own performance. |
 
-Authentication is **Supabase Auth** (email + password) with **provision-only onboarding**. There is no public sign-up. Data lives in **Supabase Postgres** behind RLS. Files live in **Vercel Blob** with download proxied through a server route that re-checks RLS. The AI pipeline runs on **Groq via the AI SDK**, with **Tesseract.js + Groq Vision** for OCR fallback. Per-user/per-team rate-limiting and per-submission idempotency live in **Upstash Redis**.
+Authentication is **Supabase Auth** (email + password) with **provision-only onboarding**. There is no public sign-up. Data lives in **Supabase Postgres** behind RLS. Files live in **Vercel Blob** with download proxied through a server route that re-checks RLS. The AI pipeline runs on **Google Gemini via the AI SDK** (Flash-Lite for rules/summary, Flash for vision/OCR) — orchestrated as staged messages on **Upstash QStash** so each stage gets its own function budget. Per-user/per-team rate-limiting, per-submission idempotency locks, and in-flight pipeline state all live in **Upstash Redis**.
 
 ---
 
@@ -48,28 +50,42 @@ Authentication is **Supabase Auth** (email + password) with **provision-only onb
 +---------------------+      |  proxy.ts (middleware) |      +----------------------+
                              |  Server Actions        |
                              |  Route Handlers        |      +----------------------+
-                             |  after() jobs          +----->|  Vercel Blob         |
-                             |  Vercel Cron entry     |      |  (random-suffix URL) |
+                             |  Vercel Cron entry     +----->|  Vercel Blob         |
+                             |                        |      |  (random-suffix URL) |
                              |                        |      +----------------------+
                              |                        |
                              |                        |      +----------------------+
                              |                        +----->|  Upstash Redis       |
                              |                        |      |  rate limit + lock   |
+                             |                        |      |  + pipeline state    |
                              |                        |      +----------------------+
                              |                        |
                              |                        |      +----------------------+
-                             |                        +----->|  Groq via AI SDK     |
-                             |                        |      |  + Tesseract OCR     |
-                             +------------------------+      +----------------------+
+                             |                        +----->|  Google Gemini       |
+                             |                        |      |  via @ai-sdk/google  |
+                             |                        |      |  (rules+vision)      |
+                             |                        |      +----------------------+
+                             |  ^                     |
+                             |  |                     |
+                             |  |   /api/pipeline/run |      +----------------------+
+                             |  +<-------------------------+ |  Upstash QStash      |
+                             |       (signed webhook)        |  staged retries+DLQ  |
+                             +-------------------------------+----------------------+
                                        ^
                                        |
                             +--------------------+
-                            |  Vercel Cron       |
-                            |  every 15 minutes  |
+                            |  Vercel Cron daily |
+                            |  Upstash gates to  |
+                            |  ~15 min cadence   |
                             |  /api/cron/        |
                             |  mark-missed       |
                             +--------------------+
 ```
+
+The validation pipeline never runs end-to-end inside one function. Instead the
+trigger route enqueues stage 1 to QStash, and each stage publishes the next
+when it finishes. See [PIPELINE_ARCHITECTURE.md](./PIPELINE_ARCHITECTURE.md)
+for the full design.
 
 ### Major source areas
 
@@ -78,10 +94,11 @@ Authentication is **Supabase Auth** (email + password) with **provision-only onb
 | `app/(dashboard)/dashboard/` | All authenticated routes. RSC-first; the route-group layout enforces session and renders top-bar/sidebar/mobile-nav. |
 | `app/auth/` | Login, OAuth callback, signout, error page. |
 | `app/actions/` | Server Actions: `submissions`, `tasks`, `materials`, `announcements`, `users`, `rules`, `profile`. Each validates with Zod, re-checks role with `requireRole`, writes to Supabase, then `revalidatePath`s. |
-| `app/api/` | Route handlers: `/api/download/[id]` (RLS-checked file streaming), `/api/cron/mark-missed` (scheduled job). |
+| `app/api/` | Route handlers: `/api/download/[id]` (RLS-checked file streaming), `/api/cron/mark-missed` (scheduled job), `/api/pipeline/[id]` (trigger), `/api/pipeline/run` (QStash-signed stage handler), `/api/pipeline/failed` (QStash DLQ callback). |
 | `lib/supabase/` | `client.ts` (browser SSR), `server.ts` (RSC + actions), `admin.ts` (service-role; **`server-only`**), `proxy.ts` (middleware session refresh + must-reset gate), `database.types.ts` (loose stub today; see §10 known issues). |
-| `lib/llm/` | `pipeline.ts` (orchestrator), `validate.ts` (Zod-typed Groq calls + retry/backoff). |
-| `lib/parse/` | Format-specific parsers: PDF (`pdf-parse`), DOCX (`mammoth`), PPTX/.doc (`officeparser`), images (Tesseract → Groq Vision fallback). |
+| `lib/llm/` | `pipeline.ts` (staged orchestrator: parse / validate_batch / finalize), `validate.ts` (Zod-typed Gemini calls + per-call timeout + retry/backoff). |
+| `lib/parse/` | Format-specific parsers: PDF (`pdf-parse`), DOCX (`mammoth`), PPTX/.doc (`officeparser`). Images route to Gemini Vision via `lib/llm/validate.ts → describeImage`. |
+| `lib/qstash.ts` | Publish helper + signature receiver. Falls back to inline `after()` when QStash creds are missing (dev). |
 | `lib/data.ts` | All **read** queries used by RSC pages — single source of truth for query shapes. |
 | `lib/auth.ts` | `requireProfile`, `requireRole`, `canManageTeam`, `getCurrentProfile`. |
 | `lib/auth-shared.ts` | `roleLabel` (safe to import from client components — no `server-only` deps). |
@@ -198,9 +215,9 @@ Each row below is a verified path through the codebase as of this audit.
 | Manager creates a task | `/dashboard/tasks` → `TaskComposer` | `app/actions/tasks.ts → createTask` → Zod + `canManageTeam` → insert `tasks` (session client) → bulk insert `task_assignments` (admin client) | `tasks`, `task_assignments`, `activity_log` |
 | Re-assign on an existing task | (no UI yet) | `app/actions/tasks.ts → assignTask` → `assign_task_to_team(p_task_id, p_team_id)` RPC (SECURITY DEFINER) | `task_assignments`, `activity_log` |
 | Member opens a task | `/dashboard/tasks/[id]` | RSC reads via `getTaskById`, `getMyAssignmentForTask`, `listAssignmentsForTask` | none |
-| Member submits to a task | `TaskSubmissionForm` on task detail | `app/actions/submissions.ts → createSubmission` (rate-limit, deadline check, blob upload, insert submission, mirror assignment, queue `after(processSubmission)`) | `submissions`, `task_assignments`, Blob, `activity_log` |
-| AI pipeline runs | (background) | `lib/llm/pipeline.ts → processSubmission` (Redis lock → parse → optional vision fallback → run rules + task brief → write `validation_runs` → update submission + assignment) | `submissions`, `task_assignments`, `validation_runs` |
-| Manager retries a submission | submission detail → `SubmissionActions` | `app/actions/submissions.ts → retrySubmission` resets status to `queued` then `after(processSubmission)` | `submissions`, `activity_log` |
+| Member submits to a task | `TaskSubmissionForm` on task detail | `app/actions/submissions.ts → createSubmission` (rate-limit, deadline check, blob upload, insert submission, mirror assignment, calls `/api/pipeline/[id]` which enqueues stage 1 to QStash) | `submissions`, `task_assignments`, Blob, `activity_log` |
+| AI pipeline runs | (background) | QStash → `/api/pipeline/run` for each stage: `parse` (extract text or vision-OCR) → `validate_batch_N` (rules in parallel) → `finalize` (aggregate + summary + status). Each stage idempotent with Redis-backed state. DLQ to `/api/pipeline/failed`. | `submissions`, `task_assignments`, `validation_runs` |
+| Manager retries a submission | submission detail → `SubmissionActions` | `app/actions/submissions.ts → retrySubmission` clears Redis state, resets status to `queued`, re-enqueues stage 1 | `submissions`, `activity_log` |
 | Manager deletes a submission | submission detail → `SubmissionActions` | `app/actions/submissions.ts → deleteSubmission` deletes row + Blob | `submissions`, Blob, `activity_log` |
 | Download a file | UI link `/api/download/[id]?type=...` | `app/api/download/[id]/route.ts` calls `requireProfile`, fetches row through session client (RLS), streams Blob | none |
 | Mark missed / recover stuck | (cron, every 15 min) | `app/api/cron/mark-missed/route.ts` admin client query | `task_assignments`, `submissions` |
@@ -253,22 +270,43 @@ Every action returns a discriminated `ActionResult` (`{ ok: true, … } | { ok: 
    7. `after(processSubmission(id))` schedules the AI pipeline.
 4. `revalidatePath` for the dashboard, submissions list, the task list, and the specific task detail page.
 
-### 6.4 AI validation pipeline (`lib/llm/pipeline.ts`)
+### 6.4 AI validation pipeline — staged via Upstash QStash
 
-1. **Idempotency.** `redis.set("pipeline:lock:{id}", "1", { nx: true, ex: 600 })` — first writer wins for 10 minutes. Releases in `finally`. Prevents duplicate `after()` invocations and racing retries.
-2. **LLM rate limit.** `llmLimiter` (60 / 1 min per team). If the team is over budget, the submission is parked at `needs_review` with a warning flag instead of failing.
-3. **Parse.** `lib/parse/index.ts → extractText(buf, mime)` dispatches:
-   - PDF → `pdf-parse` (we import the inner `pdf-parse/lib/pdf-parse.js` to skip its eager test-fixture read that crashes serverless).
-   - DOCX → `mammoth.extractRawText`.
-   - PPTX (and best-effort `.doc`) → `officeparser.parseOfficeAsync`.
-   - Images → Tesseract; if confidence is low or the text is sparse, falls back to **Groq Vision** (`describeImage`).
-   - Output is clamped to 60 KB with a `[...truncated...]` marker.
-4. **Vision fallback** triggers when the file is an image AND (text length < 60 OR OCR confidence < 60). The vision result wins only if it's longer than the OCR result.
-5. **Validate.** Pulls all `enabled` `validation_rules` for the team. If the submission is for a task with `instructions`, a **synthetic rule** is appended (id `task:{taskId}`, weight 2, threshold 70). All rules run **in parallel** via `Promise.all`. Each call is wrapped in `withRetry(3, exp-backoff)` against Groq 429/5xx.
-6. **Persist runs.** Synthetic `task:` rules are filtered out before writing `validation_runs` (they don't have a real FK target).
-7. **Aggregate.** Weighted average of rule scores. `passed` requires every rule to pass and no `fail`-severity flag. Any hard fail → `failed`. Otherwise → `needs_review`.
-8. **Late preserves late.** If `submission.is_late` was already `true`, the final status is `late_submitted` regardless of the LLM verdict. The aggregate score, summary, and flags still reflect the AI's judgement and surface in the submission detail page.
-9. **Mirror.** When the submission has a `task_assignment_id`, the assignment is updated to `submitted` / `late_submitted` (never `failed`/`needs_review` on the assignment row — see the asymmetry note in §4).
+The pipeline runs as a chain of independent function invocations, each
+delivered by QStash as a signed webhook. **No single function ever runs
+the whole pipeline.** This is what makes large submissions reliable on the
+Hobby plan's 60s ceiling.
+
+The full design lives in [PIPELINE_ARCHITECTURE.md](./PIPELINE_ARCHITECTURE.md).
+The condensed version:
+
+1. **Trigger** — `createSubmission` (or `retrySubmission`) inserts the row,
+   calls `/api/pipeline/[id]` which calls `enqueueSubmission()` and returns
+   immediately. `enqueueSubmission` publishes `stage=parse` to QStash with
+   an idempotency key of `{submissionId}:parse:0`.
+2. **Stage `parse`** — fetch the blob, extract text (PDF/DOCX/PPTX) or run
+   **Gemini Vision** via `describeImage` (images), clamp to 60 KB,
+   persist to `submissions.extracted_text` + Redis state under
+   `pipeline:state:{submissionId}`. Publish `stage=validate_batch_0`.
+3. **Stage `validate_batch_N`** — load extracted text + rules from Redis,
+   run up to 8 rules in parallel (`LLM_RULE_CONCURRENCY`) against
+   **Gemini Flash-Lite**, with a 20 s per-call abort timeout and at most
+   2 retries (no retry on permanent errors). Insert `validation_runs`
+   for the real rules (synthetic `task:{taskId}` rules are filtered out —
+   they have no FK target). Append outcomes to Redis. Publish next
+   batch or `stage=finalize`.
+4. **Stage `finalize`** — load all per-rule outcomes, compute weighted
+   average, run summary call, decide final status. **Late preserves
+   late:** if `submission.is_late=true` the final status is forced to
+   `late_submitted` regardless of LLM verdict. Mirror the matching
+   `task_assignment` row. Delete Redis state.
+5. **Failure** — if any stage's retries exhaust, QStash POSTs to
+   `/api/pipeline/failed` which marks the submission `failed` with the
+   underlying error preserved. **A submission can never get permanently
+   stuck in a non-terminal state.**
+6. **Rate limit + idempotency** — `llmLimiter` (60/min per team) gates
+   each LLM call; the QStash deduplication header on every publish
+   prevents duplicate stage runs even under retry storms.
 
 ### 6.5 Cron — missed deadlines and stuck-pipeline recovery
 
@@ -277,7 +315,7 @@ Every action returns a discriminated `ActionResult` (`{ ok: true, … } | { ok: 
 The handler is protected by `Authorization: Bearer ${CRON_SECRET}` (see §8). It runs two queries via the admin client:
 
 1. **Mark missed.** `task_assignments.status = 'assigned'` join `tasks` where `due_at < now()` AND `tasks.allow_late = false` → flip to `missed`.
-2. **Recover stuck.** Any `submissions.status IN ('queued','parsing','validating')` whose `updated_at` is older than 30 minutes → flip to `failed` with a `"Validation pipeline timed out. Please retry."` flag. This is the failsafe for `after()` invocations that crashed silently.
+2. **Recover stuck.** Any `submissions.status IN ('queued','parsing','validating')` whose `updated_at` is older than 30 minutes → flip to `failed` with a `"Validation pipeline timed out. Please retry."` flag. This is the **belt-and-suspenders** failsafe — QStash already retries each stage and routes exhausted retries to `/api/pipeline/failed`, so anything reaching the 30-minute threshold means Redis state expired before the next stage fired (very rare).
 
 The endpoint returns `{ ok, missedCount, stuckRecovered, skipped }` so it's easy to verify with curl. Executions are logged in `cron:mark-missed:executions` in Redis for monitoring.
 
@@ -305,10 +343,11 @@ The endpoint returns `{ ok, missedCount, stuckRecovered, skipped }` so it's easy
 | `lib/auth-shared.ts` | `lib/types.ts` | client components (sidebar/top-bar/etc) | no — safe for client |
 | `lib/data.ts` | `lib/supabase/server.ts`, `lib/types.ts` | RSC pages only | no |
 | `lib/activity.ts` | `lib/supabase/admin.ts`, `next/headers` | every action | yes |
-| `lib/redis.ts` | `@upstash/redis`, `@upstash/ratelimit` | `lib/llm/pipeline.ts`, `app/actions/submissions.ts` | yes |
-| `lib/llm/pipeline.ts` | `lib/supabase/admin.ts`, `lib/parse`, `lib/llm/validate.ts`, `lib/redis.ts` | `app/actions/submissions.ts` (via `after()`) | yes |
-| `lib/llm/validate.ts` | `ai`, `@ai-sdk/groq`, `zod` | `lib/llm/pipeline.ts` | yes |
-| `lib/parse/index.ts` | `pdf-parse`, `mammoth`, `officeparser`, `tesseract.js` | `lib/llm/pipeline.ts` | yes |
+| `lib/redis.ts` | `@upstash/redis`, `@upstash/ratelimit` | `lib/llm/pipeline.ts`, `app/actions/submissions.ts`, `lib/qstash.ts` | yes |
+| `lib/qstash.ts` | `@upstash/qstash` | `app/api/pipeline/*`, `lib/llm/pipeline.ts` | yes |
+| `lib/llm/pipeline.ts` | `lib/supabase/admin.ts`, `lib/parse`, `lib/llm/validate.ts`, `lib/redis.ts`, `lib/qstash.ts` | `app/actions/submissions.ts`, `app/api/pipeline/[id]`, `app/api/pipeline/run` | yes |
+| `lib/llm/validate.ts` | `ai`, `@ai-sdk/google`, `zod` | `lib/llm/pipeline.ts` | yes |
+| `lib/parse/index.ts` | `pdf-parse`, `mammoth`, `officeparser` | `lib/llm/pipeline.ts` | yes |
 
 The "yes" rows all start their files with `import "server-only"` so the bundler hard-fails on accidental client imports.
 
@@ -324,13 +363,22 @@ These must be set on Vercel (Production + Preview). Locally they go in `.env.loc
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | client + server | RLS-bound public anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | server only | RLS bypass — keep secret |
 | `BLOB_READ_WRITE_TOKEN` | server only | Vercel Blob (auto-injected on Vercel) |
-| `UPSTASH_REDIS_REST_URL` | server only | rate limit + idempotency |
+| `UPSTASH_REDIS_REST_URL` | server only | rate limit + idempotency + pipeline state |
 | `UPSTASH_REDIS_REST_TOKEN` | server only | as above |
-| `GROQ_API_KEY` | server only | used by the AI SDK Groq provider |
-| `GROQ_VALIDATION_MODEL` | optional | defaults to `llama-3.3-70b-versatile` |
-| `GROQ_SUMMARY_MODEL` | optional | defaults to `llama-3.3-70b-versatile` |
-| `GROQ_VISION_MODEL` | optional | defaults to `llama-3.2-90b-vision-preview` |
+| `QSTASH_TOKEN` | server only | publishes pipeline stage messages |
+| `QSTASH_CURRENT_SIGNING_KEY` | server only | verifies inbound `/api/pipeline/run` webhooks |
+| `QSTASH_NEXT_SIGNING_KEY` | server only | webhook verification during key rotation |
+| `APP_URL` | server only | base URL QStash delivers webhooks to (falls back to `https://${VERCEL_URL}` on previews) |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | server only | read by `@ai-sdk/google` automatically |
+| `GEMINI_VALIDATION_MODEL` | optional | defaults to `gemini-flash-lite-latest` |
+| `GEMINI_SUMMARY_MODEL` | optional | defaults to `gemini-flash-lite-latest` |
+| `GEMINI_VISION_MODEL` | optional | defaults to `gemini-flash-latest` |
+| `LLM_CALL_TIMEOUT_MS` | optional | per-call abort timeout, default 20000 |
+| `LLM_RULE_CONCURRENCY` | optional | parallel rules per batch, default 8 |
+| `PIPELINE_BUDGET_MS` | optional | function-level abort budget, default 50000 |
 | `CRON_SECRET` | server only | shared secret for the cron endpoint — see below |
+
+In dev, omitting `QSTASH_*` is fine — `lib/qstash.ts` falls back to inline `after()` execution. **In production all four QStash variables (`QSTASH_TOKEN`, both signing keys, and `APP_URL`) must be set** or the pipeline downgrades to a single function and can hit the 60 s wall-clock ceiling.
 
 ### About `CRON_SECRET` and `UPSTASH_REDIS_*`
 
@@ -392,8 +440,9 @@ If you only want the latest changes on top of an existing database, **running 00
 - Three-role RBAC (main_admin / manager / member) enforced at RLS + middleware + server actions
 - **Tasks system end-to-end:** create, single/bulk assign, member submission, late-with-reason, missed via cron, manager assignment table on the task detail page
 - Submissions: upload, AI validation, retry, delete
-- Native parsers for PDF / DOCX / PPTX / images, with OCR + Vision fallback
-- LLM pipeline with idempotency lock, retry/backoff, structured output via Zod, weighted aggregate
+- Native parsers for PDF / DOCX / PPTX; Gemini Vision for images
+- **Staged AI pipeline on Upstash QStash:** `parse → validate_batch_N → finalize`, each its own function with retry + DLQ. Replaced the previous Groq-in-after() pipeline. See [PIPELINE_ARCHITECTURE.md](./PIPELINE_ARCHITECTURE.md).
+- LLM pipeline with idempotency lock, per-call timeout + bounded retry, structured output via Zod, weighted aggregate
 - Per-team validation rules CRUD with `{{TEXT}}` placeholder substitution
 - Announcements + materials (team-scoped, `expires_at` filtering for announcements)
 - Activity log (append-only audit trail; explicit RLS deny on client writes)
@@ -418,7 +467,7 @@ If you only want the latest changes on top of an existing database, **running 00
 - **Sentry integration** — server + client (Sentry MCP is available).
 - **Generate full database types** from the Supabase CLI to replace the loose `Database = any` shim in `lib/supabase/database.types.ts`.
 - **Pagination UX on submissions table** — cursor pagination is implemented in `lib/data.ts → listSubmissions`, but the list page does not yet wire it through `searchParams`.
-- **Tests** — Playwright happy-paths + unit tests for the AI pipeline with a mocked Groq provider.
+- **Tests** — Playwright happy-paths + unit tests for the AI pipeline with a mocked Gemini provider and a fake QStash receiver.
 
 ### Known small mismatches surfaced by this audit
 

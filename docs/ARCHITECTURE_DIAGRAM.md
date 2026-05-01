@@ -15,6 +15,39 @@
 │ └─ ProvisionUserForm (user provisioning)                    │
 └───────────────────────────────────────────────────────────────┘
 
+┌─ AI VALIDATION PIPELINE (Upstash QStash + Google Gemini) ─────┐
+│                                                                │
+│ 1) Member submits a file                                       │
+│    └─> createSubmission()  inserts row, status = queued        │
+│                                                                │
+│ 2) /api/pipeline/[id]  enqueues stage 1 to QStash              │
+│                                                                │
+│ 3) QStash → /api/pipeline/run  (signed webhook)                │
+│                                                                │
+│    stage = parse                                               │
+│      ├─ extract text (PDF/DOCX/PPTX) or call Gemini Vision    │
+│      ├─ persist to submissions.extracted_text + Redis state   │
+│      └─ publish stage = validate_batch_0                      │
+│                                                                │
+│    stage = validate_batch_N    (8 rules in parallel)          │
+│      ├─ run rules against Gemini Flash-Lite (Zod-typed)        │
+│      ├─ insert validation_runs                                 │
+│      └─ publish next batch OR stage = finalize                 │
+│                                                                │
+│    stage = finalize                                            │
+│      ├─ aggregate weighted score                               │
+│      ├─ run summary call                                       │
+│      ├─ write final status (passed | needs_review | failed |   │
+│      │   late_submitted)                                       │
+│      └─ delete Redis state                                     │
+│                                                                │
+│ 4) On exhausted retries: QStash → /api/pipeline/failed        │
+│      └─ mark submission failed with the underlying error       │
+│                                                                │
+│ 5) Belt-and-suspenders: cron rescue any submission stuck in    │
+│    a non-terminal state for 30+ minutes.                       │
+└───────────────────────────────────────────────────────────────┘
+
 ┌─ MANAGER TASK CREATION ────────────────────────────────────────┐
 │ /dashboard/tasks                                              │
 │ ├─ TaskComposer (create task form)                          │
@@ -153,7 +186,8 @@
 │ 2. For each rule_id:      │
 │    ├─ Load rule config    │
 │    ├─ Get prompt template │
-│    └─ Send to Groq LLM    │
+│    └─ Send to Gemini      │
+│       (via QStash stage)  │
 │ 3. Collect results        │
 │ 4. Log validation_runs    │
 │ 5. Update submission:     │

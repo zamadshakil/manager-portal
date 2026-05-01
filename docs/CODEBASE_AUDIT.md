@@ -1,7 +1,18 @@
 # Hierarchia Manager Portal — Comprehensive Codebase Audit
 **Date:** April 30, 2026  
 **Audit Scope:** Full codebase review with emphasis on PROJECT_STATUS.md accuracy, code quality, and architectural coherence  
-**Audit Status:** ✅ Complete
+**Audit Status:** ✅ Complete — preserved as a historical snapshot.
+
+> **NOTE — partly superseded (May 2026):** This audit was written when the AI
+> pipeline ran on Groq inside Next.js `after()` and used Tesseract.js for
+> image OCR. The pipeline has since been re-platformed onto **Google Gemini**
+> for the LLM and **Upstash QStash** for staged orchestration, with vision-only
+> image handling. References below to "Groq", "Tesseract", or "after()" should
+> be read as historical context. For the current pipeline architecture, see
+> [PIPELINE_ARCHITECTURE.md](./PIPELINE_ARCHITECTURE.md) and the updated
+> [PROJECT_STATUS.md](./PROJECT_STATUS.md). Sections of this audit that are
+> *not* about the pipeline (security posture, RLS, role enforcement, RSC
+> patterns, server-only guards, etc.) remain accurate.
 
 ---
 
