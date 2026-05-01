@@ -58,29 +58,13 @@ async function parsePptx(buf: Buffer): Promise<ParseResult> {
   return { text: clamped.text, truncated: clamped.truncated }
 }
 
-async function parseImage(buf: Buffer, mimeType: string): Promise<ParseResult> {
-  const { createWorker } = await import("tesseract.js")
-  const worker = await createWorker("eng")
-  try {
-    const { data } = await worker.recognize(buf)
-    const raw = data.text || ""
-    const clamped = clamp(raw)
-    const confidence = typeof data.confidence === "number" ? data.confidence : 0
-    return {
-      text: clamped.text,
-      truncated: clamped.truncated,
-      fromOcr: true,
-      ocrConfidence: confidence,
-      warning:
-        raw.trim().length < 20
-          ? `OCR extracted little text from ${mimeType}; confidence ${confidence.toFixed(0)}.`
-          : undefined,
-    }
-  } finally {
-    await worker.terminate()
-  }
-}
-
+/**
+ * Native parsers only. Images are NOT handled here — the pipeline routes
+ * image MIME types to Gemini Vision (`describeImage` in lib/llm/validate.ts)
+ * directly, which is faster and more accurate than Tesseract.js in
+ * serverless environments. Calling extractText with an image MIME type
+ * therefore returns an explicit error so a misuse fails loudly.
+ */
 export async function extractText(buf: Buffer, mimeType: string): Promise<ParseResult> {
   switch (mimeType) {
     case "application/pdf":
@@ -95,7 +79,9 @@ export async function extractText(buf: Buffer, mimeType: string): Promise<ParseR
       return parsePptx(buf)
     case "image/png":
     case "image/jpeg":
-      return parseImage(buf, mimeType)
+      throw new Error(
+        "extractText() does not handle images. Use describeImage() (Gemini Vision) for image MIME types.",
+      )
     default:
       return { text: "", warning: `Unsupported MIME type: ${mimeType}`, truncated: false }
   }

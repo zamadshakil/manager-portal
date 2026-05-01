@@ -1,15 +1,17 @@
 import { NextResponse, after } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { processSubmission } from "@/lib/llm/pipeline"
+import { enqueueSubmission } from "@/lib/llm/pipeline"
 
 /**
- * Vercel Hobby plan allows up to 60s per serverless function. This route
- * owns the full AI pipeline lifecycle — parsing, LLM validation, scoring —
- * completely decoupled from the upload Server Action so the upload stays
- * fast (~2s) and the pipeline gets a dedicated 60s budget.
+ * Trigger endpoint for the AI validation pipeline. We enqueue the first
+ * stage to QStash (or fall back to inline execution in dev) and return
+ * immediately so the client can begin polling for status updates.
+ *
+ * The actual pipeline work runs in `/api/pipeline/run` — one function
+ * invocation per stage, each with its own 60s budget.
  */
-export const maxDuration = 60
+export const maxDuration = 30
 
 /**
  * POST /api/pipeline/[id]
@@ -74,14 +76,15 @@ export async function POST(
     })
   }
 
-  // Run the pipeline asynchronously in this function's 60s budget.
-  // Using after() ensures that if the client disconnects or aborts the
-  // fetch request, Vercel will not terminate the pipeline mid-flight.
+  // Enqueue the first pipeline stage. With QStash configured this returns
+  // in ~50ms; without it we fall back to inline `after()` execution.
+  // We still wrap in after() so the HTTP response goes out immediately
+  // even if QStash publish takes a moment.
   after(async () => {
     try {
-      await processSubmission(submissionId)
+      await enqueueSubmission(submissionId)
     } catch (err) {
-      console.error("[pipeline-route] pipeline error", submissionId, err)
+      console.error("[pipeline-route] enqueue error", submissionId, err)
     }
   })
 
