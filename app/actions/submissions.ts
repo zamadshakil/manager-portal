@@ -1,6 +1,5 @@
 "use server"
 
-import { after } from "next/server"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { put, del } from "@vercel/blob"
@@ -9,7 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { requireProfile } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
 import { uploadLimiter } from "@/lib/redis"
-import { processSubmission } from "@/lib/llm/pipeline"
+import { clearPipelineLock } from "@/lib/llm/pipeline"
 import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
 
 const UploadSchema = z.object({
@@ -27,7 +26,11 @@ export interface ActionResult {
 /**
  * Create a submission. Optionally tied to a task: if a `taskId` is supplied,
  * we look up the assignment row, enforce deadline rules, and persist late
- * metadata. The async pipeline runs after the response is sent.
+ * metadata.
+ *
+ * The AI validation pipeline is NOT triggered here — it runs in a separate
+ * API route (`/api/pipeline/[id]`) with its own 60s timeout budget. The
+ * client fires the pipeline POST after receiving the submissionId.
  */
 export async function createSubmission(formData: FormData): Promise<ActionResult> {
   const profile = await requireProfile()
@@ -190,21 +193,15 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
     },
   })
 
-  // Run the parsing + LLM validation pipeline AFTER the response is sent.
-  after(async () => {
-    try {
-      await processSubmission(data.id)
-    } catch (err) {
-      console.error("[submissions] pipeline error", err)
-    }
-  })
-
   revalidatePath("/dashboard")
   revalidatePath("/dashboard/submissions")
   if (taskId) {
     revalidatePath("/dashboard/tasks")
     revalidatePath(`/dashboard/tasks/${taskId}`)
   }
+
+  // Return the submissionId so the client can trigger the pipeline via
+  // POST /api/pipeline/[id] and poll for status updates.
   return { ok: true, submissionId: data.id }
 }
 
@@ -236,6 +233,9 @@ export async function retrySubmission(formData: FormData): Promise<ActionResult>
     .update({ status: "queued", flags: [], score: null, summary: null })
     .eq("id", parsed.data.id)
 
+  // Clear any stale pipeline lock so the retry isn't silently blocked.
+  await clearPipelineLock(parsed.data.id)
+
   await logActivity({
     actorId: profile.id,
     teamId: data.team_id,
@@ -244,16 +244,11 @@ export async function retrySubmission(formData: FormData): Promise<ActionResult>
     entityId: data.id,
   })
 
-  after(async () => {
-    try {
-      await processSubmission(data.id)
-    } catch (err) {
-      console.error("[submissions] retry pipeline error", err)
-    }
-  })
-
   revalidatePath("/dashboard/submissions")
   revalidatePath(`/dashboard/submissions/${data.id}`)
+
+  // Return submissionId so the client can trigger the pipeline via
+  // POST /api/pipeline/[id] independently.
   return { ok: true, submissionId: data.id }
 }
 

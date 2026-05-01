@@ -2,13 +2,14 @@
 
 import { useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { CloudUpload, FileType2, Loader2, AlertTriangle } from "lucide-react"
+import { CloudUpload, FileType2, Loader2, AlertTriangle, CheckCircle2, XCircle, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { createSubmission } from "@/app/actions/submissions"
+import { usePipeline } from "@/hooks/use-pipeline"
 
 const ACCEPTED_EXT = [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg"]
 
@@ -25,6 +26,9 @@ interface TaskSubmissionFormProps {
  * deadline has passed live, hides the late-reason field until needed, and
  * blocks submission entirely when `allow_late` is false on an overdue task —
  * matching the server-side enforcement in `createSubmission`.
+ *
+ * After upload, triggers the AI pipeline via POST /api/pipeline/[id] and
+ * shows live progress (queued → parsing → validating → passed/failed).
  */
 export function TaskSubmissionForm({
   taskId,
@@ -41,6 +45,9 @@ export function TaskSubmissionForm({
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
   const [dragOver, setDragOver] = useState(false)
+  const [uploaded, setUploaded] = useState(false)
+
+  const pipeline = usePipeline({ refreshOnComplete: true })
 
   const due = dueAt ? new Date(dueAt) : null
   const overdue = due ? due.getTime() < Date.now() : false
@@ -82,8 +89,17 @@ export function TaskSubmissionForm({
         setError(res.error ?? "Submission failed.")
         return
       }
-      router.refresh()
+      // Upload succeeded — trigger the AI pipeline and start polling.
+      setUploaded(true)
+      if (res.submissionId) {
+        pipeline.trigger(res.submissionId)
+      }
     })
+  }
+
+  // Show pipeline progress after upload.
+  if (uploaded && pipeline.status !== "idle") {
+    return <PipelineProgress status={pipeline.status} score={pipeline.score} />
   }
 
   return (
@@ -198,7 +214,7 @@ export function TaskSubmissionForm({
           {pending ? (
             <>
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              Submitting…
+              Uploading…
             </>
           ) : overdue ? (
             "Submit late"
@@ -208,5 +224,107 @@ export function TaskSubmissionForm({
         </Button>
       </div>
     </form>
+  )
+}
+
+// ── Pipeline Progress Component ────────────────────────────────────────────
+const STATUS_CONFIG = {
+  queued: {
+    icon: Clock,
+    label: "Queued",
+    detail: "Your file is uploaded. AI validation is starting…",
+    color: "text-muted-foreground",
+    bg: "bg-muted/50",
+    animate: true,
+  },
+  parsing: {
+    icon: Loader2,
+    label: "Parsing document",
+    detail: "Extracting text from your document…",
+    color: "text-blue-600",
+    bg: "bg-blue-50",
+    animate: true,
+  },
+  validating: {
+    icon: Loader2,
+    label: "AI validation in progress",
+    detail: "Running validation rules against your document…",
+    color: "text-primary",
+    bg: "bg-[#f2f9ff]",
+    animate: true,
+  },
+  passed: {
+    icon: CheckCircle2,
+    label: "Passed",
+    detail: "Your submission passed all validation rules.",
+    color: "text-green-600",
+    bg: "bg-green-50",
+    animate: false,
+  },
+  failed: {
+    icon: XCircle,
+    label: "Needs attention",
+    detail: "Some validation checks did not pass. Review the details below.",
+    color: "text-destructive",
+    bg: "bg-destructive/5",
+    animate: false,
+  },
+  needs_review: {
+    icon: AlertTriangle,
+    label: "Pending review",
+    detail: "Your submission needs manual review from your manager.",
+    color: "text-amber-600",
+    bg: "bg-amber-50",
+    animate: false,
+  },
+  late_submitted: {
+    icon: CheckCircle2,
+    label: "Submitted (late)",
+    detail: "Your late submission has been processed.",
+    color: "text-amber-600",
+    bg: "bg-amber-50",
+    animate: false,
+  },
+} as const
+
+function PipelineProgress({
+  status,
+  score,
+}: {
+  status: string
+  score: number | null
+}) {
+  const config = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.queued
+  const Icon = config.icon
+
+  return (
+    <div className={cn("rounded-xl border border-border p-5", config.bg)}>
+      <div className="flex items-start gap-3">
+        <span className={cn("mt-0.5", config.color)}>
+          <Icon
+            className={cn("h-5 w-5", config.animate && "animate-spin")}
+            aria-hidden="true"
+          />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className={cn("text-[14px] font-semibold", config.color)}>
+            {config.label}
+          </p>
+          <p className="mt-1 text-[12.5px] text-muted-foreground">
+            {config.detail}
+          </p>
+          {score !== null && (
+            <p className="mt-2 text-[13px] font-semibold">
+              Score: {score}/100
+            </p>
+          )}
+          {config.animate && (
+            <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-border/50">
+              <div className="h-full w-1/3 animate-pulse rounded-full bg-primary/60" />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }

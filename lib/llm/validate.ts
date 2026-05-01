@@ -210,5 +210,13 @@ export async function describeImage(
       ],
     }),
   )
-  return { text: rawText.trim(), notes: undefined }
+  // Strip markdown artifacts the model sometimes wraps around plain text.
+  const cleaned = rawText
+    .replace(/^```[\s\S]*?\n/gm, "")
+    .replace(/```\s*$/gm, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .trim()
+  return { text: cleaned, notes: undefined }
 }
