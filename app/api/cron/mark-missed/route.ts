@@ -64,7 +64,10 @@ export async function GET(request: Request) {
     }
 
     // 2. Auto-fail stuck submissions (pipeline crash recovery).
-    const stuckCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+    // The pipeline's hard ceiling is ~60s on Hobby, so any submission that's
+    // been in a non-terminal state for longer than 5 minutes is definitely
+    // abandoned (function killed, redis lock expired, etc.) — recover it.
+    const stuckCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString()
     const { data: stuck } = await admin
       .from("submissions")
       .update({
