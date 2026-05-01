@@ -296,8 +296,8 @@ dashboard/tasks/page.tsx (Server Component)
 │  ├─ Can see ONLY their assigned tasks                     │
 │  ├─ Can submit ONLY assigned tasks                        │
 │  └─ Cannot see team management                            │
-│      └─ 403 if URL directly accessed                       │
-│                                                              │
+│      └─ 403 if URL directly accessed                        │
+│                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
