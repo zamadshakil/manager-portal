@@ -1,25 +1,27 @@
 import "server-only"
 import { generateObject, generateText } from "ai"
-import { google } from "@ai-sdk/google"
+import { createOpenAI } from "@ai-sdk/openai"
 import { z } from "zod"
 import type { ValidationRule } from "@/lib/types"
 
 // ── Model configuration ────────────────────────────────────────────────────
-// Use Gemini stable aliases by default. The `*-latest` aliases auto-roll to
-// the newest stable Flash variant and have predictable rate limits — unlike
-// `*-preview` models which can be deprecated or rate-limited harder.
-//
-// Override via env vars for A/B testing or model upgrades.
-//   GEMINI_VALIDATION_MODEL — used by `runRule`
-//   GEMINI_SUMMARY_MODEL    — used by `summarize`
-//   GEMINI_VISION_MODEL     — used by `describeImage` (must support vision)
-const MODEL = process.env.GEMINI_VALIDATION_MODEL || "gemini-flash-lite-latest"
-const SUMMARY_MODEL = process.env.GEMINI_SUMMARY_MODEL || "gemini-flash-lite-latest"
-const VISION_MODEL = process.env.GEMINI_VISION_MODEL || "gemini-flash-latest"
+// Configure DigitalOcean AI Inference using the OpenAI-compatible endpoint.
+// Requires DO_AI_API_KEY in your environment variables.
+const doai = createOpenAI({
+  baseURL: process.env.DO_AI_BASE_URL || "https://inference.do-ai.run/v1",
+  apiKey: process.env.DO_AI_API_KEY,
+});
 
-// Per-LLM-call hard timeout. Any single Gemini request that exceeds this is
-// aborted so it cannot monopolise the function's 60s budget.
-const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS ?? 20_000)
+// Override via env vars for A/B testing or model upgrades.
+// DeepSeek V3 (deepseek-3.2) is currently one of the highest-quality open models.
+const MODEL = process.env.DO_VALIDATION_MODEL || "deepseek-3.2"
+const SUMMARY_MODEL = process.env.DO_SUMMARY_MODEL || "deepseek-3.2"
+const VISION_MODEL = process.env.DO_VISION_MODEL || "nemotron-nano-12b-v2-vl"
+
+// Per-LLM-call hard timeout. With Inngest, each step runs in its own
+// serverless invocation, so we no longer need to squeeze into a shared 60s
+// budget. 60s per individual LLM call is generous but safe.
+const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS ?? 60_000)
 
 // Bumped whenever the system prompt or schema changes so we can compare
 // historical runs in `validation_runs.prompt_version`.
@@ -165,12 +167,13 @@ export async function runRule(
     withTimeout(
       (signal) =>
         generateObject({
-          model: google(MODEL),
+          model: doai.chat(MODEL),
+          mode: "json",
           temperature: 0,
           schema: RuleResultSchema,
           system: [
             "You are a strict but fair document validator.",
-            "Return ONLY structured JSON matching the schema.",
+            "Return ONLY a raw structured JSON object matching the schema. DO NOT wrap the output in ```json markdown blocks.",
             "Score is 0-100 where 100 is fully compliant.",
             `Pass=true only if score >= ${rule.threshold}.`,
             "CRITICAL RULES:",
@@ -228,11 +231,12 @@ export async function summarize(
     withTimeout(
       (signal) =>
         generateObject({
-          model: google(SUMMARY_MODEL),
+          model: doai.chat(SUMMARY_MODEL),
+          mode: "json",
           temperature: 0,
           schema: SummarySchema,
           system: [
-            "You generate concise executive summaries of business documents. Return JSON only matching the schema.",
+            "You generate concise executive summaries of business documents. Return ONLY a raw JSON object matching the schema. DO NOT wrap the output in ```json markdown blocks.",
             "Only describe what is actually in the document. Do NOT invent or assume content that is not present.",
             "For predictive_flags, only flag genuine risks that are directly supported by the document content.",
           ].join(" "),
@@ -263,7 +267,7 @@ export async function describeImage(
     withTimeout(
       (signal) =>
         generateText({
-          model: google(VISION_MODEL),
+          model: doai.chat(VISION_MODEL),
           temperature: 0,
           system:
             "You are a vision OCR assistant. Transcribe ALL readable text from the image exactly as it appears. Preserve line breaks and formatting. If there are diagrams, tables, or signatures, describe them briefly after the transcribed text. Output plain text only, no JSON wrapping.",

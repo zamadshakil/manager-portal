@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
-const PUBLIC_PATHS = ["/auth", "/_next", "/favicon", "/api/auth"]
+const PUBLIC_PATHS = ["/auth", "/_next", "/favicon", "/api/auth", "/api/inngest"]
 
 /**
  * Edge proxy run for every (non-static) request. Two responsibilities:

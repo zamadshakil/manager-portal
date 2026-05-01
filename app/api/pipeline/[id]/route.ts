@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { processSubmission } from "@/lib/llm/pipeline"
+import { inngest } from "@/lib/inngest/client"
 
 /**
  * Vercel Hobby plan allows up to 60s per serverless function. This route
@@ -74,15 +74,12 @@ export async function POST(
     })
   }
 
-  // Run the pipeline asynchronously in this function's 60s budget.
-  // Using after() ensures that if the client disconnects or aborts the
-  // fetch request, Vercel will not terminate the pipeline mid-flight.
-  after(async () => {
-    try {
-      await processSubmission(submissionId)
-    } catch (err) {
-      console.error("[pipeline-route] pipeline error", submissionId, err)
-    }
+  // Trigger the background job via Inngest.
+  // This bypasses the Vercel 60s timeout entirely because Inngest orchestrates
+  // the execution across multiple serverless invocations and handles retries.
+  await inngest.send({
+    name: "app/submission.process",
+    data: { submissionId },
   })
 
   // Return immediately so the client can begin polling.
