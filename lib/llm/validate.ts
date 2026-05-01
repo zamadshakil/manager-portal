@@ -16,7 +16,7 @@ const doai = createOpenAI({
 // DeepSeek V3 (deepseek-3.2) is currently one of the highest-quality open models.
 const MODEL = process.env.DO_VALIDATION_MODEL || "deepseek-3.2"
 const SUMMARY_MODEL = process.env.DO_SUMMARY_MODEL || "deepseek-3.2"
-const VISION_MODEL = process.env.DO_VISION_MODEL || "openai-gpt-4o-mini"
+const VISION_MODEL = process.env.DO_VISION_MODEL || "nemotron-nano-12b-v2-vl"
 
 // Per-LLM-call hard timeout. With Inngest, each step runs in its own
 // serverless invocation, so we no longer need to squeeze into a shared 60s
