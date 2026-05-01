@@ -4,7 +4,7 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { ShieldCheck, Trash2, Edit3, Loader2, Plus } from "lucide-react"
 import { upsertRule, deleteRule } from "@/app/actions/rules"
-import type { ValidationRule } from "@/lib/types"
+import type { ValidationRule, Profile, Team } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {
   AlertDialog,
@@ -20,9 +20,11 @@ import {
 
 interface Props {
   rules: ValidationRule[]
+  teams?: Team[]
+  profile?: Profile
 }
 
-export function RulesEditor({ rules }: Props) {
+export function RulesEditor({ rules, teams, profile }: Props) {
   const router = useRouter()
   const [editing, setEditing] = useState<ValidationRule | null>(null)
   const [creating, setCreating] = useState(false)
@@ -92,6 +94,24 @@ export function RulesEditor({ rules }: Props) {
 
       {creating || editing ? (
         <form onSubmit={onSubmit} className="border-b border-border bg-warm-white p-4 lg:p-5 space-y-3">
+          {profile?.role === "main_admin" && teams && teams.length > 0 && (
+            <label className="block mb-3">
+              <span className="text-[12px] font-semibold text-muted-foreground">Target Team</span>
+              <select
+                name="team_id"
+                required
+                defaultValue={editing?.team_id ?? ""}
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="" disabled>Select a team...</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
               <span className="text-[12px] font-semibold text-muted-foreground">Rule name</span>
