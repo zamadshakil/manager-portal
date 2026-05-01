@@ -1,95 +1,187 @@
 import "server-only"
+import { after } from "next/server"
+import { randomUUID } from "node:crypto"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { extractText } from "@/lib/parse"
-import { runRule, summarize, describeImage, PROMPT_VERSION } from "@/lib/llm/validate"
+import { runRule, summarize, describeImage, PROMPT_VERSION, type RunRuleOutput } from "@/lib/llm/validate"
 import { llmLimiter, getRedis } from "@/lib/redis"
+import { publishStage, isQStashConfigured } from "@/lib/qstash"
 import type { Submission, SubmissionFlag, ValidationRule, Task } from "@/lib/types"
 
-/**
- * Max rules to evaluate concurrently per submission. Tuned for the Gemini
- * free/Flash-Lite tier — going higher trades token throughput for an
- * avalanche of 429s. Override via env if a paid tier is in use.
- */
-const RULE_CONCURRENCY = Number(process.env.LLM_RULE_CONCURRENCY ?? 4)
+// ── Tunables ────────────────────────────────────────────────────────────────
 
-/**
- * Max characters to persist in `submissions.extracted_text`. The full text can
- * be 60k chars; storing all of it for every submission bloats the DB. We keep
- * a generous preview for manager debugging and feed the full text only to the
- * LLM during the pipeline run.
- */
+/** Concurrent rules per batch. With Gemini Flash-Lite we comfortably handle
+ *  8 simultaneous calls; a paid tier can go higher. Override via env. */
+const RULE_CONCURRENCY = Number(process.env.LLM_RULE_CONCURRENCY ?? 8)
+
+/** Rules per QStash-chained batch. With concurrency=8 and ~10s per call,
+ *  one batch of 8 completes in a single round and ~15s wall-clock — well
+ *  inside the 60s Hobby ceiling with budget for state I/O and enqueue. */
+const RULES_BATCH_SIZE = Number(process.env.LLM_RULES_BATCH_SIZE ?? 8)
+
+/** Per-stage soft deadline. Each stage runs in its OWN function invocation
+ *  with its own 60s budget — so this is for a single stage, not the whole
+ *  pipeline. We leave a buffer to write the final state. */
+const STAGE_BUDGET_MS = Number(process.env.PIPELINE_STAGE_BUDGET_MS ?? 50_000)
+
+/** Preview length stored in `submissions.extracted_text`. The full text is
+ *  kept in Redis state during the pipeline run; this column is for manager
+ *  debugging in the dashboard. */
 const EXTRACTED_TEXT_PREVIEW_CHARS = 2_000
 
-/**
- * Soft pipeline deadline. Vercel Hobby caps function duration at 60s; we
- * leave a 10s buffer so the pipeline can always write its final status to
- * Supabase before the platform kills the function. Override via env when
- * running on a longer-budget plan.
- */
-const PIPELINE_BUDGET_MS = Number(process.env.PIPELINE_BUDGET_MS ?? 50_000)
+/** TTL for the Redis pipeline-state object. Generous so a temporarily-stuck
+ *  submission can resume up to 1h later, but bounded so abandoned state
+ *  doesn't accumulate. */
+const STATE_TTL_SECONDS = 60 * 60
 
-// ---------------------------------------------------------------------------
-// Inline concurrency limiter (replaces p-limit to avoid ESM-only dep issues).
-// ---------------------------------------------------------------------------
+// ── Pipeline state (Redis-backed across stage chain) ────────────────────────
+
+interface PipelineState {
+  /**
+   * Fresh nonce per pipeline attempt. Stages compare this to the attemptId
+   * in their incoming QStash message — if they don't match, a newer attempt
+   * has superseded this one and the stage exits cleanly without writing.
+   */
+  attemptId: string
+  text: string
+  truncated: boolean
+  task: Task | null
+  rules: ValidationRule[]
+  results: RunRuleOutput[]
+  skipped: number
+  startedAt: number
+  /** Submission timing telemetry, accumulated across stages. */
+  timing: Record<string, unknown>
+}
+
+function stateKey(id: string) {
+  return `pipeline:state:${id}`
+}
+
+async function saveState(id: string, state: PipelineState): Promise<void> {
+  const redis = getRedis()
+  await redis.set(stateKey(id), JSON.stringify(state), { ex: STATE_TTL_SECONDS })
+}
+
+async function loadState(id: string): Promise<PipelineState | null> {
+  const redis = getRedis()
+  const raw = await redis.get<string | PipelineState>(stateKey(id))
+  if (!raw) return null
+  // Upstash auto-deserializes JSON in some clients, leaves string in others.
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw) as PipelineState
+    } catch {
+      return null
+    }
+  }
+  return raw as PipelineState
+}
+
+async function clearState(id: string): Promise<void> {
+  try {
+    const redis = getRedis()
+    await redis.del(stateKey(id))
+  } catch {
+    /* TTL will clean up */
+  }
+}
+
+/** Exported so retry/delete actions can clear stale state alongside the lock. */
+export async function clearPipelineLock(submissionId: string): Promise<void> {
+  try {
+    const redis = getRedis()
+    await Promise.all([
+      redis.del(`pipeline:lock:${submissionId}`),
+      redis.del(stateKey(submissionId)),
+    ])
+  } catch {
+    /* Redis unavailable — entries will expire via TTL */
+  }
+}
+
+// ── Inline concurrency limiter (avoids p-limit ESM issues) ──────────────────
+
 function pLimit(concurrency: number) {
   let active = 0
   const queue: (() => void)[] = []
-
   function next() {
     if (queue.length > 0 && active < concurrency) {
       active++
       queue.shift()!()
     }
   }
-
   return <T>(fn: () => Promise<T>): Promise<T> =>
     new Promise<T>((resolve, reject) => {
-      const run = () => {
+      const run = () =>
         fn()
           .then(resolve, reject)
           .finally(() => {
             active--
             next()
           })
-      }
       queue.push(run)
       next()
     })
 }
 
-/**
- * Delete the Redis idempotency lock for a submission. Exported so
- * `retrySubmission` can clear a stale lock before re-running the pipeline.
- */
-export async function clearPipelineLock(submissionId: string) {
-  try {
-    const redis = getRedis()
-    await redis.del(`pipeline:lock:${submissionId}`)
-  } catch {
-    // Redis unavailable — lock will expire via TTL.
-  }
-}
+// ── Stage transition helper ─────────────────────────────────────────────────
 
 /**
- * End-to-end async validation pipeline. Called from the `/api/pipeline/[id]`
- * route via `after()` so the user sees an instant "queued" response while we:
- *   1. fetch the file from Vercel Blob
- *   2. extract plain text via the right parser for the MIME type
- *   3. (images) use Gemini vision; OCR is NOT used as a fallback in
- *      serverless because Tesseract's WASM cold-start is too slow
- *   4. run every enabled validation_rule for the team — plus the parent
- *      task's `instructions` if this submission is for a task — in parallel
- *   5. compute a weighted score, summary, and predictive flags
- *   6. write validation_runs and update the submission row
+ * Transition to the next stage. In production with QStash configured, this
+ * publishes a message and returns immediately — the next stage runs in a
+ * fresh function invocation with a fresh 60s budget. Without QStash (local
+ * dev or emergency fallback), we run the next stage inline in the same
+ * process via `after()` to keep the pipeline functional but bounded by the
+ * current function's budget.
  *
- * Idempotency: a Redis SETNX lock prevents double-runs (e.g. a duplicate
- * `after()` invocation, manual retry collisions, or cron rescues).
- *
- * Failure safety: any unhandled error in `runPipeline` is caught here and
- * the submission is forced into a terminal state ("failed") so the row
- * never lingers in "validating".
+ * `attemptId` is the per-attempt nonce — it makes the QStash dedup ID
+ * unique across retries (otherwise QStash would silently drop the second
+ * publish of `${submissionId}:parse` and the user would see "stuck in
+ * queued" forever after clicking Re-run validation).
  */
-export async function processSubmission(submissionId: string) {
+async function transitionTo(
+  submissionId: string,
+  stage: string,
+  attemptId: string,
+): Promise<void> {
+  if (isQStashConfigured()) {
+    await publishStage({ submissionId, stage, attemptId })
+    return
+  }
+  // Fallback: same-process execution. Will share the current function budget.
+  console.warn(
+    "[pipeline] QStash not configured — running",
+    stage,
+    "inline. Configure QSTASH_TOKEN for production-grade staged execution.",
+  )
+  after(async () => {
+    try {
+      await runStage(submissionId, stage, attemptId)
+    } catch (err) {
+      console.error("[pipeline] inline stage failed", stage, err)
+    }
+  })
+}
+
+// ── Public entry: kick off a pipeline run ───────────────────────────────────
+
+/**
+ * Enqueue the pipeline for a submission. Generates a fresh `attemptId`
+ * nonce so this run is decoupled from any previous attempt — QStash dedup
+ * IDs are scoped to `${submissionId}:${attemptId}:${stage}` so retries are
+ * never silently dropped.
+ *
+ * Concurrency control: we set a short Redis lock holding the *current*
+ * attemptId. If a previous lock is still held (rare race — same submission
+ * being enqueued twice within seconds), we overwrite it because the calling
+ * site (`createSubmission` / `retrySubmission`) already validated the row
+ * is in a re-runnable state. Stale stages from the previous attempt will
+ * fence themselves out via the attemptId mismatch check in `loadState`.
+ */
+export async function enqueueSubmission(submissionId: string): Promise<void> {
+  const attemptId = randomUUID()
+
   const redis = (() => {
     try {
       return getRedis()
@@ -98,148 +190,146 @@ export async function processSubmission(submissionId: string) {
     }
   })()
 
-  // Idempotency lock — first writer wins for 10 minutes.
   if (redis) {
-    const acquired = await redis.set(`pipeline:lock:${submissionId}`, "1", {
-      nx: true,
-      ex: 600,
-    })
-    if (!acquired) {
-      console.warn("[pipeline] another worker holds the lock for", submissionId)
-      return
-    }
+    // Use a regular set (not NX): a fresh enqueue should always supersede
+    // any prior in-flight attempt. The lock TTL is short — it's just a
+    // soft signal that "an attempt is in progress" for observability.
+    await redis.set(`pipeline:lock:${submissionId}`, attemptId, { ex: 600 })
   }
 
+  console.log("[pipeline] enqueue", submissionId, "attempt:", attemptId)
+  await transitionTo(submissionId, "parse", attemptId)
+}
+
+/**
+ * Backwards-compat shim. Some callers (cron, manual scripts) may still
+ * import this name. Routes the call through the new staged enqueue path.
+ */
+export async function processSubmission(submissionId: string): Promise<void> {
+  await enqueueSubmission(submissionId)
+}
+
+// ── Stage dispatcher (called by the QStash webhook) ─────────────────────────
+
+export async function runStage(
+  submissionId: string,
+  stage: string,
+  attemptId: string,
+): Promise<void> {
+  // Catch-all so a stage error always writes a terminal state.
   try {
-    await runPipeline(submissionId)
-  } catch (err) {
-    // Last-resort safety net. Any error escaping `runPipeline` would otherwise
-    // leave the submission stuck in `parsing`/`validating`. We mark it failed
-    // so the user can retry.
-    const errorMsg = err instanceof Error ? err.message : String(err)
-    console.error("[pipeline] unhandled error for", submissionId, errorMsg, err)
-    try {
-      const admin = createAdminClient()
-      await admin
-        .from("submissions")
-        .update({
-          status: "failed",
-          flags: [
-            {
-              severity: "fail" as const,
-              message: `Validation pipeline crashed: ${errorMsg.slice(0, 200)}. Please retry.`,
-            },
-          ] satisfies SubmissionFlag[],
-        })
-        .eq("id", submissionId)
-    } catch (writeErr) {
-      console.error("[pipeline] failed to write final status", writeErr)
+    if (stage === "parse") {
+      await stageParse(submissionId, attemptId)
+    } else if (stage.startsWith("rules:")) {
+      const idx = Number(stage.slice("rules:".length))
+      if (Number.isNaN(idx)) throw new Error(`Invalid rules stage: ${stage}`)
+      await stageRules(submissionId, idx, attemptId)
+    } else if (stage === "finalize") {
+      await stageFinalize(submissionId, attemptId)
+    } else {
+      throw new Error(`Unknown stage: ${stage}`)
     }
-  } finally {
-    if (redis) await redis.del(`pipeline:lock:${submissionId}`).catch(() => {})
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error("[pipeline] stage", stage, "crashed for", submissionId, msg, err)
+    await markFailedSafe(submissionId, `${stage} stage crashed: ${msg.slice(0, 200)}`)
+    await clearState(submissionId)
+    await clearLock(submissionId)
   }
 }
 
-async function runPipeline(submissionId: string) {
-  const admin = createAdminClient()
-  const timing: Record<string, number> = {}
-  const pipelineStart = Date.now()
+async function clearLock(id: string) {
+  try {
+    const redis = getRedis()
+    await redis.del(`pipeline:lock:${id}`)
+  } catch {
+    /* noop */
+  }
+}
 
-  // Pipeline-level deadline. Wired into LLM calls via `abortSignal` so any
-  // in-flight request is cancelled when we run out of time.
-  const deadlineController = new AbortController()
-  const deadlineTimer = setTimeout(
-    () => deadlineController.abort(),
-    PIPELINE_BUDGET_MS,
-  )
-  const abortSignal = deadlineController.signal
-  const remaining = () => PIPELINE_BUDGET_MS - (Date.now() - pipelineStart)
+async function markFailedSafe(submissionId: string, reason: string) {
+  try {
+    const admin = createAdminClient()
+    await admin
+      .from("submissions")
+      .update({
+        status: "failed",
+        flags: [{ severity: "fail" as const, message: reason }] satisfies SubmissionFlag[],
+      })
+      .eq("id", submissionId)
+  } catch (writeErr) {
+    console.error("[pipeline] failed to write final status", writeErr)
+  }
+}
+
+// ── Stage 1: Parse ──────────────────────────────────────────────────────────
+
+async function stageParse(submissionId: string, attemptId: string): Promise<void> {
+  const admin = createAdminClient()
+  const startedAt = Date.now()
+
+  const { data: subData, error: subError } = await admin
+    .from("submissions")
+    .select("*")
+    .eq("id", submissionId)
+    .single()
+  if (subError || !subData) {
+    console.error("[pipeline] submission not found", submissionId, subError)
+    await clearLock(submissionId)
+    return
+  }
+  const submission = subData as Submission
+
+  // Skip if already terminal (a duplicate QStash delivery).
+  if (
+    ["passed", "failed", "needs_review", "late_submitted", "missed"].includes(
+      submission.status,
+    )
+  ) {
+    console.log("[pipeline] submission already terminal, skipping", submissionId, submission.status)
+    return
+  }
+
+  await admin.from("submissions").update({ status: "parsing" }).eq("id", submissionId)
+
+  // Per-stage abort/budget signal so a slow LLM doesn't blow the budget.
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), STAGE_BUDGET_MS)
+  const remaining = () => STAGE_BUDGET_MS - (Date.now() - startedAt)
+
+  let text = ""
+  let truncated = false
 
   try {
-    const { data: subData, error: subError } = await admin
-      .from("submissions")
-      .select("*")
-      .eq("id", submissionId)
-      .single()
-    if (subError || !subData) {
-      console.error("[pipeline] submission not found", submissionId, subError)
-      return
+    const { get: getBlob } = await import("@vercel/blob")
+    console.log("[pipeline:parse]", submissionId, "mime:", submission.mime_type)
+
+    const blobResult = await getBlob(submission.blob_url, {
+      access: "private" as const,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    })
+    if (!blobResult || !blobResult.stream) {
+      throw new Error(`blob stream is missing for: ${submission.blob_url}`)
     }
-    const submission = subData as Submission
+    const chunks: Uint8Array[] = []
+    const reader = blobResult.stream.getReader()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+    }
+    const buf = Buffer.concat(chunks)
+    console.log("[pipeline:parse] downloaded", buf.length, "bytes")
 
-    await admin.from("submissions").update({ status: "parsing" }).eq("id", submissionId)
-
-    // ── Stage 1: Fetch + Parse ────────────────────────────────────────────
-    let text = ""
-    let truncated = false
-    const parseStart = Date.now()
-
-    try {
-      // Step 1: Fetch the private blob via the SDK (handles auth automatically).
-      const { get: getBlob } = await import("@vercel/blob")
-      console.log("[pipeline] fetching blob for", submissionId, "mime:", submission.mime_type)
-
-      const blobResult = await getBlob(submission.blob_url, {
-        access: "private" as const,
-        token: process.env.BLOB_READ_WRITE_TOKEN,
-      })
-      if (!blobResult || !blobResult.stream) {
-        throw new Error(`blob stream is missing for: ${submission.blob_url}`)
-      }
-
-      // Step 2: Read the stream into a Buffer for the parsers.
-      const chunks: Uint8Array[] = []
-      const reader = blobResult.stream.getReader()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        chunks.push(value)
-      }
-      const buf = Buffer.concat(chunks)
-      console.log("[pipeline] downloaded", buf.length, "bytes")
-
-      // Step 3: Extract text from the document.
-      const isImage = submission.mime_type.startsWith("image/")
-
-      if (isImage) {
-        // Vision-only path. Tesseract.js fallback was removed because its
-        // WASM cold-start (5–15s) blows the function budget on Hobby.
-        // If vision fails, we mark needs_review instead of guessing.
-        console.log("[pipeline] image detected — using vision model")
-        try {
-          const vision = await describeImage(buf, submission.mime_type, { abortSignal })
-          text = vision.text || ""
-          truncated = false
-          console.log("[pipeline] vision extraction completed, length:", text.length)
-        } catch (visionErr) {
-          const msg = visionErr instanceof Error ? visionErr.message : String(visionErr)
-          console.error("[pipeline] vision extraction failed", msg)
-          await admin
-            .from("submissions")
-            .update({
-              status: "needs_review",
-              flags: [
-                {
-                  severity: "warn" as const,
-                  message: `Could not extract text from image (${msg.slice(0, 120)}). Marked for manual review.`,
-                },
-              ] satisfies SubmissionFlag[],
-            })
-            .eq("id", submissionId)
-          return
-        }
-      } else {
-        // Non-image: native parsers (PDF, DOCX, PPTX).
-        console.log("[pipeline] starting extractText...")
-        const parsed = await extractText(buf, submission.mime_type)
-        console.log("[pipeline] extractText completed")
-        text = parsed.text
-        truncated = parsed.truncated
-      }
-
-      console.log("[pipeline] extracted text length:", text.length, "truncated:", truncated)
-
-      if (!text || text.trim().length < 20) {
+    const isImage = submission.mime_type.startsWith("image/")
+    if (isImage) {
+      try {
+        const vision = await describeImage(buf, submission.mime_type, { abortSignal: ctrl.signal })
+        text = vision.text || ""
+        truncated = false
+      } catch (visionErr) {
+        const msg = visionErr instanceof Error ? visionErr.message : String(visionErr)
+        console.error("[pipeline:parse] vision failed", msg)
         await admin
           .from("submissions")
           .update({
@@ -247,331 +337,485 @@ async function runPipeline(submissionId: string) {
             flags: [
               {
                 severity: "warn" as const,
-                message: "Could not extract enough text from the file.",
+                message: `Could not extract text from image (${msg.slice(0, 120)}). Marked for manual review.`,
               },
             ] satisfies SubmissionFlag[],
           })
           .eq("id", submissionId)
+        await clearLock(submissionId)
         return
       }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err)
-      console.error(
-        "[pipeline] parse error for submission",
-        submissionId,
-        "error:",
-        errorMsg,
-        err instanceof Error ? err.stack : "",
-      )
-      await admin
-        .from("submissions")
-        .update({
-          status: "failed",
-          flags: [
-            { severity: "fail" as const, message: `Parse Error: ${errorMsg}` },
-          ] satisfies SubmissionFlag[],
-        })
-        .eq("id", submissionId)
-      return
+    } else {
+      const parsed = await extractText(buf, submission.mime_type)
+      text = parsed.text
+      truncated = parsed.truncated
     }
-
-    timing.parse_ms = Date.now() - parseStart
-
-    // Bail early if the parse already used most of our budget.
-    if (remaining() < 5_000) {
-      console.warn("[pipeline] parse stage exhausted budget for", submissionId)
-      await admin
-        .from("submissions")
-        .update({
-          status: "needs_review",
-          extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
-          flags: [
-            {
-              severity: "warn" as const,
-              message:
-                "Document parsing took too long. Marked for manual review — please retry to attempt full validation.",
-            },
-          ] satisfies SubmissionFlag[],
-          metadata: { timing, total_ms: Date.now() - pipelineStart },
-        })
-        .eq("id", submissionId)
-      return
-    }
-
-    // ── Stage 2: Rate limit check (AFTER parsing so parse work isn't wasted) ─
-    const limit = await llmLimiter().limit(`team:${submission.team_id}`)
-    if (!limit.success) {
-      await admin
-        .from("submissions")
-        .update({
-          status: "needs_review",
-          extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
-          flags: [
-            {
-              severity: "warn" as const,
-              message: "LLM quota reached for this team. Marked for manual review.",
-            },
-          ] satisfies SubmissionFlag[],
-        })
-        .eq("id", submissionId)
-      return
-    }
-
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err)
+    console.error("[pipeline:parse] error for", submissionId, errorMsg)
     await admin
       .from("submissions")
-      .update({ status: "validating", extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS) })
-      .eq("id", submissionId)
-
-    // ── Stage 3: Load rules ─────────────────────────────────────────────
-    // Pull team rules + (if any) the parent task as a synthesised rule so the
-    // manager's per-task instructions are evaluated alongside global ones.
-    const [{ data: rulesData }, taskRow] = await Promise.all([
-      admin
-        .from("validation_rules")
-        .select("*")
-        .eq("team_id", submission.team_id)
-        .eq("enabled", true),
-      submission.task_id
-        ? admin.from("tasks").select("*").eq("id", submission.task_id).maybeSingle()
-        : Promise.resolve({ data: null as Task | null }),
-    ])
-
-    const rules = (rulesData ?? []) as ValidationRule[]
-    const task = (taskRow?.data as Task | null) ?? null
-
-    // If the task explicitly lists rule_ids, restrict to only those rules.
-    // null  → no restriction (use all enabled rules — backward-compatible default)
-    // []    → skip all standing rules entirely
-    // [id…] → keep only the rules whose id appears in the list
-    const filteredRules: ValidationRule[] =
-      task && task.rule_ids !== null
-        ? rules.filter((r) => (task.rule_ids as string[]).includes(r.id))
-        : [...rules]
-
-    if (task && task.instructions && task.instructions.trim().length > 0) {
-      filteredRules.push({
-        id: `task:${task.id}`,
-        team_id: submission.team_id,
-        rule_name: `Task brief: ${task.title}`,
-        description: task.description,
-        prompt_template: task.instructions,
-        threshold: 70,
-        weight: 2,
-        enabled: true,
-        created_by: task.manager_id,
-        created_at: task.created_at,
-        updated_at: task.updated_at,
+      .update({
+        status: "failed",
+        flags: [
+          { severity: "fail" as const, message: `Parse Error: ${errorMsg.slice(0, 200)}` },
+        ] satisfies SubmissionFlag[],
       })
-    }
+      .eq("id", submissionId)
+    await clearLock(submissionId)
+    return
+  } finally {
+    clearTimeout(timer)
+  }
 
-    // ── P3: Handle zero-rule case explicitly ────────────────────────────
-    if (filteredRules.length === 0) {
-      await admin
-        .from("submissions")
-        .update({
-          status: "needs_review",
-          score: null,
-          summary: "",
-          extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
-          flags: [
-            {
-              severity: "info" as const,
-              message:
-                "No validation rules are configured for this team. Please ask your manager to set up validation rules, then retry.",
-            },
-          ] satisfies SubmissionFlag[],
-          metadata: {
-            rules_evaluated: 0,
-            had_task: Boolean(task),
-            truncated,
-            timing,
-            total_ms: Date.now() - pipelineStart,
+  if (!text || text.trim().length < 20) {
+    await admin
+      .from("submissions")
+      .update({
+        status: "needs_review",
+        flags: [
+          {
+            severity: "warn" as const,
+            message: "Could not extract enough text from the file.",
           },
-        })
-        .eq("id", submissionId)
-      return
-    }
+        ] satisfies SubmissionFlag[],
+      })
+      .eq("id", submissionId)
+    await clearLock(submissionId)
+    return
+  }
 
-    // Clean up any old runs before generating new ones.
-    await admin.from("validation_runs").delete().eq("submission_id", submissionId)
+  if (remaining() < 5_000) {
+    console.warn("[pipeline:parse] budget exhausted before persist", submissionId)
+    await admin
+      .from("submissions")
+      .update({
+        status: "needs_review",
+        extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
+        flags: [
+          {
+            severity: "warn" as const,
+            message: "Document parsing took too long. Please retry.",
+          },
+        ] satisfies SubmissionFlag[],
+      })
+      .eq("id", submissionId)
+    await clearLock(submissionId)
+    return
+  }
 
-    // ── Stage 4: Run rules ──────────────────────────────────────────────
-    // Bound concurrency: with no cap, a team that has 30+ rules would fan out
-    // 30 simultaneous LLM calls per submission and tip the rate limiter into
-    // failure mode.
-    const ruleLimit = pLimit(Math.max(1, RULE_CONCURRENCY))
-    const rulesStart = Date.now()
-    const ruleOutputs = await Promise.all(
-      filteredRules.map((rule) =>
-        ruleLimit(async () => {
-          // Skip remaining rules if we've blown the budget — better to mark
-          // the submission needs_review than to be killed mid-write.
-          if (abortSignal.aborted || remaining() < 3_000) {
+  // Rate-limit AFTER parse so we don't waste extraction work.
+  const limit = await llmLimiter().limit(`team:${submission.team_id}`)
+  if (!limit.success) {
+    await admin
+      .from("submissions")
+      .update({
+        status: "needs_review",
+        extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
+        flags: [
+          {
+            severity: "warn" as const,
+            message: "LLM quota reached for this team. Marked for manual review.",
+          },
+        ] satisfies SubmissionFlag[],
+      })
+      .eq("id", submissionId)
+    await clearLock(submissionId)
+    return
+  }
+
+  // Load rules + task in parallel.
+  const [{ data: rulesData }, taskRow] = await Promise.all([
+    admin
+      .from("validation_rules")
+      .select("*")
+      .eq("team_id", submission.team_id)
+      .eq("enabled", true),
+    submission.task_id
+      ? admin.from("tasks").select("*").eq("id", submission.task_id).maybeSingle()
+      : Promise.resolve({ data: null as Task | null }),
+  ])
+  const rules = (rulesData ?? []) as ValidationRule[]
+  const task = (taskRow?.data as Task | null) ?? null
+
+  const filteredRules: ValidationRule[] =
+    task && task.rule_ids !== null
+      ? rules.filter((r) => (task.rule_ids as string[]).includes(r.id))
+      : [...rules]
+
+  if (task && task.instructions && task.instructions.trim().length > 0) {
+    filteredRules.push({
+      id: `task:${task.id}`,
+      team_id: submission.team_id,
+      rule_name: `Task brief: ${task.title}`,
+      description: task.description,
+      prompt_template: task.instructions,
+      threshold: 70,
+      weight: 2,
+      enabled: true,
+      created_by: task.manager_id,
+      created_at: task.created_at,
+      updated_at: task.updated_at,
+    })
+  }
+
+  // Mark as validating + persist preview text.
+  await admin
+    .from("submissions")
+    .update({
+      status: "validating",
+      extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
+    })
+    .eq("id", submissionId)
+
+  // Zero-rule short-circuit — go straight to finalize so the row leaves
+  // `validating` cleanly with a clear message.
+  if (filteredRules.length === 0) {
+    await admin
+      .from("submissions")
+      .update({
+        status: "needs_review",
+        score: null,
+        summary: "",
+        flags: [
+          {
+            severity: "info" as const,
+            message:
+              "No validation rules are configured for this team. Please ask your manager to set up validation rules, then retry.",
+          },
+        ] satisfies SubmissionFlag[],
+        metadata: {
+          rules_evaluated: 0,
+          had_task: Boolean(task),
+          truncated,
+          timing: { parse_ms: Date.now() - startedAt },
+          total_ms: Date.now() - startedAt,
+        },
+      })
+      .eq("id", submissionId)
+    await clearLock(submissionId)
+    return
+  }
+
+  // Wipe any prior runs so retries don't double-count.
+  await admin.from("validation_runs").delete().eq("submission_id", submissionId)
+
+  // Persist state for subsequent stages. The attemptId is what fences out
+  // stale stages from a previous attempt that may still be in flight.
+  const state: PipelineState = {
+    attemptId,
+    text,
+    truncated,
+    task,
+    rules: filteredRules,
+    results: [],
+    skipped: 0,
+    startedAt,
+    timing: { parse_ms: Date.now() - startedAt },
+  }
+  await saveState(submissionId, state)
+
+  // Hand off to the first rules batch.
+  await transitionTo(submissionId, "rules:0", attemptId)
+}
+
+// ── Stage 2: Rules (chained, batch by batch) ────────────────────────────────
+
+async function stageRules(
+  submissionId: string,
+  batchIdx: number,
+  attemptId: string,
+): Promise<void> {
+  const state = await loadState(submissionId)
+  if (!state) {
+    console.error("[pipeline:rules] state missing for", submissionId, "batch", batchIdx)
+    await markFailedSafe(submissionId, "Pipeline state was lost between stages. Please retry.")
+    await clearLock(submissionId)
+    return
+  }
+
+  // Fence: if a newer attempt has superseded us, exit cleanly without
+  // writing — the newer attempt will produce the authoritative result.
+  if (state.attemptId !== attemptId) {
+    console.warn(
+      "[pipeline:rules] superseded — incoming attempt",
+      attemptId,
+      "vs state attempt",
+      state.attemptId,
+    )
+    return
+  }
+
+  // Skip if already terminal (defensive — duplicate delivery).
+  const admin = createAdminClient()
+  const { data: cur } = await admin
+    .from("submissions")
+    .select("status")
+    .eq("id", submissionId)
+    .maybeSingle()
+  if (
+    cur &&
+    ["passed", "failed", "needs_review", "late_submitted", "missed"].includes(cur.status)
+  ) {
+    await clearState(submissionId)
+    await clearLock(submissionId)
+    return
+  }
+
+  const startedAt = Date.now()
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), STAGE_BUDGET_MS)
+  const remaining = () => STAGE_BUDGET_MS - (Date.now() - startedAt)
+
+  const batchStart = batchIdx * RULES_BATCH_SIZE
+  const batchEnd = Math.min(batchStart + RULES_BATCH_SIZE, state.rules.length)
+  const batch = state.rules.slice(batchStart, batchEnd)
+
+  console.log(
+    "[pipeline:rules]",
+    submissionId,
+    "batch",
+    batchIdx,
+    `(${batchStart}-${batchEnd}/${state.rules.length})`,
+  )
+
+  let batchResults: RunRuleOutput[] = []
+  let batchSkipped = 0
+  try {
+    const limiter = pLimit(Math.max(1, RULE_CONCURRENCY))
+    const outputs = await Promise.all(
+      batch.map((rule) =>
+        limiter(async () => {
+          if (ctrl.signal.aborted || remaining() < 3_000) {
             return null
           }
           try {
-            return await runRule(text, rule, { truncated, abortSignal })
+            return await runRule(state.text, rule, {
+              truncated: state.truncated,
+              abortSignal: ctrl.signal,
+            })
           } catch (err) {
-            console.error("[pipeline] rule failed", rule.rule_name, err)
+            console.error("[pipeline:rules] rule failed", rule.rule_name, err)
             return null
           }
         }),
       ),
     )
-    timing.rules_ms = Date.now() - rulesStart
+    batchResults = outputs.filter((r): r is NonNullable<typeof r> => Boolean(r))
+    batchSkipped = batch.length - batchResults.length
+  } finally {
+    clearTimeout(timer)
+  }
 
-    const successful = ruleOutputs.filter((r): r is NonNullable<typeof r> => Boolean(r))
-    const skipped = filteredRules.length - successful.length
-
-    // ── P8: All rules failed → explicit failure ─────────────────────────
-    if (successful.length === 0 && filteredRules.length > 0) {
-      const reasonMsg = abortSignal.aborted
-        ? `The validation pipeline ran out of time before any rule completed. Please retry.`
-        : `All ${filteredRules.length} validation rules failed to execute. The AI service may be temporarily unavailable. Please retry later.`
-      await admin
-        .from("submissions")
-        .update({
-          status: "failed",
-          score: null,
-          summary: "",
-          extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
-          flags: [
-            { severity: "fail" as const, message: reasonMsg },
-          ] satisfies SubmissionFlag[],
-          metadata: {
-            rules_evaluated: 0,
-            rules_attempted: filteredRules.length,
-            had_task: Boolean(task),
-            truncated,
-            timing,
-            total_ms: Date.now() - pipelineStart,
-          },
-        })
-        .eq("id", submissionId)
-      return
-    }
-
-    // Persist validation_runs only for real (non-synthetic) rule rows.
-    const persistable = successful.filter((r) => !r.rule_id.startsWith("task:"))
-    if (persistable.length > 0) {
-      await admin.from("validation_runs").insert(
-        persistable.map((r) => ({
-          submission_id: submissionId,
-          rule_id: r.rule_id,
-          model: r.model,
-          prompt_version: PROMPT_VERSION,
-          raw_output: { ...(r.raw as Record<string, unknown>), rule_name: r.rule_name },
-          pass: r.pass,
-          score: r.score,
-          reasons: r.reasons,
-          flags: r.flags,
-          latency_ms: r.latency_ms,
-        })),
-      )
-    }
-
-    // Weighted aggregate score.
-    const totalWeight = successful.reduce((s, r) => s + Number(r.weight || 1), 0) || 1
-    const aggScore =
-      successful.reduce((s, r) => s + Number(r.score) * Number(r.weight || 1), 0) / totalWeight
-
-    const allPassed = successful.length > 0 && successful.every((r) => r.pass)
-    const anyHardFail = successful.some((r) => r.flags.some((f) => f.severity === "fail"))
-
-    // ── Stage 5: Summary + predictive flags ─────────────────────────────
-    let summary = ""
-    let predictive: string[] = []
-    const summaryStart = Date.now()
-    // Skip the summary if we're nearly out of budget; the rule results are
-    // more important than a nice summary line.
-    if (!abortSignal.aborted && remaining() > 8_000) {
-      try {
-        const s = await summarize(text, { truncated, abortSignal })
-        summary = s.summary
-        predictive = s.predictive_flags
-      } catch (err) {
-        console.error("[pipeline] summary failed", err)
-      }
-    } else {
-      console.warn("[pipeline] skipping summary — budget exhausted")
-    }
-    timing.summary_ms = Date.now() - summaryStart
-
-    const aggregateFlags: SubmissionFlag[] = [
-      ...successful.flatMap((r) =>
-        r.flags.map<SubmissionFlag>((f) => ({
-          rule_id: r.rule_id,
-          rule_name: r.rule_name,
-          severity: f.severity,
-          message: f.message,
-        })),
-      ),
-      ...predictive.map<SubmissionFlag>((p) => ({
-        severity: "info",
-        message: `Predictive: ${p}`,
+  // Persist this batch's validation_runs (only real, non-synthetic rules).
+  const persistable = batchResults.filter((r) => !r.rule_id.startsWith("task:"))
+  if (persistable.length > 0) {
+    await admin.from("validation_runs").insert(
+      persistable.map((r) => ({
+        submission_id: submissionId,
+        rule_id: r.rule_id,
+        model: r.model,
+        prompt_version: PROMPT_VERSION,
+        raw_output: { ...(r.raw as Record<string, unknown>), rule_name: r.rule_name },
+        pass: r.pass,
+        score: r.score,
+        reasons: r.reasons,
+        flags: r.flags,
+        latency_ms: r.latency_ms,
       })),
-    ]
+    )
+  }
 
-    if (skipped > 0) {
-      aggregateFlags.unshift({
-        severity: "warn",
-        message: `${skipped} of ${filteredRules.length} rules were skipped because the validation budget ran out. Retry to evaluate them.`,
-      })
-    }
+  // Accumulate into state and save before transitioning.
+  const next: PipelineState = {
+    ...state,
+    results: [...state.results, ...batchResults],
+    skipped: state.skipped + batchSkipped,
+    timing: {
+      ...state.timing,
+      [`rules_batch_${batchIdx}_ms`]: Date.now() - startedAt,
+    },
+  }
+  await saveState(submissionId, next)
 
-    // Record per-rule latency for observability.
-    timing.rules_detail = successful.map((r) => ({
-      rule_id: r.rule_id,
-      rule_name: r.rule_name,
-      latency_ms: r.latency_ms,
-    })) as unknown as number // type coerce for metadata
+  if (batchEnd < state.rules.length) {
+    await transitionTo(submissionId, `rules:${batchIdx + 1}`, attemptId)
+  } else {
+    await transitionTo(submissionId, "finalize", attemptId)
+  }
+}
 
-    // Final status preserves "late_submitted" if the row was already marked late
-    // at upload time — the AI verdict still influences score/flags but a late
-    // submission never reverts to plain "passed".
-    let finalStatus: Submission["status"]
-    if (submission.is_late) {
-      finalStatus = "late_submitted"
-    } else if (skipped > 0 && successful.length > 0) {
-      // Partial result — defer to manager review.
-      finalStatus = "needs_review"
-    } else {
-      finalStatus = allPassed && !anyHardFail ? "passed" : anyHardFail ? "failed" : "needs_review"
-    }
+// ── Stage 3: Finalize ───────────────────────────────────────────────────────
 
-    timing.total_ms = Date.now() - pipelineStart
+async function stageFinalize(submissionId: string, attemptId: string): Promise<void> {
+  const admin = createAdminClient()
+  const state = await loadState(submissionId)
+  if (!state) {
+    console.error("[pipeline:finalize] state missing for", submissionId)
+    await markFailedSafe(submissionId, "Pipeline state was lost before finalize. Please retry.")
+    await clearLock(submissionId)
+    return
+  }
 
+  // Fence: stale stage from a superseded attempt.
+  if (state.attemptId !== attemptId) {
+    console.warn(
+      "[pipeline:finalize] superseded — incoming attempt",
+      attemptId,
+      "vs state attempt",
+      state.attemptId,
+    )
+    return
+  }
+
+  const startedAt = Date.now()
+
+  const { data: subData } = await admin
+    .from("submissions")
+    .select("*")
+    .eq("id", submissionId)
+    .single()
+  if (!subData) {
+    await clearState(submissionId)
+    await clearLock(submissionId)
+    return
+  }
+  const submission = subData as Submission
+
+  // Skip if a duplicate delivery already finalized.
+  if (
+    ["passed", "failed", "needs_review", "late_submitted", "missed"].includes(submission.status)
+  ) {
+    await clearState(submissionId)
+    await clearLock(submissionId)
+    return
+  }
+
+  const successful = state.results
+  const totalRules = state.rules.length
+
+  // All rules failed → explicit failure.
+  if (successful.length === 0 && totalRules > 0) {
     await admin
       .from("submissions")
       .update({
-        status: finalStatus,
-        score: Number(aggScore.toFixed(2)),
-        summary,
-        flags: aggregateFlags,
-        extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
+        status: "failed",
+        score: null,
+        summary: "",
+        flags: [
+          {
+            severity: "fail" as const,
+            message: `All ${totalRules} validation rules failed to execute. The AI service may be temporarily unavailable. Please retry later.`,
+          },
+        ] satisfies SubmissionFlag[],
         metadata: {
-          rules_evaluated: persistable.length,
-          rules_skipped: skipped,
-          topics: predictive,
-          truncated,
-          had_task: Boolean(task),
-          timing,
+          rules_evaluated: 0,
+          rules_attempted: totalRules,
+          had_task: Boolean(state.task),
+          truncated: state.truncated,
+          timing: state.timing,
+          total_ms: Date.now() - state.startedAt,
         },
       })
       .eq("id", submissionId)
-
-    // Mirror status onto task_assignment so the member view stays in sync.
-    if (submission.task_assignment_id) {
-      await admin
-        .from("task_assignments")
-        .update({
-          status: submission.is_late ? "late_submitted" : "submitted",
-          submission_id: submissionId,
-          submitted_at: submission.submitted_at ?? new Date().toISOString(),
-        })
-        .eq("id", submission.task_assignment_id)
-    }
-  } finally {
-    clearTimeout(deadlineTimer)
+    await clearState(submissionId)
+    await clearLock(submissionId)
+    return
   }
+
+  // Summary (best-effort — never blocks finalisation).
+  const summaryStart = Date.now()
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), STAGE_BUDGET_MS)
+  let summary = ""
+  let predictive: string[] = []
+  try {
+    const s = await summarize(state.text, {
+      truncated: state.truncated,
+      abortSignal: ctrl.signal,
+    })
+    summary = s.summary
+    predictive = s.predictive_flags
+  } catch (err) {
+    console.error("[pipeline:finalize] summary failed", err)
+  } finally {
+    clearTimeout(timer)
+  }
+
+  const totalWeight = successful.reduce((s, r) => s + Number(r.weight || 1), 0) || 1
+  const aggScore =
+    successful.reduce((s, r) => s + Number(r.score) * Number(r.weight || 1), 0) / totalWeight
+  const allPassed = successful.length > 0 && successful.every((r) => r.pass)
+  const anyHardFail = successful.some((r) => r.flags.some((f) => f.severity === "fail"))
+
+  const aggregateFlags: SubmissionFlag[] = [
+    ...successful.flatMap((r) =>
+      r.flags.map<SubmissionFlag>((f) => ({
+        rule_id: r.rule_id,
+        rule_name: r.rule_name,
+        severity: f.severity,
+        message: f.message,
+      })),
+    ),
+    ...predictive.map<SubmissionFlag>((p) => ({
+      severity: "info",
+      message: `Predictive: ${p}`,
+    })),
+  ]
+
+  if (state.skipped > 0) {
+    aggregateFlags.unshift({
+      severity: "warn",
+      message: `${state.skipped} of ${totalRules} rules were skipped because the AI service did not respond. Retry to evaluate them.`,
+    })
+  }
+
+  let finalStatus: Submission["status"]
+  if (submission.is_late) {
+    finalStatus = "late_submitted"
+  } else if (state.skipped > 0 && successful.length > 0) {
+    finalStatus = "needs_review"
+  } else {
+    finalStatus = allPassed && !anyHardFail ? "passed" : anyHardFail ? "failed" : "needs_review"
+  }
+
+  const totalMs = Date.now() - state.startedAt
+  const persistable = successful.filter((r) => !r.rule_id.startsWith("task:"))
+
+  await admin
+    .from("submissions")
+    .update({
+      status: finalStatus,
+      score: Number(aggScore.toFixed(2)),
+      summary,
+      flags: aggregateFlags,
+      metadata: {
+        rules_evaluated: persistable.length,
+        rules_skipped: state.skipped,
+        topics: predictive,
+        truncated: state.truncated,
+        had_task: Boolean(state.task),
+        timing: {
+          ...state.timing,
+          summary_ms: Date.now() - summaryStart,
+          total_ms: totalMs,
+        },
+      },
+    })
+    .eq("id", submissionId)
+
+  // Mirror status onto task_assignment.
+  if (submission.task_assignment_id) {
+    await admin
+      .from("task_assignments")
+      .update({
+        status: submission.is_late ? "late_submitted" : "submitted",
+        submission_id: submissionId,
+        submitted_at: submission.submitted_at ?? new Date().toISOString(),
+      })
+      .eq("id", submission.task_assignment_id)
+  }
+
+  await clearState(submissionId)
+  await clearLock(submissionId)
 }

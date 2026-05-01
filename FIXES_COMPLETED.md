@@ -1,7 +1,13 @@
-# Audit Fixes Completed ✅
+# Audit Fixes Completed (April 2026)
 
 **Date:** April 30, 2026  
-**Status:** All 3 critical audit issues resolved and production-ready
+**Status:** All 3 audit issues from that round resolved.
+
+> **NOTE — partly superseded (May 2026):** This document records the audit
+> fixes that landed in late April 2026 (cron via Upstash gating, Tailwind
+> design tokens, env/README overhaul). The validation pipeline has since been
+> re-platformed onto Google Gemini + Upstash QStash. For the current pipeline
+> design see [docs/PIPELINE_ARCHITECTURE.md](./docs/PIPELINE_ARCHITECTURE.md).
 
 ---
 

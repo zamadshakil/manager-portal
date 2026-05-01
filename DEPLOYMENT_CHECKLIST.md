@@ -1,4 +1,31 @@
-# Task & Team Management System - Deployment Checklist
+# Manager Portal — Deployment Checklist
+
+> Updated May 2026: now also covers the Gemini + Upstash QStash pipeline.
+> For the pipeline design itself, see
+> [docs/PIPELINE_ARCHITECTURE.md](./docs/PIPELINE_ARCHITECTURE.md).
+
+## Pipeline-Specific Pre-Deployment Steps (Production)
+
+The validation pipeline runs as staged messages on Upstash QStash in
+production. Without these settings the pipeline silently downgrades to a
+single-function path and can hit the 60s wall-clock ceiling.
+
+- [ ] **Create / locate the QStash project** in the Upstash console.
+- [ ] Copy `QSTASH_TOKEN` to Vercel env (Production + Preview).
+- [ ] Copy `QSTASH_CURRENT_SIGNING_KEY` to Vercel env.
+- [ ] Copy `QSTASH_NEXT_SIGNING_KEY` to Vercel env.
+- [ ] Set `APP_URL` to the production hostname
+      (e.g. `https://manager.yourdomain.com`). Must include `https://` and
+      no trailing slash. Previews fall back to `VERCEL_URL` automatically.
+- [ ] Verify `GOOGLE_GENERATIVE_AI_API_KEY` is set (Gemini API key).
+- [ ] (Optional) Pin model versions if you want lockstep deploys —
+      `GEMINI_VALIDATION_MODEL`, `GEMINI_SUMMARY_MODEL`, `GEMINI_VISION_MODEL`.
+      Otherwise we use the safe `…-latest` aliases.
+- [ ] After deploy, send a real submission and confirm in the QStash
+      dashboard that messages flow `parse → validate_batch_0 → finalize`.
+- [ ] Confirm the failure callback URL (`/api/pipeline/failed`) is hit when
+      you intentionally cause a stage to error (e.g. revoke the Gemini key
+      and submit, then restore).
 
 ## Pre-Deployment Verification
 

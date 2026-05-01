@@ -1,5 +1,11 @@
 # Implementation Changes — April 2026
 
+> **NOTE — partly superseded (May 2026):** Historical changelog of the April
+> 2026 audit fixes. The validation pipeline has since been migrated to
+> Gemini + Upstash QStash. See
+> [PIPELINE_ARCHITECTURE.md](./PIPELINE_ARCHITECTURE.md) for the canonical
+> pipeline design.
+
 ## Summary
 
 This document tracks the three critical audit fixes implemented to address inconsistencies and improve developer experience:

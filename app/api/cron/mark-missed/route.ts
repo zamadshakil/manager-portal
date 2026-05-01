@@ -64,10 +64,13 @@ export async function GET(request: Request) {
     }
 
     // 2. Auto-fail stuck submissions (pipeline crash recovery).
-    // The pipeline's hard ceiling is ~60s on Hobby, so any submission that's
-    // been in a non-terminal state for longer than 5 minutes is definitely
-    // abandoned (function killed, redis lock expired, etc.) — recover it.
-    const stuckCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+    // QStash now retries each stage independently for up to ~24h with
+    // exponential backoff, AND publishes to a failure callback when retries
+    // exhaust — so the pipeline can no longer silently abandon a submission.
+    // This cron is a belt-and-suspenders safety net: anything stuck for
+    // 30+ minutes signals a deeper problem (Redis state expired, QStash
+    // outage, etc.) and we recover it so the user isn't blocked.
+    const stuckCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
     const { data: stuck } = await admin
       .from("submissions")
       .update({

@@ -4,6 +4,14 @@
 **Audit Date:** April 30, 2026  
 **Overall Status:** ✅ **Production-Ready** with minor corrections needed
 
+> **NOTE — partly superseded (May 2026):** This audit predates the migration
+> from Groq + Next.js `after()` to **Google Gemini + Upstash QStash** for the
+> validation pipeline, and the removal of Tesseract.js (vision-only image
+> handling now). For the current architecture see
+> [PIPELINE_ARCHITECTURE.md](./PIPELINE_ARCHITECTURE.md) and
+> [PROJECT_STATUS.md](./PROJECT_STATUS.md). Non-pipeline findings
+> (security, RLS, RBAC, RSC patterns) still apply.
+
 ---
 
 ## Project Overview
