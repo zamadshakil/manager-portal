@@ -4,8 +4,8 @@ import { groq } from "@ai-sdk/groq"
 import { z } from "zod"
 import type { ValidationRule } from "@/lib/types"
 
-const MODEL = process.env.GROQ_VALIDATION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
-const SUMMARY_MODEL = process.env.GROQ_SUMMARY_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
+const MODEL = process.env.GROQ_VALIDATION_MODEL || "llama-3.3-70b-versatile"
+const SUMMARY_MODEL = process.env.GROQ_SUMMARY_MODEL || "llama-3.3-70b-versatile"
 
 // Bumped whenever the system prompt or schema changes so we can compare
 // historical runs in `validation_runs.prompt_version`.
@@ -189,7 +189,7 @@ export async function describeImage(
   buffer: Uint8Array,
   mimeType: string,
 ): Promise<{ text: string; notes?: string }> {
-  const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"
+  const VISION_MODEL = process.env.GROQ_VISION_MODEL || "llama-3.2-11b-vision-preview"
   const { text: rawText } = await withRetry(() =>
     generateText({
       model: groq(VISION_MODEL),
