@@ -20,8 +20,8 @@ const VISION_MODEL = process.env.DO_VISION_MODEL || "nemotron-nano-12b-v2-vl"
 
 // Per-LLM-call hard timeout. With Inngest, each step runs in its own
 // serverless invocation, so we no longer need to squeeze into a shared 60s
-// budget. 60s per individual LLM call is generous but safe.
-const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS ?? 60_000)
+// budget. We set it to 45s to ensure it times out before Vercel's 60s hard limit.
+const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS ?? 45_000)
 
 // Bumped whenever the system prompt or schema changes so we can compare
 // historical runs in `validation_runs.prompt_version`.
@@ -169,6 +169,7 @@ export async function runRule(
         generateObject({
           model: doai.chat(MODEL),
           temperature: 0,
+          topP: 0.01,
           schema: RuleResultSchema,
           system: [
             "You are a strict but fair document validator.",
@@ -232,6 +233,7 @@ export async function summarize(
         generateObject({
           model: doai.chat(SUMMARY_MODEL),
           temperature: 0,
+          topP: 0.01,
           schema: SummarySchema,
           system: [
             "You generate concise executive summaries of business documents. Return ONLY a raw JSON object matching the schema. DO NOT wrap the output in ```json markdown blocks.",
@@ -267,6 +269,7 @@ export async function describeImage(
         generateText({
           model: doai.chat(VISION_MODEL),
           temperature: 0,
+          topP: 0.01,
           system:
             "You are a vision OCR assistant. Transcribe ALL readable text from the image exactly as it appears. Preserve line breaks and formatting. If there are diagrams, tables, or signatures, describe them briefly after the transcribed text. Output plain text only, no JSON wrapping.",
           messages: [

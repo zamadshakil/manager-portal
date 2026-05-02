@@ -214,3 +214,24 @@ export const processSubmissionFn = inngest.createFunction(
     return { status: "completed" };
   }
 );
+
+export const onFailureSubmissionFn = inngest.createFunction(
+  { id: "handle-submission-failure" },
+  { event: "inngest/function.failed" },
+  async ({ event, step }) => {
+    const originalEvent = event.data.event;
+    if (originalEvent.name === "app/submission.process") {
+      const submissionId = originalEvent.data.submissionId;
+      const errorMsg = event.data.error.message || "Unknown error";
+      
+      await step.run("mark-db-failed", async () => {
+        const admin = createAdminClient();
+        await admin.from("submissions").update({
+          status: "needs_review",
+          score: null,
+          flags: [{ severity: "fail", message: `AI Pipeline crashed: ${errorMsg}` }]
+        }).eq("id", submissionId);
+      });
+    }
+  }
+);
