@@ -97,6 +97,18 @@ export async function POST(
     })
   } catch (error: any) {
     console.error("Pipeline trigger error:", error)
+    
+    // Provide a helpful hint if the local Inngest dev server is missing
+    if (error.cause?.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
+      return NextResponse.json(
+        { 
+          error: "Inngest Dev Server is not running", 
+          details: "Please run 'npx inngest-cli@latest dev' in a new terminal tab to process background jobs locally." 
+        },
+        { status: 500 }
+      )
+    }
+
     return NextResponse.json(
       { error: "Internal Server Error", details: error.message || String(error) },
       { status: 500 }
