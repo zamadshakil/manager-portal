@@ -296,3 +296,73 @@ export async function deleteSubmission(formData: FormData): Promise<ActionResult
   revalidatePath("/dashboard/submissions")
   return { ok: true }
 }
+
+const BulkDeleteSchema = z.object({ ids: z.array(z.string().uuid()) })
+
+export async function bulkDeleteSubmissions(formData: FormData): Promise<ActionResult> {
+  const profile = await requireProfile()
+  // Since we can't easily pass arrays via simple FormData append without parsing tricks,
+  // we assume the client stringifies the array and passes it under 'ids_json'.
+  const idsJson = formData.get("ids_json") as string
+  if (!idsJson) return { ok: false, error: "No ids provided" }
+  
+  let parsedIds: string[]
+  try {
+    parsedIds = JSON.parse(idsJson)
+  } catch (e) {
+    return { ok: false, error: "Invalid ids format" }
+  }
+
+  const parsed = BulkDeleteSchema.safeParse({ ids: parsedIds })
+  if (!parsed.success) return { ok: false, error: "Invalid submission ids" }
+
+  const supabase = await createClient()
+  
+  // Verify permissions and get blob_urls
+  const { data: subs, error: fetchErr } = await supabase
+    .from("submissions")
+    .select("id, team_id, blob_url")
+    .in("id", parsed.data.ids)
+
+  if (fetchErr || !subs || subs.length === 0) {
+    return { ok: false, error: "Submissions not found or fetch error." }
+  }
+
+  const allowedIds: string[] = []
+  const blobUrls: string[] = []
+
+  for (const sub of subs) {
+    const canDelete =
+      profile.role === "main_admin" ||
+      (profile.role === "manager" && profile.team_id === sub.team_id)
+      
+    if (canDelete) {
+      allowedIds.push(sub.id)
+      if (sub.blob_url) blobUrls.push(sub.blob_url)
+    }
+  }
+
+  if (allowedIds.length === 0) {
+    return { ok: false, error: "Not authorized to delete these submissions." }
+  }
+
+  const { error } = await supabase.from("submissions").delete().in("id", allowedIds)
+  if (error) return { ok: false, error: error.message }
+
+  // Delete blobs in parallel if possible, catch individually
+  await Promise.allSettled(
+    blobUrls.map((url) => del(url).catch((err) => console.error("[submissions] blob delete failed", err)))
+  )
+
+  await logActivity({
+    actorId: profile.id,
+    teamId: profile.team_id,
+    action: "submission.bulk_deleted",
+    entityType: "submission",
+    entityId: allowedIds[0], // log against the first one
+    metadata: { count: allowedIds.length },
+  })
+
+  revalidatePath("/dashboard/submissions")
+  return { ok: true }
+}

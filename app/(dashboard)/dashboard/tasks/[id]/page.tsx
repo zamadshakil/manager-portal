@@ -10,6 +10,7 @@ import {
 import { PageHeader } from "@/components/dashboard/page-header"
 import { TaskSubmissionForm } from "@/components/dashboard/task-submission-form"
 import { StatusBadge } from "@/components/dashboard/status-badge"
+import { DeleteTaskButton } from "@/components/dashboard/delete-task-button"
 import { formatRelative } from "@/lib/format"
 
 export default async function TaskDetailPage({
@@ -43,6 +44,7 @@ export default async function TaskDetailPage({
       <PageHeader
         title={task.title}
         description={task.description ?? "Task details and submission."}
+        action={isManager ? <DeleteTaskButton taskId={task.id} /> : undefined}
       />
 
       {/* Meta strip */}
@@ -74,7 +76,7 @@ export default async function TaskDetailPage({
       </div>
 
       {/* Instructions */}
-      {task.instructions ? (
+      {isManager && task.instructions ? (
         <section className="rounded-xl border border-border bg-card shadow-card">
           <header className="px-4 py-3.5 lg:px-5 border-b border-border flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f2f9ff] text-[#097fe8]">

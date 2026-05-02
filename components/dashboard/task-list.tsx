@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { CalendarClock, Users, AlertTriangle, CheckCircle2 } from "lucide-react"
 import { formatRelative } from "@/lib/format"
+import { DeleteTaskButton } from "@/components/dashboard/delete-task-button"
 import type { TaskWithStats } from "@/lib/data"
 
 interface TaskListProps {
@@ -85,6 +86,7 @@ export function TaskList({ tasks, emptyHint }: TaskListProps) {
                     <CheckCircle2 className="h-3 w-3 text-primary" aria-hidden="true" />
                     {completion}%
                   </span>
+                  <DeleteTaskButton taskId={t.id} iconOnly />
                 </div>
               </div>
               {t.total_assigned > 0 ? (
