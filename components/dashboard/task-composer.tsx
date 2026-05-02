@@ -302,6 +302,16 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
                                 >
                                   {rule.rule_name}
                                 </span>
+                                {rule.creator_role === "main_admin" && (
+                                  <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold text-blue-600 border border-blue-100">
+                                    GLOBAL
+                                  </span>
+                                )}
+                                {rule.creator_role === "manager" && (
+                                  <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-600 border border-amber-100">
+                                    TEAM
+                                  </span>
+                                )}
                                 <span
                                   className={cn(
                                     "rounded-full px-1.5 py-0.5 text-[10px] font-semibold shrink-0",

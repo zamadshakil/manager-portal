@@ -23,9 +23,7 @@ alter table public.report_snapshots enable row level security;
 drop policy if exists profiles_select on public.profiles;
 create policy profiles_select on public.profiles for select
   using (
-    auth.uid() = id
-    or public.is_main_admin()
-    or (public.current_user_role() = 'manager' and team_id = public.current_user_team())
+    auth.uid() is not null
   );
 
 drop policy if exists profiles_update_self on public.profiles;
@@ -99,12 +97,23 @@ create policy rules_select on public.validation_rules for select
     public.is_main_admin()
     or public.is_manager_of(team_id)
     or team_id = public.current_user_team()
+    or team_id is null
   );
 
 drop policy if exists rules_manager_write on public.validation_rules;
 create policy rules_manager_write on public.validation_rules for all
-  using (public.is_manager_of(team_id) or public.is_main_admin())
-  with check (public.is_manager_of(team_id) or public.is_main_admin());
+  using (
+    public.is_main_admin()
+    or public.is_manager_of(team_id)
+    or team_id = public.current_user_team()
+    or (team_id is null and public.current_user_role() = 'manager')
+  )
+  with check (
+    public.is_main_admin()
+    or public.is_manager_of(team_id)
+    or team_id = public.current_user_team()
+    or (team_id is null and public.current_user_role() = 'manager')
+  );
 
 -- ----------------------------------------------------------------------------
 -- validation_runs (read-only from clients; writes happen via service role)

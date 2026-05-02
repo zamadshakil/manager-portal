@@ -113,6 +113,7 @@ export interface ValidationRule {
   weight: number
   enabled: boolean
   created_by: string | null
+  creator_role?: UserRole | null
   created_at: string
   updated_at: string
 }
