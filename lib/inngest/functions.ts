@@ -216,8 +216,10 @@ export const processSubmissionFn = inngest.createFunction(
 );
 
 export const onFailureSubmissionFn = inngest.createFunction(
-  { id: "handle-submission-failure" },
-  { event: "inngest/function.failed" },
+  { 
+    id: "handle-submission-failure",
+    triggers: [{ event: "inngest/function.failed" }]
+  },
   async ({ event, step }) => {
     const originalEvent = event.data.event;
     if (originalEvent.name === "app/submission.process") {

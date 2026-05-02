@@ -12,6 +12,7 @@ const MetaSchema = z.object({
   title: z.string().trim().min(2).max(200),
   description: z.string().trim().max(2_000).optional().or(z.literal("")),
   tags: z.string().trim().max(500).optional().or(z.literal("")),
+  target: z.string(),
 })
 
 export async function createMaterial(formData: FormData): Promise<{ ok: boolean; error?: string }> {
@@ -31,13 +32,28 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
     title: formData.get("title") || "",
     description: formData.get("description") ?? "",
     tags: formData.get("tags") ?? "",
+    target: formData.get("target") || "global",
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
+
+  let teamId: string | null = null
+  if (parsed.data.target === "global") {
+    if (profile.role !== "main_admin") {
+      return { ok: false, error: "Only Main Admin can post global materials." }
+    }
+    teamId = null
+  } else {
+    // If manager, enforce their own team_id
+    if (profile.role === "manager" && parsed.data.target !== profile.team_id) {
+      return { ok: false, error: "Managers can only post to their own team." }
+    }
+    teamId = parsed.data.target
+  }
 
   // Random suffix keeps the public URL unguessable; the download proxy
   // (`/api/download/[id]?type=material`) re-checks RLS before streaming bytes.
   const safeName = file.name.replace(/[^\w.\-]+/g, "_")
-  const pathname = `materials/${profile.team_id ?? "global"}/${safeName}`
+  const pathname = `materials/${teamId ?? "global"}/${safeName}`
   const blob = await put(pathname, file, {
     access: "private",
     addRandomSuffix: true,
@@ -55,7 +71,7 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
     .from("materials")
     .insert({
       author_id: profile.id,
-      team_id: profile.role === "main_admin" ? null : profile.team_id,
+      team_id: teamId,
       title: parsed.data.title,
       description: parsed.data.description || null,
       blob_url: blob.url,
@@ -75,7 +91,7 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
 
   await logActivity({
     actorId: profile.id,
-    teamId: profile.team_id,
+    teamId: teamId,
     action: "material.created",
     entityType: "material",
     entityId: data.id,

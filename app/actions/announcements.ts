@@ -10,7 +10,7 @@ const Schema = z.object({
   title: z.string().trim().min(2).max(200),
   body: z.string().trim().min(2).max(5_000),
   priority: z.enum(["low", "normal", "high", "urgent"]),
-  scope: z.enum(["team", "global"]),
+  target: z.string(),
 })
 
 export interface ActionResult {
@@ -24,16 +24,23 @@ export async function createAnnouncement(formData: FormData): Promise<ActionResu
     title: formData.get("title") || "",
     body: formData.get("body") || "",
     priority: formData.get("priority") || undefined,
-    scope: formData.get("scope") || "team",
+    target: formData.get("target") || "global",
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
 
-  // Only main_admin can post a global (team_id null) announcement.
-  if (parsed.data.scope === "global" && profile.role !== "main_admin") {
-    return { ok: false, error: "Only Main Admin can post global announcements." }
+  let teamId: string | null = null
+  if (parsed.data.target === "global") {
+    if (profile.role !== "main_admin") {
+      return { ok: false, error: "Only Main Admin can post global announcements." }
+    }
+    teamId = null
+  } else {
+    // If manager, enforce their own team_id
+    if (profile.role === "manager" && parsed.data.target !== profile.team_id) {
+      return { ok: false, error: "Managers can only post to their own team." }
+    }
+    teamId = parsed.data.target
   }
-  const teamId = parsed.data.scope === "global" ? null : profile.team_id
-  if (parsed.data.scope === "team" && !teamId) return { ok: false, error: "No team assigned." }
 
   const supabase = await createClient()
   const { data, error } = await supabase
@@ -55,7 +62,7 @@ export async function createAnnouncement(formData: FormData): Promise<ActionResu
     action: "announcement.created",
     entityType: "announcement",
     entityId: data.id,
-    metadata: { priority: parsed.data.priority, scope: parsed.data.scope },
+    metadata: { priority: parsed.data.priority, target: parsed.data.target },
   })
 
   revalidatePath("/dashboard")

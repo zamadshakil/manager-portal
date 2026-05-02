@@ -182,6 +182,7 @@ export default async function SubmissionDetail({ params }: PageProps) {
                             <p className="mt-1 text-[12.5px] italic text-muted-foreground">
                               No specific reasons were provided.
                             </p>
+                          )}
                         </div>
                         <div className="text-right shrink-0">
                           <span

@@ -4,14 +4,24 @@ import { useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { FolderOpen, Loader2 } from "lucide-react"
 import { createMaterial } from "@/app/actions/materials"
+import type { UserRole } from "@/lib/types"
 
-export function MaterialUploader() {
+export function MaterialUploader({
+  role,
+  teams,
+  currentTeamId,
+}: {
+  role: UserRole
+  teams: { id: string; name: string }[]
+  currentTeamId: string | null
+}) {
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [tags, setTags] = useState("")
+  const [target, setTarget] = useState<string>("global")
   const [error, setError] = useState<string | null>(null)
   const [pending, start] = useTransition()
 
@@ -27,6 +37,10 @@ export function MaterialUploader() {
     fd.set("title", title.trim())
     fd.set("description", description.trim())
     fd.set("tags", tags.trim())
+    
+    // For managers, force their own team id
+    fd.set("target", role === "manager" && currentTeamId ? currentTeamId : target)
+
     start(async () => {
       const res = await createMaterial(fd)
       if (!res.ok) {
@@ -107,6 +121,24 @@ export function MaterialUploader() {
             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </label>
+
+        {role === "main_admin" ? (
+          <label className="block">
+            <span className="text-[12px] font-semibold text-muted-foreground">Target Audience</span>
+            <select
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="global">Global (All Teams)</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
         {error ? (
           <p role="alert" className="text-[12px] font-semibold text-destructive">

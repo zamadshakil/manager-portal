@@ -14,12 +14,20 @@ const PRIORITIES = [
   { id: "urgent", label: "Urgent" },
 ] as const
 
-export function AnnouncementComposer({ role }: { role: UserRole }) {
+export function AnnouncementComposer({
+  role,
+  teams,
+  currentTeamId,
+}: {
+  role: UserRole
+  teams: { id: string; name: string }[]
+  currentTeamId: string | null
+}) {
   const router = useRouter()
   const [title, setTitle] = useState("")
   const [body, setBody] = useState("")
   const [priority, setPriority] = useState<(typeof PRIORITIES)[number]["id"]>("normal")
-  const [scope, setScope] = useState<"team" | "global">("team")
+  const [target, setTarget] = useState<string>("global")
   const [error, setError] = useState<string | null>(null)
   const [pending, start] = useTransition()
 
@@ -30,7 +38,10 @@ export function AnnouncementComposer({ role }: { role: UserRole }) {
     fd.set("title", title.trim())
     fd.set("body", body.trim())
     fd.set("priority", priority)
-    fd.set("scope", scope)
+    
+    // For managers, force their own team id
+    fd.set("target", role === "manager" && currentTeamId ? currentTeamId : target)
+    
     start(async () => {
       const res = await createAnnouncement(fd)
       if (!res.ok) {
@@ -112,14 +123,20 @@ export function AnnouncementComposer({ role }: { role: UserRole }) {
           </div>
 
           {role === "main_admin" ? (
-            <label className="flex items-center gap-1.5 text-[12px] font-semibold">
-              <input
-                type="checkbox"
-                checked={scope === "global"}
-                onChange={(e) => setScope(e.target.checked ? "global" : "team")}
-                className="rounded border-border"
-              />
-              Global (all teams)
+            <label className="flex items-center gap-2 text-[12px] font-semibold text-muted-foreground ml-2">
+              Audience:
+              <select
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                className="rounded-lg border border-border bg-background px-2.5 py-1 text-[12.5px] font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="global">Global (All Teams)</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
             </label>
           ) : null}
 
