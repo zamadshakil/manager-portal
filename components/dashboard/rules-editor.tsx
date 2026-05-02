@@ -236,46 +236,60 @@ export function RulesEditor({ rules, teams, profile }: Props) {
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCreating(false)
-                    setEditing(rule)
-                  }}
-                  aria-label="Edit rule"
-                  className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted"
-                >
-                  <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
+                {rule.creator_role === "main_admin" && (
+                  <span className="mr-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-600 border border-blue-100">
+                    GLOBAL
+                  </span>
+                )}
+                {rule.creator_role === "manager" && (
+                  <span className="mr-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600 border border-amber-100">
+                    TEAM
+                  </span>
+                )}
+                {!(profile?.role === "manager" && rule.creator_role === "main_admin") && (
+                  <>
                     <button
                       type="button"
-                      aria-label={`Delete rule ${rule.rule_name}`}
-                      className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted text-destructive"
+                      onClick={() => {
+                        setCreating(false)
+                        setEditing(rule)
+                      }}
+                      aria-label="Edit rule"
+                      className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted transition-colors"
                     >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete this rule?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Future submissions will skip <strong>{rule.rule_name}</strong>. Existing
-                        validation runs are unaffected.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={() => onDelete(rule.id)}
-                        className="bg-destructive text-white hover:bg-destructive/90"
-                      >
-                        Delete rule
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={`Delete rule ${rule.rule_name}`}
+                          className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted text-destructive transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete this rule?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Future submissions will skip <strong>{rule.rule_name}</strong>. Existing
+                            validation runs are unaffected.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => onDelete(rule.id)}
+                            className="bg-destructive text-white hover:bg-destructive/90"
+                          >
+                            Delete rule
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </>
+                )}
               </div>
             </li>
           ))}
