@@ -19,18 +19,36 @@ const CreateTaskSchema = z.object({
   title: z.string().trim().min(2, "Title is too short").max(200),
   description: z.string().trim().max(2000).optional().or(z.literal("")),
   instructions: z.string().trim().max(8000).optional().or(z.literal("")),
-  due_at: z
+  due_at: z.string().min(1, "Deadline is required"),
+  allow_late: z.coerce.boolean().default(true),
+  late_submission_deadline: z
     .string()
     .optional()
     .or(z.literal(""))
     .transform((v) => (v ? v : null)),
-  allow_late: z.coerce.boolean().default(true),
   require_late_reason: z.coerce.boolean().default(true),
   // "all" assigns to every member of the team; otherwise a comma-separated
   // list of profile UUIDs (multiple <input name="assignee_ids">).
   assign_mode: z.enum(["all", "selected"]).default("all"),
   // Explicit rule IDs to run. null = use all enabled team rules.
   rule_ids: z.array(z.string().uuid()).nullable().default(null),
+}).superRefine((data, ctx) => {
+  if (data.allow_late && !data.late_submission_deadline) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Late submission deadline is required when late submissions are allowed.",
+      path: ["late_submission_deadline"],
+    })
+  }
+  if (data.due_at && data.late_submission_deadline) {
+    if (new Date(data.late_submission_deadline) <= new Date(data.due_at)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Late submission deadline must be after the main deadline.",
+        path: ["late_submission_deadline"],
+      })
+    }
+  }
 })
 
 /**
@@ -52,6 +70,7 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
     instructions: formData.get("instructions") ?? "",
     due_at: formData.get("due_at") ?? "",
     allow_late: formData.get("allow_late") === "on" || formData.get("allow_late") === "true",
+    late_submission_deadline: formData.get("late_submission_deadline") ?? "",
     require_late_reason:
       formData.get("require_late_reason") === "on" ||
       formData.get("require_late_reason") === "true",
@@ -83,6 +102,7 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
       instructions: parsed.data.instructions || null,
       due_at: parsed.data.due_at,
       allow_late: parsed.data.allow_late,
+      late_submission_deadline: parsed.data.late_submission_deadline,
       require_late_reason: parsed.data.require_late_reason,
       rule_ids: parsed.data.rule_ids,
     })
@@ -102,7 +122,6 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
       .from("profiles")
       .select("id")
       .eq("team_id", parsed.data.team_id)
-      .eq("role", "member")
     const rows =
       members?.map((m) => ({ task_id: task.id, assignee_id: (m as { id: string }).id })) ?? []
     if (rows.length > 0) {

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
-import { put, del } from "@vercel/blob"
+import { put, del } from "@/lib/r2"
 import { createClient } from "@/lib/supabase/server"
 import { requireRole } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"

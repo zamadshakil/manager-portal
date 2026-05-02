@@ -53,71 +53,23 @@ export const processSubmissionFn = inngest.createFunction(
       let extracted = "";
       let isTruncated = false;
 
-      // Fetch file from Vercel Blob. Private blobs CANNOT be fetched via raw
-      // HTTP — they require the SDK. We use `get()` which returns { blob, stream }.
-      // If `stream` is null (conditional-get / execution context issues), we
-      // fall back to the signed `downloadUrl` from `head()`.
       let buffer: Buffer;
-      const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
 
       try {
-        const { get: getBlob, head: headBlob } = await import("@vercel/blob");
-        const blobOpts = { access: "private" as const, token: blobToken };
-
-        // Attempt 1: SDK get() — returns stream + metadata
-        const blobResult = await getBlob(submission.blob_url, blobOpts);
+        const { get: getBlob } = await import("@/lib/r2");
+        const blobResult = await getBlob(submission.blob_url);
 
         if (blobResult?.stream) {
           const chunks: Uint8Array[] = [];
-          const reader = blobResult.stream.getReader();
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(value);
+          for await (const chunk of blobResult.stream) {
+            chunks.push(chunk);
           }
           buffer = Buffer.concat(chunks);
-        } else if (blobResult?.blob?.downloadUrl) {
-          // stream was null but we got metadata — use the signed downloadUrl
-          console.warn("[inngest] get() returned no stream, using downloadUrl");
-          const resp = await fetch(blobResult.blob.downloadUrl);
-          if (!resp.ok) {
-            return { text: "", truncated: false, error: `Blob download failed: ${resp.status} ${resp.statusText}` };
-          }
-          buffer = Buffer.from(await resp.arrayBuffer());
         } else {
-          // Attempt 2: head() to get a signed downloadUrl, then fetch that
-          console.warn("[inngest] get() returned no stream or metadata, trying head()");
-          const headResult = await headBlob(submission.blob_url, { token: blobToken } as any);
-          if (headResult?.downloadUrl) {
-            const resp = await fetch(headResult.downloadUrl);
-            if (!resp.ok) {
-              return { text: "", truncated: false, error: `Blob download failed: ${resp.status} ${resp.statusText}` };
-            }
-            buffer = Buffer.from(await resp.arrayBuffer());
-          } else {
-            return { text: "", truncated: false, error: "Blob is inaccessible — no stream or download URL available." };
-          }
+          return { text: "", truncated: false, error: "Blob is inaccessible — no stream available." };
         }
       } catch (blobErr: any) {
-        // Attempt 3: if get() threw, try head() + downloadUrl as last resort
-        console.warn("[inngest] Blob SDK get() threw:", blobErr.message, "— trying head()");
-        try {
-          const { head: headBlob } = await import("@vercel/blob");
-          const headResult = await headBlob(submission.blob_url, {
-            token: blobToken,
-          } as any);
-          if (headResult?.downloadUrl) {
-            const resp = await fetch(headResult.downloadUrl);
-            if (!resp.ok) {
-              return { text: "", truncated: false, error: `Blob download failed: ${resp.status} ${resp.statusText}` };
-            }
-            buffer = Buffer.from(await resp.arrayBuffer());
-          } else {
-            return { text: "", truncated: false, error: `Blob inaccessible: ${blobErr.message}` };
-          }
-        } catch (headErr: any) {
-          return { text: "", truncated: false, error: `Blob completely inaccessible: ${blobErr.message} / ${headErr.message}` };
-        }
+        return { text: "", truncated: false, error: `Blob completely inaccessible: ${blobErr.message}` };
       }
 
       if (!buffer || buffer.length === 0) {

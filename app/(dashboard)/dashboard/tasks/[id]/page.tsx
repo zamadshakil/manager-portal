@@ -25,7 +25,7 @@ export default async function TaskDetailPage({
   if (!task) notFound()
 
   const isManager = canManageTeam(profile, task.team_id)
-  const myAssignment = profile.role === "member" ? await getMyAssignmentForTask(profile, id) : null
+  const myAssignment = await getMyAssignmentForTask(profile, id)
   const assignments = isManager ? await listAssignmentsForTask(id) : []
 
   const due = task.due_at ? new Date(task.due_at) : null
@@ -61,6 +61,12 @@ export default async function TaskDetailPage({
           <Users className="h-3.5 w-3.5" aria-hidden="true" />
           {task.submitted_count}/{task.total_assigned} submitted
         </span>
+        {task.allow_late && task.late_submission_deadline ? (
+          <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-amber-600">
+            <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
+            Late allowed up to {formatRelative(task.late_submission_deadline)}
+          </span>
+        ) : null}
         {task.late_count > 0 ? (
           <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-amber-600">
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
@@ -96,7 +102,7 @@ export default async function TaskDetailPage({
       ) : null}
 
       {/* Member submission form (or read-only state) */}
-      {profile.role === "member" ? (
+      {profile.role === "member" || myAssignment ? (
         <section className="rounded-xl border border-border bg-card shadow-card">
           <header className="px-4 py-3.5 lg:px-5 border-b border-border flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f2f9ff] text-[#097fe8]">
@@ -128,6 +134,7 @@ export default async function TaskDetailPage({
                 taskTitle={task.title}
                 dueAt={task.due_at}
                 allowLate={task.allow_late}
+                lateSubmissionDeadline={task.late_submission_deadline}
                 requireLateReason={task.require_late_reason}
               />
             ) : (
@@ -191,16 +198,31 @@ export default async function TaskDetailPage({
                       </p>
                     ) : null}
                   </div>
-                  <StatusBadge status={a.status} />
-                  {a.submitted_at ? (
-                    <span className="text-[11.5px] text-muted-foreground">
-                      {formatRelative(a.submitted_at)}
-                    </span>
-                  ) : null}
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={a.status} />
+                      {a.submission?.status ? (
+                        <StatusBadge status={a.submission.status as any} />
+                      ) : null}
+                    </div>
+                    {a.submitted_at ? (
+                      <span className="text-[11.5px] text-muted-foreground whitespace-nowrap">
+                        {new Date(a.submitted_at).toLocaleString([], {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </span>
+                    ) : null}
+                    {a.submission?.score !== null && a.submission?.score !== undefined ? (
+                      <span className="text-[12px] font-medium text-foreground">
+                        Score: {a.submission.score}/100
+                      </span>
+                    ) : null}
+                  </div>
                   {a.submission_id ? (
                     <Link
                       href={`/dashboard/submissions/${a.submission_id}`}
-                      className="text-[12px] font-semibold text-primary hover:underline"
+                      className="text-[12px] font-semibold text-primary hover:underline ml-2"
                     >
                       Open
                     </Link>

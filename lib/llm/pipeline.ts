@@ -176,13 +176,10 @@ async function runPipeline(submissionId: string) {
 
     try {
       // Step 1: Fetch the private blob via the SDK (handles auth automatically).
-      const { get: getBlob } = await import("@vercel/blob")
+      const { get: getBlob } = await import("@/lib/r2")
       console.log("[pipeline] fetching blob for", submissionId, "mime:", submission.mime_type)
 
-      const blobResult = await getBlob(submission.blob_url, {
-        access: "private" as const,
-        token: process.env.BLOB_READ_WRITE_TOKEN,
-      })
+      const blobResult = await getBlob(submission.blob_url)
       if (!blobResult || !blobResult.stream) {
         throw new Error(`blob stream is missing for: ${submission.blob_url}`)
       }

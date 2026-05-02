@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { get as getBlob } from "@vercel/blob"
+import { get as getBlob } from "@/lib/r2"
 import { createClient } from "@/lib/supabase/server"
 import { requireProfile } from "@/lib/auth"
 
@@ -55,10 +55,7 @@ export async function GET(
   if (!blobUrl) return NextResponse.json({ error: "No file" }, { status: 404 })
 
   try {
-    const blobResult = await getBlob(blobUrl, {
-      access: "private" as const,
-      token: process.env.BLOB_READ_WRITE_TOKEN,
-    })
+    const blobResult = await getBlob(blobUrl)
     if (!blobResult) {
       return NextResponse.json({ error: "Blob not found" }, { status: 404 })
     }

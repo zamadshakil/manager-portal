@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
-import { put, del } from "@vercel/blob"
+import { put, del } from "@/lib/r2"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireProfile } from "@/lib/auth"
@@ -70,7 +70,7 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   if (parsed.data.taskId) {
     const { data: task } = await supabase
       .from("tasks")
-      .select("id, team_id, due_at, allow_late, require_late_reason, title")
+      .select("id, team_id, due_at, allow_late, late_submission_deadline, require_late_reason, title")
       .eq("id", parsed.data.taskId)
       .maybeSingle()
     if (!task) return { ok: false, error: "Task not found." }
@@ -103,6 +103,15 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
           error: "Submission failed: the deadline has passed and late submissions are not allowed.",
         }
       }
+      if (task.allow_late && task.late_submission_deadline) {
+        const lateDeadline = new Date(task.late_submission_deadline).getTime()
+        if (now > lateDeadline) {
+          return {
+            ok: false,
+            error: "Submission failed: the late submission deadline has passed.",
+          }
+        }
+      }
       isLate = true
       const reason = parsed.data.lateReason?.trim() ?? ""
       if (task.require_late_reason && reason.length < 8) {
@@ -130,7 +139,8 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   })
 
   // ---------- Insert submission row ----------
-  const { data, error } = await supabase
+  const adminClient = createAdminClient()
+  const { data, error } = await adminClient
     .from("submissions")
     .insert({
       uploader_id: profile.id,
@@ -226,8 +236,8 @@ export async function retrySubmission(formData: FormData): Promise<ActionResult>
   // queueing a retry. If the blob was deleted, the pipeline will always fail.
   if (data.blob_url) {
     try {
-      const { head } = await import("@vercel/blob")
-      await head(data.blob_url, { token: process.env.BLOB_READ_WRITE_TOKEN } as any)
+      const { head } = await import("@/lib/r2")
+      await head(data.blob_url)
     } catch {
       return { ok: false, error: "The original file no longer exists. Please upload a new submission instead." }
     }

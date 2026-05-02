@@ -18,6 +18,7 @@ interface TaskSubmissionFormProps {
   taskTitle: string
   dueAt: string | null
   allowLate: boolean
+  lateSubmissionDeadline: string | null
   requireLateReason: boolean
 }
 
@@ -35,6 +36,7 @@ export function TaskSubmissionForm({
   taskTitle,
   dueAt,
   allowLate,
+  lateSubmissionDeadline,
   requireLateReason,
 }: TaskSubmissionFormProps) {
   const router = useRouter()
@@ -51,7 +53,9 @@ export function TaskSubmissionForm({
 
   const due = dueAt ? new Date(dueAt) : null
   const overdue = due ? due.getTime() < Date.now() : false
-  const blocked = overdue && !allowLate
+  const lateDeadline = lateSubmissionDeadline ? new Date(lateSubmissionDeadline).getTime() : null
+  const pastLateDeadline = lateDeadline ? lateDeadline < Date.now() : false
+  const blocked = (overdue && !allowLate) || pastLateDeadline
   const reasonRequired = overdue && requireLateReason
 
   function pickFile(f: File | null) {

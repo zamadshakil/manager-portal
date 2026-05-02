@@ -36,6 +36,7 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
   const [teamId, setTeamId] = useState<string>(defaultTeamId ?? teams[0]?.id ?? "")
   const [mode, setMode] = useState<"all" | "selected">("all")
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [allowLate, setAllowLate] = useState(true)
 
   // Validation rules selection — default: all enabled rules pre-checked
   const enabledRules = rules.filter((r) => r.enabled)
@@ -44,7 +45,7 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
   )
   const [rulesExpanded, setRulesExpanded] = useState(false)
 
-  const teamMembers = members.filter((m) => m.team_id === teamId && m.role === "member")
+  const teamMembers = members.filter((m) => m.team_id === teamId)
 
   function toggleMember(id: string) {
     setSelected((prev) => {
@@ -80,6 +81,14 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
     setError(null)
     setSuccess(null)
     const fd = new FormData(e.currentTarget)
+    const dueRaw = fd.get("due_at") as string
+    if (dueRaw) {
+      fd.set("due_at", new Date(dueRaw).toISOString())
+    }
+    const lateDeadlineRaw = fd.get("late_submission_deadline") as string
+    if (lateDeadlineRaw) {
+      fd.set("late_submission_deadline", new Date(lateDeadlineRaw).toISOString())
+    }
     fd.set("team_id", teamId)
     fd.set("assign_mode", mode)
     if (mode === "selected") {
@@ -340,30 +349,42 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
 
         <div className="grid gap-1.5 sm:grid-cols-2 sm:gap-3">
           <div className="grid gap-1.5">
-            <Label htmlFor="due_at">Deadline (optional)</Label>
-            <Input id="due_at" name="due_at" type="datetime-local" />
+            <Label htmlFor="due_at">Deadline</Label>
+            <Input id="due_at" name="due_at" type="datetime-local" required />
           </div>
           <div className="grid gap-1.5">
             <Label className="flex items-center gap-2 mt-6">
               <input
                 type="checkbox"
                 name="allow_late"
-                defaultChecked
+                checked={allowLate}
+                onChange={(e) => setAllowLate(e.target.checked)}
                 className="h-4 w-4 rounded border-border accent-primary"
               />
               <span className="text-[13px]">Allow late submissions</span>
             </Label>
-            <Label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                name="require_late_reason"
-                defaultChecked
-                className="h-4 w-4 rounded border-border accent-primary"
-              />
-              <span className="text-[13px]">Require reason if late</span>
-            </Label>
+            {allowLate && (
+              <Label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="require_late_reason"
+                  defaultChecked
+                  className="h-4 w-4 rounded border-border accent-primary"
+                />
+                <span className="text-[13px]">Require reason if late</span>
+              </Label>
+            )}
           </div>
         </div>
+
+        {allowLate && (
+          <div className="grid gap-1.5 sm:grid-cols-2 sm:gap-3">
+            <div className="col-start-1 grid gap-1.5">
+              <Label htmlFor="late_submission_deadline">Allowed up to</Label>
+              <Input id="late_submission_deadline" name="late_submission_deadline" type="datetime-local" required />
+            </div>
+          </div>
+        )}
 
         <fieldset className="rounded-lg border border-border p-3">
           <legend className="px-1 text-[12px] font-semibold">Assign to</legend>
