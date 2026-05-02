@@ -39,10 +39,14 @@ export default async function SubmissionDetail({ params }: PageProps) {
     .eq("id", submission.uploader_id)
     .maybeSingle()
 
+  const isSystemFailure =
+    (submission.status === "failed" || submission.status === "needs_review") &&
+    !((submission.metadata as any)?.rules_evaluated > 0)
+
   const canRetry =
     profile.role === "main_admin" ||
     (profile.role === "manager" && profile.team_id === submission.team_id) ||
-    profile.id === submission.uploader_id
+    (profile.id === submission.uploader_id && isSystemFailure)
   const canDelete =
     profile.role === "main_admin" ||
     (profile.role === "manager" && profile.team_id === submission.team_id)

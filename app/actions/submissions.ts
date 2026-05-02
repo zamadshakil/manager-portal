@@ -217,16 +217,32 @@ export async function retrySubmission(formData: FormData): Promise<ActionResult>
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("submissions")
-    .select("id, team_id, uploader_id, status")
+    .select("id, team_id, uploader_id, status, metadata, blob_url")
     .eq("id", parsed.data.id)
     .single()
   if (error || !data) return { ok: false, error: "Submission not found." }
 
-  // Only managers, admins, or the original uploader (on failed/needs_review) may retry.
+  // Pre-flight check: verify the file still exists in Vercel Blob before
+  // queueing a retry. If the blob was deleted, the pipeline will always fail.
+  if (data.blob_url) {
+    try {
+      const { head } = await import("@vercel/blob")
+      await head(data.blob_url, { token: process.env.BLOB_READ_WRITE_TOKEN } as any)
+    } catch {
+      return { ok: false, error: "The original file no longer exists. Please upload a new submission instead." }
+    }
+  }
+
+  // Only managers, admins, or the original uploader (on system failure) may retry.
+  // A system failure is when it failed but the AI didn't successfully evaluate any rules.
+  const isSystemFailure =
+    (data.status === "failed" || data.status === "needs_review") &&
+    !((data.metadata as any)?.rules_evaluated > 0)
+
   const canRetry =
     profile.role === "main_admin" ||
     (profile.role === "manager" && profile.team_id === data.team_id) ||
-    profile.id === data.uploader_id
+    (profile.id === data.uploader_id && isSystemFailure)
   if (!canRetry) return { ok: false, error: "Not authorized." }
 
   const admin = createAdminClient()
