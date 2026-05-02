@@ -23,9 +23,10 @@ interface SubmissionsTableProps {
   rows: Submission[]
   showFooterLink?: boolean
   emptyHint?: string
+  canDelete?: boolean
 }
 
-export function SubmissionsTable({ rows, showFooterLink = true, emptyHint }: SubmissionsTableProps) {
+export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDelete = false }: SubmissionsTableProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [isDeleting, startDeleting] = useTransition()
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
@@ -85,7 +86,7 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint }: Sub
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {selectedIds.size > 0 && (
+            {canDelete && selectedIds.size > 0 && (
               <button
                 onClick={() => confirmDelete(Array.from(selectedIds))}
                 className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-destructive hover:text-destructive/80 transition-colors"
@@ -120,13 +121,15 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint }: Sub
               {rows.map((row) => (
                 <li key={row.id} className="px-4 py-3">
                   <div className="flex items-start gap-3">
-                    <div className="pt-1 shrink-0">
-                      <Checkbox
-                        checked={selectedIds.has(row.id)}
-                        onCheckedChange={(checked) => handleSelectRow(row.id, !!checked)}
-                        aria-label={`Select ${row.title}`}
-                      />
-                    </div>
+                    {canDelete && (
+                      <div className="pt-1 shrink-0">
+                        <Checkbox
+                          checked={selectedIds.has(row.id)}
+                          onCheckedChange={(checked) => handleSelectRow(row.id, !!checked)}
+                          aria-label={`Select ${row.title}`}
+                        />
+                      </div>
+                    )}
                     <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warm-white text-[10.5px] font-semibold tracking-wide">
                       {fileIconLabel(row.mime_type)}
                     </span>
@@ -138,13 +141,15 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint }: Sub
                         >
                           {row.title}
                         </Link>
-                        <button
-                          onClick={() => confirmDelete([row.id])}
-                          className="text-muted-foreground hover:text-destructive p-1 rounded transition-colors"
-                          title="Delete submission"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        {canDelete && (
+                          <button
+                            onClick={() => confirmDelete([row.id])}
+                            className="text-muted-foreground hover:text-destructive p-1 rounded transition-colors"
+                            title="Delete submission"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
                       <p className="text-[11px] text-muted-foreground">
                         {formatBytes(row.size_bytes)} · {formatRelative(row.created_at)}
@@ -168,13 +173,15 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint }: Sub
               <table className="w-full text-left">
                 <thead>
                   <tr className="border-b border-border text-[11px] uppercase tracking-[0.04em] text-muted-foreground">
-                    <th className="px-5 py-2.5 w-10">
-                      <Checkbox
-                        checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                        onCheckedChange={(c) => handleSelectAll(!!c)}
-                        aria-label="Select all submissions"
-                      />
-                    </th>
+                    {canDelete && (
+                      <th className="px-5 py-2.5 w-10">
+                        <Checkbox
+                          checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                          onCheckedChange={(c) => handleSelectAll(!!c)}
+                          aria-label="Select all submissions"
+                        />
+                      </th>
+                    )}
                     <th className="px-2 py-2.5 font-semibold w-full">Submission</th>
                     <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Status</th>
                     <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Score</th>
@@ -188,13 +195,15 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint }: Sub
                 <tbody className="divide-y divide-border text-[13px]">
                   {rows.map((row) => (
                     <tr key={row.id} className="hover:bg-muted/40 transition-colors">
-                      <td className="px-5 py-3">
-                        <Checkbox
-                          checked={selectedIds.has(row.id)}
-                          onCheckedChange={(checked) => handleSelectRow(row.id, !!checked)}
-                          aria-label={`Select ${row.title}`}
-                        />
-                      </td>
+                      {canDelete && (
+                        <td className="px-5 py-3">
+                          <Checkbox
+                            checked={selectedIds.has(row.id)}
+                            onCheckedChange={(checked) => handleSelectRow(row.id, !!checked)}
+                            aria-label={`Select ${row.title}`}
+                          />
+                        </td>
+                      )}
                       <td className="px-2 py-3 max-w-[0px] w-full">
                         <div className="flex items-center gap-3 min-w-0">
                           <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-warm-white text-[10.5px] font-semibold tracking-wide">
@@ -222,13 +231,15 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint }: Sub
                       </td>
                       <td className="px-5 py-3 text-right">
                         <div className="flex items-center justify-end gap-3">
-                          <button
-                            onClick={() => confirmDelete([row.id])}
-                            className="text-muted-foreground hover:text-destructive transition-colors p-1"
-                            title="Delete submission"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {canDelete && (
+                            <button
+                              onClick={() => confirmDelete([row.id])}
+                              className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                              title="Delete submission"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                           <Link
                             href={`/dashboard/submissions/${row.id}`}
                             className="inline-flex items-center gap-1 text-[12px] font-semibold text-primary hover:underline"

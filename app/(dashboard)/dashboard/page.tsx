@@ -103,7 +103,8 @@ async function StatCardsSection({ profile }: { profile: Profile }) {
 async function RecentSubmissionsSection({ profile }: { profile: Profile }) {
   // Reuses the React.cache'd summary — no second query.
   const summary = await getDashboardSummary(profile)
-  return <SubmissionsTable rows={summary.recent} />
+  const canDelete = profile.role === "manager" || profile.role === "main_admin"
+  return <SubmissionsTable rows={summary.recent} canDelete={canDelete} />
 }
 
 async function MaterialsSection({ profile }: { profile: Profile }) {

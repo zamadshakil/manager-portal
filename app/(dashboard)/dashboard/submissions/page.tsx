@@ -32,6 +32,8 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
 
   const { rows } = await listSubmissions(profile, { status, limit: 100 })
 
+  const canDelete = profile.role === "manager" || profile.role === "main_admin"
+
   return (
     <>
       <PageHeader
@@ -66,6 +68,7 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
               ? "Upload your first document to start the validation pipeline."
               : "Your team hasn't uploaded anything yet."
         }
+        canDelete={canDelete}
       />
     </>
   )
