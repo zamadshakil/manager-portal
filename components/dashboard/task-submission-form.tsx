@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import { createSubmission } from "@/app/actions/submissions"
 import { usePipeline } from "@/hooks/use-pipeline"
 
-const ACCEPTED_EXT = [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg"]
+const ACCEPTED_EXT = [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".txt", ".png", ".jpg", ".jpeg"]
 
 interface TaskSubmissionFormProps {
   taskId: string
@@ -160,7 +160,7 @@ export function TaskSubmissionForm({
               {file ? file.name : "Drop file or click to browse"}
             </p>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-              Up to 25 MB · PDF, DOC, PPT, PNG, JPG
+              Up to 25 MB · PDF, DOC, DOCX, TXT, PPT, PNG, JPG
             </p>
           </div>
         </div>

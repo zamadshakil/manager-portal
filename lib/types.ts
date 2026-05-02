@@ -198,6 +198,7 @@ export const ACCEPTED_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "image/png",
   "image/jpeg",
+  "text/plain",
 ] as const
 
 export const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024 // 25 MB

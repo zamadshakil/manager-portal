@@ -96,6 +96,10 @@ export async function extractText(buf: Buffer, mimeType: string): Promise<ParseR
     case "image/png":
     case "image/jpeg":
       return parseImage(buf, mimeType)
+    case "text/plain":
+      const txt = buf.toString("utf8")
+      const clampedTxt = clamp(txt)
+      return { text: clampedTxt.text, truncated: clampedTxt.truncated }
     default:
       return { text: "", warning: `Unsupported MIME type: ${mimeType}`, truncated: false }
   }
