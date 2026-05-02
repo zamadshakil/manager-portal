@@ -25,7 +25,7 @@ const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS ?? 45_000)
 
 // Bumped whenever the system prompt or schema changes so we can compare
 // historical runs in `validation_runs.prompt_version`.
-export const PROMPT_VERSION = "v5"
+export const PROMPT_VERSION = "v6"
 
 // ── Schemas ────────────────────────────────────────────────────────────────
 // IMPORTANT: `reasons` uses `.min(0)` at the schema level. We enforce at
@@ -172,17 +172,25 @@ export async function runRule(
           topP: 0.01,
           schema: RuleResultSchema,
           system: [
-            "You are a strict but fair document validator.",
-            "Return ONLY a raw structured JSON object matching the schema. DO NOT wrap the output in ```json markdown blocks.",
-            "Score is 0-100 where 100 is fully compliant.",
-            `Pass=true only if score >= ${rule.threshold}.`,
-            "CRITICAL RULES:",
-            "1. Evaluate ONLY what the rule instructions explicitly ask for. Do NOT invent or assume additional requirements.",
-            "2. If the document is a different type than what the rule expects (e.g. a technical spec checked against academic formatting), score based only on what the rule asks, not what the document 'should' have.",
-            "3. If the rule criteria are not applicable to this document type, set pass=true, score=100, and explain it is not applicable.",
-            "4. Be specific in `reasons`; cite short excerpts from the document where possible. YOU MUST PROVIDE AT LEAST ONE REASON, EVEN IF SCORE IS 100.",
-            "5. Do NOT hallucinate content that is not in the document.",
-          ].join(" "),
+            "You are a professional document quality auditor.",
+            "Return ONLY a raw structured JSON object matching the schema. DO NOT wrap in ```json blocks.",
+            "",
+            "SCORING RUBRIC (0-100):",
+            "90-100: Excellent — fully meets all stated criteria with no issues.",
+            "70-89: Good — meets most criteria with minor gaps or formatting issues.",
+            "40-69: Needs Improvement — partially meets criteria; significant gaps or quality issues.",
+            "0-39: Poor — does not meet the stated criteria or is largely irrelevant.",
+            "",
+            `The pass threshold for this rule is ${rule.threshold}. Set pass=true ONLY if the score >= ${rule.threshold}.`,
+            "",
+            "CRITICAL INSTRUCTIONS:",
+            "1. Evaluate ONLY against the criteria stated in the rule. Do NOT invent requirements.",
+            "2. Be consistent: the same document evaluated against the same rule must always produce a similar score (within ±5 points).",
+            "3. Anchor your score to the rubric above. A mediocre document should score 50-65, not 28 or 100.",
+            "4. In reasons, cite specific evidence from the document. You MUST provide at least one reason.",
+            "5. Do NOT hallucinate content. Only reference text actually present in the document.",
+            "6. If the rule criteria are not applicable to this document type, set pass=true and score=100.",
+          ].join("\n"),
           prompt,
           abortSignal: anySignal(signal, opts.abortSignal),
         }),
@@ -236,9 +244,13 @@ export async function summarize(
           topP: 0.01,
           schema: SummarySchema,
           system: [
-            "You generate concise executive summaries of business documents. Return ONLY a raw JSON object matching the schema. DO NOT wrap the output in ```json markdown blocks.",
-            "Only describe what is actually in the document. Do NOT invent or assume content that is not present.",
-            "For predictive_flags, only flag genuine risks that are directly supported by the document content.",
+            "You generate concise, professional executive summaries of documents.",
+            "Return ONLY a raw JSON object matching the schema. DO NOT wrap in ```json blocks.",
+            "Rules:",
+            "- summary: Write exactly 3-5 sentences. Be factual and specific. Mention key topics and conclusions.",
+            "- topics: List 3-6 main topics or themes found in the document.",
+            "- predictive_flags: List 0-3 genuine risks or concerns ONLY if directly supported by the content. If the document is solid, return an empty array.",
+            "- Do NOT invent or assume content that is not in the document.",
           ].join(" "),
           prompt: promptParts.join("\n"),
           abortSignal: anySignal(signal, opts.abortSignal),
