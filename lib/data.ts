@@ -269,21 +269,30 @@ export async function listRules(profile: Profile): Promise<ValidationRule[]> {
 
   let q = supabase
     .from("validation_rules")
-    .select("*")
+    .select("*, creator:profiles!created_by(role)")
     .order("created_at", { ascending: false })
 
   // Scope rules:
   // - main_admin sees all rules (no filter)
   // - manager sees their team's rules AND global rules (team_id is null)
   // - member should not access this directly
-  if (profile.role === "manager" && profile.team_id) {
-    q = q.or(`team_id.eq.${profile.team_id},team_id.is.null`)
+  if (profile.role === "manager") {
+    if (profile.team_id) {
+      q = q.or(`team_id.eq.${profile.team_id},team_id.is.null`)
+    } else {
+      q = q.is("team_id", null)
+    }
   } else if (profile.role !== "main_admin") {
     return [] // Members don't have access to rules
   }
 
   const { data } = await q
-  return (data ?? []) as ValidationRule[]
+  if (!data) return []
+
+  return (data as any[]).map((row) => ({
+    ...row,
+    creator_role: row.creator?.role ?? null,
+  })) as ValidationRule[]
 }
 
 export async function listTeamMembers(profile: Profile): Promise<Profile[]> {

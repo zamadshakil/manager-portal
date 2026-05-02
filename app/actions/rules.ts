@@ -32,15 +32,21 @@ export async function upsertRule(formData: FormData) {
   const supabase = await createClient()
 
   if (id) {
-    // For updates, just verify the rule exists
+    // For updates, check permission
     const { data: existingRule } = await supabase
       .from("validation_rules")
-      .select("id")
+      .select("id, created_by, profiles!created_by(role)")
       .eq("id", id)
       .single()
 
     if (!existingRule) {
       return { ok: false, error: "Rule not found." }
+    }
+
+    // Permission check: Managers cannot edit rules created by main_admin
+    const creatorRole = (existingRule as any).profiles?.role
+    if (profile.role === "manager" && creatorRole === "main_admin") {
+      return { ok: false, error: "Managers cannot edit rules created by the main admin." }
     }
 
     const { error } = await supabase
@@ -66,7 +72,7 @@ export async function upsertRule(formData: FormData) {
     const { data, error } = await supabase
       .from("validation_rules")
       .insert({
-        team_id: null, // Rules are now global
+        team_id: profile.role === "main_admin" ? null : (profile.team_id || null),
         rule_name: parsed.data.rule_name,
         description: parsed.data.description || null,
         prompt_template: parsed.data.prompt_template,
@@ -96,15 +102,21 @@ export async function deleteRule(formData: FormData) {
   const id = String(formData.get("id") || "")
   const supabase = await createClient()
 
-  // Verify rule exists
+  // Verify rule exists and check permission
   const { data: rule } = await supabase
     .from("validation_rules")
-    .select("id")
+    .select("id, created_by, profiles!created_by(role)")
     .eq("id", id)
     .single()
 
   if (!rule) {
     return { ok: false, error: "Rule not found." }
+  }
+
+  // Permission check: Managers cannot delete rules created by main_admin
+  const creatorRole = (rule as any).profiles?.role
+  if (profile.role === "manager" && creatorRole === "main_admin") {
+    return { ok: false, error: "Managers cannot delete rules created by the main admin." }
   }
 
   const { error } = await supabase.from("validation_rules").delete().eq("id", id)
