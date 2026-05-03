@@ -104,9 +104,14 @@ export class ChatPersistence {
     if (error) {
       // Log loudly but don't throw — losing a single message must not
       // crash the live stream the user is watching.
-      console.error(
-        `[persistence] saveMessage(${message.role}) failed in mode=${this.mode}: ${error.message}`,
-      )
+      console.error("[persistence] saveMessage failed:", {
+        mode: this.mode,
+        role: message.role,
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        threadId,
+      })
     }
   }
 
@@ -141,7 +146,11 @@ export class ChatPersistence {
       }
 
       // Fall through to a server-generated ID if even that failed.
-      console.error("[persistence] ensureThread reuse failed:", insertErr?.message)
+      console.error("[persistence] ensureThread reuse failed:", {
+        message: insertErr?.message,
+        code: insertErr?.code,
+        threadId,
+      })
     }
 
     const { data, error } = await this.supabase
@@ -151,8 +160,13 @@ export class ChatPersistence {
       .single()
 
     if (error || !data) {
-      console.error("[persistence] ensureThread create failed:", error?.message)
-      throw new Error("Failed to create chat thread")
+      console.error("[persistence] ensureThread create failed:", {
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+      })
+      throw new Error(`Failed to create chat thread: ${error?.message || "Unknown error"}`)
     }
     return data.id
   }

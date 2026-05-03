@@ -115,19 +115,26 @@ export async function POST(req: Request) {
   const accessToken = session?.access_token ?? null
 
   // ---- Path 1: MCP service (preferred) ----
-  const mcp = await streamChatFromMcp({
-    scope,
-    accessToken,
-    threadId: body.threadId,
-    messages: flat,
-    signal: req.signal,
-  })
+  let mcp: Response | null = null
+  let fallbackReason = "mcp-unreachable"
 
-  if (mcp && mcp.body) {
+  try {
+    mcp = await streamChatFromMcp({
+      scope,
+      accessToken,
+      threadId: body.threadId,
+      messages: flat,
+      signal: req.signal,
+    })
+  } catch (err: any) {
+    console.error("[smart-ai] mcp fetch threw:", err.message)
+    fallbackReason = "mcp-fetch-error"
+  }
+
+  if (mcp && mcp.ok && mcp.body) {
     // Pass the AI SDK UI Message Stream straight through to <useChat>.
     const headers = new Headers({
-      "content-type":
-        mcp.headers.get("content-type") ?? "text/event-stream; charset=utf-8",
+      "content-type": mcp.headers.get("content-type") ?? "text/event-stream; charset=utf-8",
       "cache-control": "no-store",
       "x-smart-ai-source": "mcp",
     })
@@ -139,10 +146,15 @@ export async function POST(req: Request) {
 
   // ---- Path 2: AI Gateway fallback ----
   // Surface why we fell back so operators don't have to grep logs blind.
-  const fallbackReason =
-    !process.env.MCP_SERVICE_URL || !process.env.MCP_SERVICE_TOKEN
-      ? "mcp-not-configured"
-      : "mcp-unreachable"
+  if (mcp && !mcp.ok) {
+    const text = await mcp.text().catch(() => "")
+    console.warn(`[smart-ai] mcp returned error (${mcp.status}): ${text.slice(0, 200)}`)
+    fallbackReason = `mcp-status-${mcp.status}`
+  }
+
+  if (!process.env.MCP_SERVICE_URL || !process.env.MCP_SERVICE_TOKEN) {
+    fallbackReason = "mcp-not-configured"
+  }
   console.warn(`[smart-ai] using fallback: ${fallbackReason}`)
 
   const systemPrompt = [
