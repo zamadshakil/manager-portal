@@ -78,7 +78,7 @@ export async function getDashboardSummary(profile: Profile): Promise<DashboardSu
   const avgScore =
     scoreRows && scoreRows.length > 0
       ? Math.round(
-          scoreRows.reduce((acc, r) => acc + Number((r as { score: number }).score), 0) /
+          scoreRows.reduce((acc: number, r: any) => acc + Number((r as { score: number }).score), 0) /
             scoreRows.length,
         )
       : 0
@@ -357,7 +357,7 @@ export async function listDepartmentsWithStats(): Promise<DepartmentWithStats[]>
   // pulled every profile across every team into Node memory.
   const { data, error } = await supabase.rpc("list_departments_with_stats")
   if (!error && data) {
-    return data.map((row) => ({
+    return data.map((row: any) => ({
       id: row.id,
       name: row.name,
       description: row.description,
