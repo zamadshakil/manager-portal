@@ -98,6 +98,18 @@ export async function POST(req: Request) {
 
     // ---- 5. DB row ----------------------------------------------------
     const supabase = await createClient()
+    
+    // Ensure the thread exists before referencing it to prevent FK violations.
+    // The frontend mints thread IDs locally before any message is sent.
+    if (threadId) {
+      await supabase
+        .from("chat_threads")
+        .upsert(
+          { id: threadId, user_id: profile.id, title: "New conversation" },
+          { onConflict: "id", ignoreDuplicates: true }
+        )
+    }
+
     const { data: doc, error: dbError } = await supabase
       .from("chat_documents")
       .insert({
