@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   ListChecks,
   Megaphone,
+  Sparkles,
   Upload,
   Users,
 } from "lucide-react"
@@ -28,6 +29,7 @@ interface NavItem {
 const items: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: LayoutDashboard, roles: ["main_admin", "manager", "member"] },
   { href: "/dashboard/tasks", label: "Tasks", icon: ListChecks, roles: ["main_admin", "manager", "member"] },
+  { href: "/dashboard/smart-ai", label: "Smart AI", icon: Sparkles, roles: ["main_admin", "manager", "member"] },
   { href: "/dashboard/submissions", label: "Submissions", icon: Upload, roles: ["main_admin", "manager", "member"] },
   { href: "/dashboard/team", label: "Team", icon: Users, roles: ["main_admin", "manager"] },
   { href: "/dashboard/announcements", label: "News", icon: Megaphone, roles: ["main_admin", "manager", "member"] },
