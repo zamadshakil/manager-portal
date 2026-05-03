@@ -73,6 +73,30 @@ RAG_SERVICE_TOKEN = os.environ.get("RAG_SERVICE_TOKEN", "")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "1536"))
 
+# Embedding provider resolution.
+#
+# Priority:
+#   1. EMBEDDING_API_KEY + EMBEDDING_BASE_URL (explicit override — useful when
+#      you want chat on OpenRouter but embeddings on OpenAI direct).
+#   2. OPENROUTER_API_KEY (single-key setup — chat + embeddings via OpenRouter).
+#   3. OPENAI_API_KEY (legacy / OpenAI direct).
+#
+# OpenRouter is OpenAI-compatible, so we just swap the base URL.
+EMBEDDING_API_KEY = (
+    os.environ.get("EMBEDDING_API_KEY")
+    or os.environ.get("OPENROUTER_API_KEY")
+    or os.environ.get("OPENAI_API_KEY", "")
+)
+EMBEDDING_BASE_URL = (
+    os.environ.get("EMBEDDING_BASE_URL")
+    or (
+        "https://openrouter.ai/api/v1"
+        if os.environ.get("OPENROUTER_API_KEY")
+        and not os.environ.get("EMBEDDING_API_KEY")
+        else None
+    )
+)
+
 
 # ---------------------------------------------------------------------------
 # Lifespan: open a single asyncpg pool reused across requests
@@ -224,7 +248,13 @@ class LogQueryRequest(BaseModel):
 async def embed(text: str) -> list[float]:
     from langchain_openai import OpenAIEmbeddings  # type: ignore[import-not-found]
 
-    embedder = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+    kwargs: dict[str, Any] = {"model": EMBEDDING_MODEL}
+    if EMBEDDING_API_KEY:
+        kwargs["api_key"] = EMBEDDING_API_KEY
+    if EMBEDDING_BASE_URL:
+        kwargs["base_url"] = EMBEDDING_BASE_URL
+
+    embedder = OpenAIEmbeddings(**kwargs)
     # langchain's embed_query is sync; offload to a thread to avoid blocking
     import anyio
 
