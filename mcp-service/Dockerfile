@@ -14,7 +14,6 @@ RUN npm install --no-audit --no-fund
 
 COPY tsconfig.json ./
 COPY index.ts ./
-COPY src ./src
 RUN npx tsc -p tsconfig.json
 
 FROM node:22-alpine AS runner
