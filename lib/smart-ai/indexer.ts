@@ -42,6 +42,7 @@ export type IndexSourceType =
   | "submission"
   | "validation_run"
   | "rule"
+  | "chat_attachment"
 
 export interface IndexDocumentInput {
   source_type: IndexSourceType
@@ -65,6 +66,12 @@ export interface IndexDocumentInput {
  */
 export async function indexDocument(input: IndexDocumentInput): Promise<void> {
   if (!isConfigured()) return
+
+  // Disable automatic indexing of general database rows to reserve RAG for explicit documents
+  if (["task", "submission", "validation_run", "announcement", "rule"].includes(input.source_type)) {
+    return
+  }
+
   // Empty / whitespace-only content provides no retrieval value and would
   // waste an embedding call. Skip those instead of polluting the index.
   if (!input.content || input.content.trim().length < 4) return

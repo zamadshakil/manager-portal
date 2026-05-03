@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { streamText, convertToModelMessages, type UIMessage } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
 import { requireProfile } from "@/lib/auth"
+import { createClient } from "@/lib/supabase/server"
 import {
   scopeForProfile,
   streamChatFromMcp,
@@ -45,6 +46,7 @@ export const dynamic = "force-dynamic"
 
 interface Body {
   messages: UIMessage[]
+  threadId?: string
 }
 
 /**
@@ -86,15 +88,28 @@ export async function POST(req: Request) {
         .map((p) => (p as { text: string }).text)
         .join("")
         .trim()
-      if (!content) return null
-      return { role, content } as ChatMessage
+      if (!content && !m.annotations) return null
+      return { 
+        role, 
+        content,
+        metadata: m.annotations?.[0] as Record<string, any> // AI SDK use annotations for extra data
+      } as ChatMessage
     })
     .filter((m): m is ChatMessage => m !== null)
 
+  const supabase = await createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+  const accessToken = session?.access_token ?? null
+
   // ---- Path 1: MCP service (preferred) ----
-  const mcp = await streamChatFromMcp({ scope, messages: flat, signal: req.signal }).catch(
-    () => null,
-  )
+  const mcp = await streamChatFromMcp({
+    scope,
+    accessToken,
+    threadId: body.threadId,
+    messages: flat,
+    signal: req.signal,
+  }).catch(() => null)
+  
   if (mcp && mcp.body) {
     // The MCP service speaks the AI SDK UI Message Stream protocol so the
     // response can be passed straight through to <useChat>.

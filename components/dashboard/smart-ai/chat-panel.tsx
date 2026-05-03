@@ -15,9 +15,11 @@ import {
   RefreshCcw,
   Trash2,
   User2,
+  Paperclip,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Profile } from "@/lib/types"
+import { FilePreview, type Attachment } from "./file-preview"
 
 type ProfileLite = Pick<Profile, "id" | "email" | "full_name" | "role" | "team_id">
 
@@ -87,11 +89,28 @@ export function ChatPanel({
   onSeedConsumed,
 }: ChatPanelProps) {
   const [input, setInput] = useState("")
+  const [threadId, setThreadId] = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [isDragging, setIsDragging] = useState(false)
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    // Simple thread persistence in localStorage
+    const stored = localStorage.getItem("smart_ai_thread_id")
+    if (stored) {
+      setThreadId(stored)
+    } else {
+      const newId = crypto.randomUUID()
+      localStorage.setItem("smart_ai_thread_id", newId)
+      setThreadId(newId)
+    }
+  }, [])
 
   const { messages, sendMessage, setMessages, status, error, regenerate, stop } =
     useChat({
       transport: new DefaultChatTransport({ api: "/api/smart-ai/chat" }),
+      body: { threadId },
     })
 
   // Auto-stick to bottom whenever new tokens arrive.
@@ -112,12 +131,69 @@ export function ChatPanel({
 
   const isStreaming = status === "streaming" || status === "submitted"
 
+  async function handleUpload(file: File) {
+    const tempId = Math.random().toString(36).substring(7)
+    setAttachments((prev) => [...prev, { id: tempId, filename: file.name, status: "uploading" }])
+
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+      const res = await fetch("/api/smart-ai/upload", {
+        method: "POST",
+        body: formData,
+      })
+      if (!res.ok) throw new Error("Upload failed")
+      const data = await res.json()
+
+      setAttachments((prev) =>
+        prev.map((a) =>
+          a.id === tempId ? { id: data.id, filename: data.filename, status: "ready", url: data.r2_url } : a,
+        ),
+      )
+    } catch (err) {
+      console.error("Upload failed:", err)
+      setAttachments((prev) => prev.map((a) => (a.id === tempId ? { ...a, status: "error" } : a)))
+    }
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    files.forEach(handleUpload)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  function onDragOver(e: React.DragEvent) {
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  function onDragLeave(e: React.DragEvent) {
+    e.preventDefault()
+    setIsDragging(false)
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setIsDragging(false)
+    const files = Array.from(e.dataTransfer.files)
+    files.forEach(handleUpload)
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const trimmed = input.trim()
-    if (!trimmed || isStreaming) return
-    sendMessage({ text: trimmed })
+    const readyAttachments = attachments.filter((a) => a.status === "ready")
+    
+    if ((!trimmed && readyAttachments.length === 0) || isStreaming) return
+
+    // Pass attachment metadata in annotations for the backend to process
+    sendMessage({ 
+      text: trimmed || `[Attached ${readyAttachments.length} files]`,
+      annotations: readyAttachments.length > 0 ? [{ attachments: readyAttachments }] : undefined
+    })
+    
     setInput("")
+    setAttachments([])
   }
 
   function handleSuggestion(p: SuggestedPrompt) {
@@ -130,8 +206,24 @@ export function ChatPanel({
       {/* Conversation */}
       <section
         aria-label="Conversation"
-        className="xl:col-span-2 flex flex-col rounded-xl border border-border bg-card shadow-card overflow-hidden min-h-[560px]"
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        className={cn(
+          "xl:col-span-2 flex flex-col rounded-xl border border-border bg-card shadow-card overflow-hidden min-h-[560px] transition-colors relative",
+          isDragging && "bg-primary/5 border-primary/30"
+        )}
       >
+        {isDragging && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-primary/10 backdrop-blur-[2px] pointer-events-none">
+            <div className="flex flex-col items-center gap-3 rounded-2xl bg-background px-8 py-6 shadow-2xl border border-primary/20">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                <ArrowUp className="h-6 w-6" />
+              </div>
+              <p className="text-[15px] font-semibold text-foreground">Drop files to index and discuss</p>
+            </div>
+          </div>
+        )}
         <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3.5 lg:px-5">
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#f2f9ff] text-[#097fe8]">
@@ -220,17 +312,39 @@ export function ChatPanel({
               className="w-full resize-none bg-transparent px-3.5 py-2.5 text-[14px] leading-relaxed placeholder:text-muted-foreground focus:outline-none"
               aria-label="Message Smart AI"
             />
+            <FilePreview
+              attachments={attachments}
+              onRemove={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
+            />
             <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
-              <p className="text-[11px] text-muted-foreground">
-                <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  Enter
-                </kbd>{" "}
-                to send ·{" "}
-                <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  Shift + Enter
-                </kbd>{" "}
-                for newline
-              </p>
+              <div className="flex items-center gap-1">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  className="hidden"
+                  multiple
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  aria-label="Attach files"
+                  title="Attach documents"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
+                <p className="text-[11px] text-muted-foreground">
+                  <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px]">
+                    Enter
+                  </kbd>{" "}
+                  to send ·{" "}
+                  <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px]">
+                    Shift + Enter
+                  </kbd>{" "}
+                  for newline
+                </p>
+              </div>
               {isStreaming ? (
                 <button
                   type="button"
@@ -242,7 +356,7 @@ export function ChatPanel({
               ) : (
                 <button
                   type="submit"
-                  disabled={!input.trim()}
+                  disabled={!input.trim() && attachments.filter(a => a.status === 'ready').length === 0}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.95] disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed"
                   aria-label="Send message"
                 >

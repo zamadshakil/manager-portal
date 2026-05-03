@@ -225,6 +225,7 @@ class IndexRequest(BaseModel):
 class RetrieveRequest(BaseModel):
     scope: Scope
     query: str
+    document_id: str | None = None
     top_k: int = Field(default=6, ge=1, le=20)
 
 
@@ -360,6 +361,12 @@ async def retrieve(req: RetrieveRequest) -> list[RetrievedChunk]:
         where_clauses.append(f"team_id = ${idx}")
         params.append(req.scope.team_id)
         idx += 1
+        
+    if req.document_id:
+        where_clauses.append(f"source_id = ${idx}")
+        params.append(req.document_id)
+        idx += 1
+
     where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
     sql = f"""

@@ -53,6 +53,7 @@ export function scopeForProfile(profile: Profile): ChatScope {
 export interface ChatMessage {
   role: "user" | "assistant" | "system"
   content: string
+  metadata?: Record<string, any>
 }
 
 /**
@@ -62,6 +63,8 @@ export interface ChatMessage {
  */
 export async function streamChatFromMcp(args: {
   scope: ChatScope
+  accessToken: string | null
+  threadId?: string | null
   messages: ChatMessage[]
   signal?: AbortSignal
 }): Promise<Response | null> {
@@ -75,6 +78,8 @@ export async function streamChatFromMcp(args: {
     },
     body: JSON.stringify({
       scope: args.scope,
+      accessToken: args.accessToken,
+      threadId: args.threadId,
       messages: args.messages,
       stream: true,
     }),

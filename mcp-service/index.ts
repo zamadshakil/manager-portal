@@ -24,8 +24,11 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
-import { streamText, type ModelMessage } from "ai"
+import { streamText, type ModelMessage, tool } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
+import { z } from "zod"
+import { createSupabaseTools } from "./supabase-tools.js"
+import { ChatPersistence } from "./persistence.js"
 
 // ---------------------------------------------------------------------------
 // Config
@@ -75,10 +78,13 @@ interface Scope {
 interface ChatMessage {
   role: "user" | "assistant" | "system"
   content: string
+  metadata?: Record<string, any>
 }
 
 interface ChatRequestBody {
   scope: Scope
+  accessToken?: string | null
+  threadId?: string | null
   messages: ChatMessage[]
   stream?: boolean
 }
@@ -124,16 +130,9 @@ function authOk(req: IncomingMessage): boolean {
   return req.headers.authorization === `Bearer ${MCP_SERVICE_TOKEN}`
 }
 
-// ---------------------------------------------------------------------------
-// LangGraph-style retrieval pipeline.
-//
-// Kept as a plain async function for clarity. When the workflow grows
-// (rerankers, query rewriting, multi-hop tool use), promote this to a
-// proper LangGraph state graph.
-// ---------------------------------------------------------------------------
-
-async function retrieveContext(args: {
+async function searchDocument(args: {
   scope: Scope
+  documentId: string
   query: string
 }): Promise<RetrievedChunk[]> {
   if (!RAG_SERVICE_URL) return []
@@ -146,6 +145,7 @@ async function retrieveContext(args: {
     },
     body: JSON.stringify({
       scope: args.scope,
+      document_id: args.documentId, // We'll update the Python backend to accept this
       query: args.query,
       top_k: MAX_TOP_K,
     }),
@@ -175,27 +175,17 @@ async function logQuery(args: {
   })
 }
 
-function buildPrompt(args: { scope: Scope; chunks: RetrievedChunk[] }): string {
-  const role = args.scope.role.replace("_", " ")
-  const context =
-    args.chunks.length === 0
-      ? "(no documents retrieved — answer only from the conversation)"
-      : args.chunks
-          .map(
-            (c, i) =>
-              `[#${i + 1} ${c.source_type}:${c.source_id}${
-                c.title ? ` — ${c.title}` : ""
-              }]\n${c.snippet}`,
-          )
-          .join("\n\n")
+function buildSystemPrompt(scope: Scope): string {
+  const role = scope.role.replace("_", " ")
   return [
-    "You are Smart AI, the assistant inside the Hierarchia manager portal.",
-    `The current user's role is "${role}". Honor their access level — never reveal data outside their scope.`,
-    "Cite retrieved chunks inline using their #N marker. If no chunks were retrieved, say so plainly.",
-    "Be concise, factual, and never invent submission IDs, scores, or names.",
-    "",
-    "Retrieved context:",
-    context,
+    "You are Smart AI, the agentic assistant inside the Hierarchia manager portal.",
+    `The current user's role is "${role}". You have access to database tools that run queries on their behalf.`,
+    "These tools respect the user's Row Level Security (RLS) policies, so you can safely use them to query or modify data.",
+    "If the user asks about a specific document (e.g. PDF), use the 'searchDocument' tool to retrieve relevant sections.",
+    "If the user asks about their tasks, submissions, or team members, use the 'queryDatabase' tool to look up the real data.",
+    "Always use the database tools to fetch real-time information instead of making up answers.",
+    "When modifying data via insertRecord or updateRecord, ask for confirmation or just execute if the user is explicit.",
+    "If you see attachment IDs in the message metadata, those are documents the user has pinned to this conversation. Use 'searchDocument' with those IDs if the user's question relates to them.",
   ].join("\n")
 }
 
@@ -217,33 +207,80 @@ async function handleChat(req: IncomingMessage, res: ServerResponse) {
     return badRequest(res, "scope + non-empty messages required")
   }
 
-  const userQuestion =
-    [...body.messages].reverse().find((m) => m.role === "user")?.content ?? ""
+  const persistence = new ChatPersistence(body.accessToken ?? null)
+  let threadId: string
+  try {
+    threadId = await persistence.ensureThread(body.scope.user_id, body.threadId)
+  } catch (err) {
+    return serverError(res, "Thread management failed")
+  }
+
+  // Load history if we're in an existing thread and the portal only sent the latest turn.
+  // If the portal sends full history, we skip this to avoid duplication.
+  const history = (body.threadId && body.messages.length === 1) 
+    ? await persistence.getMessages(threadId) 
+    : []
+    
+  const allMessages = [...history, ...body.messages]
+  
+  // Save the incoming user message to persistence
+  const lastUserMessage = body.messages[body.messages.length - 1]
+  if (lastUserMessage.role === "user") {
+    await persistence.saveMessage(threadId, lastUserMessage)
+  }
 
   const startedAt = Date.now()
-  const chunks = await retrieveContext({ scope: body.scope, query: userQuestion }).catch(
-    () => [] as RetrievedChunk[],
-  )
+  const system = buildSystemPrompt(body.scope)
 
-  const system = buildPrompt({ scope: body.scope, chunks })
+  // Convert simple chat messages → ModelMessage.
+  const modelMessages: ModelMessage[] = allMessages.map((m) => {
+    let content = m.content
+    if (m.role === "user" && m.metadata?.attachments) {
+      const attachments = m.metadata.attachments as Array<{ id: string; filename: string }>
+      const list = attachments.map((a) => `${a.filename} (id: ${a.id})`).join(", ")
+      content += `\n\n[Context: The user has attached the following documents to this message: ${list}. If needed, use the searchDocument tool with these IDs to answer questions about them.]`
+    }
+    return {
+      role: m.role,
+      content,
+    }
+  })
 
-  // Convert simple chat messages → ModelMessage. The portal already gives us
-  // a clean { role, content } shape so no UIMessage conversion is needed.
-  const modelMessages: ModelMessage[] = body.messages.map((m) => ({
-    role: m.role,
-    content: m.content,
-  }))
+  const supabaseTools = createSupabaseTools(body.accessToken ?? null)
+
+  let sourcesUsed = 0
 
   try {
     const result = streamText({
       model: resolveModel(),
       system,
       messages: modelMessages,
-      onFinish: async ({ usage }) => {
+      maxSteps: 5, // Allow the agent to use multiple tools in sequence
+      tools: {
+        ...supabaseTools,
+        searchDocument: tool({
+          description: "Search inside a specific user-provided document or material by ID to answer questions about its content.",
+          parameters: z.object({
+            documentId: z.string().describe("The UUID or source_id of the document to search inside."),
+            query: z.string().describe("The question or search query to look for in the document."),
+          }),
+          execute: async ({ documentId, query }) => {
+            sourcesUsed += 1
+            return await searchDocument({ scope: body.scope, documentId, query })
+          },
+        }),
+      },
+      onFinish: async ({ usage, text }) => {
+        // Save the assistant's response to persistence
+        await persistence.saveMessage(threadId, {
+          role: "assistant",
+          content: text,
+        })
+
         await logQuery({
           scope: body.scope,
-          question: userQuestion,
-          sources: chunks.length,
+          question: lastUserMessage.content,
+          sources: sourcesUsed,
           latency_ms: Date.now() - startedAt,
           tokens_in: usage?.inputTokens ?? 0,
           tokens_out: usage?.outputTokens ?? 0,
