@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
+import { getSupabaseEnv, warnIfSupabaseUnconfigured } from "@/lib/env"
 
 const PUBLIC_PATHS = ["/auth", "/_next", "/favicon", "/api/auth", "/api/inngest"]
 
@@ -30,9 +31,21 @@ export async function updateSession(request: NextRequest) {
     request: { headers: requestHeaders },
   })
 
+  // After the Railway migration, env vars on the new project may be empty
+  // for a few minutes (key rotation, kong DNS warm-up, etc.). Crashing
+  // here turns every request into a 500 — including /auth/login — which
+  // makes recovery impossible. Instead, fail-open: pass the request
+  // through with a clear server-side warning and let route handlers /
+  // server components render their own "Supabase not configured" state.
+  const env = getSupabaseEnv()
+  if (!env.configured) {
+    warnIfSupabaseUnconfigured("proxy.updateSession")
+    return supabaseResponse
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    env.url,
+    env.anonKey,
     {
       cookies: {
         getAll() {
