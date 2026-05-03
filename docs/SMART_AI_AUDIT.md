@@ -4,7 +4,7 @@
 **Branch:** `smart-ai-audit`
 **Scope:** Smart AI chat (`/dashboard/smart-ai`), MCP service (`mcp-service/`), RAG service (`rag-service/`), shared indexer (`lib/smart-ai/`), and the Supabase tables that back them.
 **Hosting:** All three application services (`manager-portal`, `mcp-service`, `FastAPI-8UVj`) and the self‑hosted Supabase stack (Postgres, GoTrue Auth, Storage, PostgREST, Kong, Studio, Realtime, Imgproxy) run on Railway. Files live in Cloudflare R2.
-**Status:** Findings only — no code changes applied. Implementation plan is at the end.
+**Status:** **Implemented.** All Phase‑1 and Phase‑2 fixes have been applied on this branch. Operator runbook (DB / pgvector / Railway / R2 actions you still need to take) is in §13 at the bottom.
 
 ---
 
@@ -581,6 +581,256 @@ And on the server:
 const last = body.messages[body.messages.length - 1]
 const attachments = (last?.metadata as ChatMetadata | undefined)?.attachments ?? []
 ```
+
+---
+
+## 11. Implementation log (May 4, 2026)
+
+Phase‑1 + Phase‑2 are now applied on this branch. Each row links to the file that changed and the fix it addresses.
+
+| # | Finding | Files changed | What was done |
+|---|---|---|---|
+| C1 / §1 | Schema/code drift, missing `metadata` column, no RLS | `scripts/smart-ai-chat-followup.sql` (new) | Idempotent follow‑up migration: adds `chat_messages.metadata jsonb`, `chat_documents.text_excerpt text`, `chat_documents.owner_id` (alias), `updated_at` trigger on threads, per‑user RLS on all three chat tables, plus `(user_id, updated_at desc)` and `(thread_id, created_at)` indexes. Safe to re‑run. |
+| C2 | AI SDK 6 tool API | `mcp-service/supabase-tools.ts`, `mcp-service/index.ts` | All tools use `inputSchema` (was `parameters`). `streamText` uses `stopWhen: stepCountIs(5)` (was `maxSteps`). `searchDocument` rewritten with the same shape and now passes `source_type`. |
+| C3 | `UIMessage.annotations` doesn't exist | `components/dashboard/smart-ai/chat-panel.tsx`, `app/api/smart-ai/chat/route.ts`, `lib/smart-ai/client.ts` | Switched to typed `UIMessage<PortalUIMessageMetadata>`. Attachments travel as `metadata.attachments`. The transport's `prepareSendMessagesRequest` injects a fresh `threadId` on every send. Server reads `metadata` off the last user message and forwards it to MCP. |
+| H1 | Indexer hard‑skipping every important source | `lib/smart-ai/indexer.ts` | Removed the early‑return. Replaced with optional `RAG_INDEX_DISABLED_TYPES` env kill‑switch. Bumped min content length 4 → 16 so single‑word titles don't pollute the index. |
+| H3 | MCP persistence used anon key + user JWT | `mcp-service/persistence.ts` | Now requires `SUPABASE_SERVICE_ROLE_KEY`. Falls back to anon only when service role is absent (dev). All inserts/selects no longer depend on a user token surviving the stream. Logs every error path. |
+| H5 / Phase 2 | `threadId` global per browser | `components/dashboard/smart-ai/chat-panel.tsx` | `threadId` is keyed by `profile.id`, kept in `localStorage` per user. New "New conversation" button mints a fresh ID and clears messages. |
+| H8 | Inngest cron + Upstash scheduler both run every minute | (Phase 2 follow‑up) | Documented in §13.4 — runtime change requires choosing one. Code unchanged for now to avoid breaking your existing schedule. |
+| M1 | Silent MCP failures | `lib/smart-ai/client.ts` | Wraps the upstream `fetch` in `try/catch` and logs status + body excerpt on non‑2xx so token rotations / timeouts are debuggable. |
+| M2 | Tools allowed any table | `mcp-service/supabase-tools.ts` | `ALLOWED_READ` set + per‑role `ALLOWED_WRITE` map. `member` role has zero write access. `insertRecord` / `updateRecord` reject unknown tables. |
+| M3 | RAG retrieval mixed source types | `rag-service/main.py` | New `source_type` filter. `chat_attachment` rows are *always* scoped to the uploader regardless of role (managers cannot see members' private chat uploads). Managers now also see their own uploads, not only their team's. |
+| M4 | Lost assistant messages on insert failure | `mcp-service/persistence.ts` | Added 3‑attempt retry with exponential backoff and a final structured log. |
+| M5 | No size/MIME validation on upload | `app/api/smart-ai/upload/route.ts`, `components/dashboard/smart-ai/chat-panel.tsx` | Server enforces `MAX_FILE_SIZE_BYTES` and `ACCEPTED_MIME_TYPES` from `lib/types.ts`. Client pre‑filters and surfaces a friendly error before hitting R2. |
+| M6 | pgvector index needs ANALYZE after backfill | `scripts/smart-ai-chat-followup.sql` | Adds an `ANALYZE rag_documents;` block at the bottom. Backfill instructions in §13.3. |
+| M7 | `pnpm start` referenced missing `.env.local` | `mcp-service/package.json` | `start` no longer reads a dotenv file (Railway injects env vars). `dev` uses `--env-file-if-exists` so it doesn't error locally. |
+| M9 | No abort handling in `streamText` | `mcp-service/index.ts` | Express `req` `'close'` event → `AbortController` → `streamText({ abortSignal })`. |
+| L1 | Tool calls render as forever‑"Thinking…" | `components/dashboard/smart-ai/chat-panel.tsx` | New `<ToolBadge>` component renders `tool-*` and `dynamic-tool` parts as compact, expandable cards (input/output JSON). |
+| L3 | Client‑side upload validation | same as M5 client side | Done in the same fix. |
+
+### Files added
+
+```
+scripts/smart-ai-chat-followup.sql
+```
+
+### Files rewritten
+
+```
+app/api/smart-ai/chat/route.ts
+app/api/smart-ai/upload/route.ts
+components/dashboard/smart-ai/chat-panel.tsx
+lib/smart-ai/client.ts
+lib/smart-ai/indexer.ts
+mcp-service/index.ts
+mcp-service/persistence.ts
+mcp-service/supabase-tools.ts
+mcp-service/package.json
+mcp-service/tsconfig.json
+rag-service/main.py
+```
+
+Both projects typecheck cleanly:
+
+```
+$ pnpm exec tsc --noEmit -p tsconfig.json          # portal: exit 0
+$ cd mcp-service && pnpm exec tsc --noEmit         # mcp:    exit 0
+```
+
+---
+
+## 12. New `PortalUIMessage` contract
+
+For future contributors — the shape that flows between the browser, the Next.js chat route, and the MCP service:
+
+```ts
+// components/dashboard/smart-ai/chat-panel.tsx
+export type PortalUIMessageMetadata = {
+  attachments?: Array<{
+    id: string         // chat_documents.id
+    file_name: string  // chat_documents.file_name
+    file_url: string   // chat_documents.file_url
+  }>
+}
+
+export type PortalUIMessage = UIMessage<PortalUIMessageMetadata>
+```
+
+* Browser sends `sendMessage({ text, metadata: { attachments } })`.
+* `prepareSendMessagesRequest` adds `{ threadId }` to the body.
+* `app/api/smart-ai/chat/route.ts` serializes each message as `{ role, content, metadata }` and forwards to MCP.
+* MCP persists each message with its `metadata` JSONB, then asks the model to use the `searchDocument` tool with the attachment IDs.
+
+---
+
+## 13. Operator runbook — what YOU still need to do
+
+This is the punchlist for moving the change from "merged" to "running in prod on Railway." Most of it is one‑off SQL or env vars.
+
+### 13.1 Run the follow‑up migration on Railway Postgres
+
+The original `chat-system-database-design.md` SQL is already applied. Run this **once** on your Railway Postgres:
+
+```bash
+# from your laptop
+psql "$RAILWAY_POSTGRES_URL" -f scripts/smart-ai-chat-followup.sql
+```
+
+…or paste the file contents into Supabase Studio → SQL Editor. It is idempotent — safe to re‑run.
+
+What it does:
+
+* Adds `chat_messages.metadata jsonb` (the persistence layer writes `{ tool_calls: N, attachments: [...] }`).
+* Adds `chat_documents.text_excerpt text` (preview cached so the UI doesn't fetch R2 to show a snippet).
+* Adds an `owner_id` alias column on `chat_documents` for symmetry with `rag_documents.owner_id`.
+* Adds the `updated_at` trigger on `chat_threads` so thread sidebars sort by recency.
+* Enables RLS on `chat_threads` / `chat_messages` / `chat_documents` with **per‑user** policies.
+* Adds the two query indexes the chat sidebar and persistence layer rely on.
+
+After it runs, verify:
+
+```sql
+SELECT relname, relrowsecurity
+FROM pg_class
+WHERE relname IN ('chat_threads','chat_messages','chat_documents');
+-- relrowsecurity should be 't' for all three
+
+SELECT polname FROM pg_policy WHERE polrelid = 'chat_threads'::regclass;
+-- should list threads_owner_all
+```
+
+### 13.2 Make sure pgvector + RAG schema exist on Railway Postgres
+
+The chat tables you ran live in the same Postgres as the RAG documents. Check:
+
+```sql
+-- pgvector extension
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- the rag-service expects this table to already exist
+\d rag_documents
+```
+
+If `rag_documents` doesn't exist, create it from the schema the FastAPI service expects (it's defined inline in `rag-service/main.py` `lifespan`):
+
+```sql
+CREATE TABLE IF NOT EXISTS rag_documents (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_type text NOT NULL,
+  source_id   uuid NOT NULL,
+  owner_id    uuid,
+  team_id     uuid,
+  chunk_index int  NOT NULL,
+  content     text NOT NULL,
+  embedding   vector(1024) NOT NULL,
+  metadata    jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS rag_documents_chunk_uniq
+  ON rag_documents(source_type, source_id, chunk_index);
+CREATE INDEX IF NOT EXISTS rag_documents_owner_idx ON rag_documents(owner_id);
+CREATE INDEX IF NOT EXISTS rag_documents_team_idx  ON rag_documents(team_id);
+
+-- ivfflat needs at least one row before it can be created with `lists` set,
+-- so the lifespan creates it lazily. If you want to create it manually:
+CREATE INDEX IF NOT EXISTS rag_documents_embedding_ivfflat
+  ON rag_documents USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+```
+
+> If your embedding provider isn't `voyage-3` (1024 dims), match the `vector(N)` to your model.
+
+After backfilling existing rows, run:
+
+```sql
+ANALYZE rag_documents;
+```
+
+### 13.3 Backfill the RAG index
+
+Now that the indexer no longer hard‑skips tasks/submissions/announcements/materials, **existing rows aren't indexed yet**. Run the backfill (from your laptop or any worker that has DB + RAG service env vars):
+
+```bash
+pnpm tsx scripts/backfill-rag-index.ts
+```
+
+It iterates over each source table and calls `indexDocument()`, which posts to the FastAPI service. Watch the logs of `FastAPI-8UVj` on Railway for chunk counts. After it completes:
+
+```sql
+SELECT source_type, count(*) FROM rag_documents GROUP BY 1;
+ANALYZE rag_documents;
+```
+
+### 13.4 Pick ONE scheduler
+
+`lib/inngest/functions.ts` has a `* * * * *` (every‑minute) Inngest cron AND `lib/upstash-scheduler.ts` does its own gating. They will both fire and both record executions, doubling cost.
+
+Recommended: keep the Upstash scheduler (it's what the docs describe) and either:
+
+1. Disable the Inngest function in Inngest Cloud, or
+2. Comment out its registration in the Inngest serve route.
+
+This is a one‑line change but it's deliberate so as not to silently change your scheduling behavior — please make the call yourself.
+
+### 13.5 Environment variables on Railway
+
+On the **manager-portal** service, confirm these are set (paste from `.env.local.example` if you haven't):
+
+| Var | Purpose |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Browser + server Supabase |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser Supabase |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server actions, indexer |
+| `MCP_SERVICE_URL` | e.g. `https://mcp-service-production-…up.railway.app` |
+| `MCP_SERVICE_TOKEN` | Shared secret with `mcp-service` |
+| `RAG_SERVICE_URL` | e.g. `https://fastapi-8uvj-production…up.railway.app` |
+| `RAG_SERVICE_TOKEN` | Shared secret with `FastAPI-8UVj` |
+| `R2_*` | Cloudflare R2 access |
+| `OPENROUTER_API_KEY` *or* `OPENAI_API_KEY` | LLM provider |
+
+On the **mcp-service** service:
+
+| Var | Purpose |
+|---|---|
+| `SUPABASE_URL` | Same as portal's `NEXT_PUBLIC_SUPABASE_URL` |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Required** — persistence uses it |
+| `MCP_SERVICE_TOKEN` | Same shared secret |
+| `RAG_SERVICE_URL`, `RAG_SERVICE_TOKEN` | For `searchDocument` tool |
+| `OPENROUTER_API_KEY` *or* `OPENAI_API_KEY` | LLM provider |
+| `OPENROUTER_MODEL` *or* `OPENAI_MODEL` | optional override |
+
+On the **FastAPI-8UVj** (RAG) service:
+
+| Var | Purpose |
+|---|---|
+| `DATABASE_URL` | Railway Postgres connection string |
+| `RAG_SERVICE_TOKEN` | Same shared secret |
+| `EMBEDDING_API_KEY` | Voyage / OpenAI / etc. |
+| `EMBEDDING_MODEL` | default `voyage-3` |
+
+### 13.6 Restart order on Railway
+
+After applying the migration:
+
+1. `FastAPI-8UVj` (RAG) — picks up the new optional `source_type` field.
+2. `mcp-service` — picks up the AI SDK 6 syntax + service‑role persistence.
+3. `manager-portal` — picks up the new schema column names.
+
+Both ⚠ warnings on `manager-portal` and `mcp-service` should clear. If they don't, check the logs for the error referenced in §1 (you'd see it as `relation "chat_attachments" does not exist` or `column "annotations" of relation … does not exist`) — that means the deploy didn't pick up the new code, not the migration.
+
+### 13.7 Smoke test
+
+1. Open `/dashboard/smart-ai`. The status badges in `smart-ai-shell.tsx` should both show "Connected".
+2. Send "Hi". Expected: model replies normally, a row appears in `chat_threads` for your user, two rows in `chat_messages` (user + assistant).
+3. Click the New conversation button. Expected: messages clear, a fresh `threadId` is minted (visible in `localStorage`), and the next message creates a *second* `chat_threads` row.
+4. Drag a small PDF into the chat. Expected: a `chat_documents` row with `rag_status = 'pending'` → `'indexed'`, a row in `rag_documents` with `source_type = 'chat_attachment'`, and an attachment chip appears on the user message.
+5. Ask "Summarise the document I just uploaded." Expected: model invokes the `searchDocument` tool (you'll see a Tool badge expand in the bubble) and quotes the document.
+6. As a manager, ask "How many submissions did my team make this week?" Expected: model invokes `queryDatabase` against `submissions` with a `team_id` filter and answers from real data.
+
+If step 5 fails with no tool badge, the AI SDK migration didn't take — verify `mcp-service` logs show `tools registered: queryDatabase, insertRecord, updateRecord, searchDocument` at startup.
+
+### 13.8 Self‑hosted Supabase note
+
+You're running self‑hosted Supabase on Railway, so `auth.uid()` in RLS policies depends on the `Authorization: Bearer <user_jwt>` header reaching Postgres via PostgREST/Kong. Server actions use `createServerClient` (cookies‑based) which already does this. The MCP service uses the **service role**, which bypasses RLS — that's correct and intentional. Anything calling Postgres directly (e.g. cron jobs, `scripts/`) must also use the service role or RLS will silently filter them out.
 
 ---
 
