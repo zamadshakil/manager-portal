@@ -1,6 +1,24 @@
 -- Smart AI Chat System: follow-up migration
--- Adds columns, triggers, RLS, and indexes the application code expects.
+-- Creates the missing chat_documents table, adds columns, triggers, RLS,
+-- and indexes the application code expects.
 -- Idempotent — safe to re-run on Railway Postgres.
+
+-- ---------------------------------------------------------------------------
+-- 0. chat_documents table  (was missing from the base migration)
+-- Stores metadata for files uploaded in Smart AI chat conversations.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS chat_documents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    thread_id UUID REFERENCES chat_threads(id) ON DELETE SET NULL,
+    file_name TEXT NOT NULL,
+    file_url TEXT NOT NULL,
+    file_type TEXT,
+    rag_status TEXT NOT NULL DEFAULT 'pending',
+    text_excerpt TEXT,
+    indexed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- ---------------------------------------------------------------------------
 -- 1. chat_messages.metadata  (§1.3)

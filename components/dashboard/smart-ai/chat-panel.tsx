@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport, type UIMessage } from "ai"
 import {
@@ -18,11 +18,14 @@ import {
   Paperclip,
   Search,
   Plus,
+  History,
+  Zap,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Profile } from "@/lib/types"
 import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
 import { FilePreview, type Attachment } from "./file-preview"
+import { ThreadDrawer } from "./thread-drawer"
 
 type ProfileLite = Pick<Profile, "id" | "email" | "full_name" | "role" | "team_id">
 
@@ -112,6 +115,8 @@ export function ChatPanel({
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [loadingThread, setLoadingThread] = useState(false)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -153,6 +158,27 @@ export function ChatPanel({
     useChat<PortalUIMessage>({
       transport: transportRef.current,
     })
+
+  // Load messages from a persisted thread
+  const loadThread = useCallback(
+    async (id: string) => {
+      setLoadingThread(true)
+      try {
+        const res = await fetch(`/api/smart-ai/threads/${id}/messages`)
+        if (!res.ok) throw new Error(`Failed: ${res.status}`)
+        const data = await res.json()
+        const msgs = (data.messages ?? []) as PortalUIMessage[]
+        setMessages(msgs)
+        setThreadId(id)
+        localStorage.setItem(threadIdKey(profile.id), id)
+      } catch (err) {
+        console.error("[chat] failed to load thread:", err)
+      } finally {
+        setLoadingThread(false)
+      }
+    },
+    [profile.id, setMessages],
+  )
 
   // Auto-stick to the bottom whenever new tokens arrive.
   useEffect(() => {
@@ -334,6 +360,15 @@ export function ChatPanel({
             </div>
           </div>
         ) : null}
+        {/* Thread drawer */}
+        <ThreadDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          activeThreadId={threadId}
+          onSelectThread={loadThread}
+          onNewConversation={startNewConversation}
+        />
+
         <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3.5 lg:px-5">
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#f2f9ff] text-[#097fe8]">
@@ -343,14 +378,40 @@ export function ChatPanel({
               <h2 className="text-[15px] font-semibold tracking-tight">
                 Smart AI Assistant
               </h2>
-              <p className="text-[12px] text-muted-foreground truncate">
-                {services.mcp
-                  ? "Connected to MCP · grounded in your portal data"
-                  : "Fallback mode · connect MCP_SERVICE_URL for full RAG retrieval"}
-              </p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-[12px] text-muted-foreground truncate">
+                  {services.mcp
+                    ? "Connected to MCP · grounded in your portal data"
+                    : "Direct mode · querying your portal data"}
+                </p>
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                    services.mcp
+                      ? "bg-[#e8f8eb] text-[#157a2a]"
+                      : "bg-[#f2f9ff] text-[#097fe8]",
+                  )}
+                >
+                  {services.mcp ? (
+                    <Zap className="h-2.5 w-2.5" />
+                  ) : (
+                    <Database className="h-2.5 w-2.5" />
+                  )}
+                  {services.mcp ? "RAG" : "SQL"}
+                </span>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              title="View chat history"
+            >
+              <History className="h-3.5 w-3.5" aria-hidden="true" />
+              History
+            </button>
             <button
               type="button"
               onClick={startNewConversation}
@@ -379,7 +440,12 @@ export function ChatPanel({
           ref={scrollerRef}
           className="flex-1 overflow-y-auto scrollbar-thin px-4 py-5 lg:px-6 lg:py-6 space-y-5"
         >
-          {messages.length === 0 ? (
+          {loadingThread ? (
+            <div className="flex items-center justify-center py-12 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              <span className="text-[13px]">Loading conversation…</span>
+            </div>
+          ) : messages.length === 0 ? (
             <EmptyState
               profile={profile}
               suggestions={visibleSuggestions}

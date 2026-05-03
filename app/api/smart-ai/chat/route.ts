@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
-import { streamText, convertToModelMessages, stepCountIs, type UIMessage } from "ai"
+import { streamText, convertToModelMessages, stepCountIs, tool, type UIMessage } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
+import { z } from "zod"
 import { requireProfile } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import {
@@ -64,8 +65,8 @@ interface Body {
  *   protocol.
  *
  * Path 2 (fallback): if the MCP service is not reachable, we use the AI
- *   SDK directly to keep the UI streaming-functional. The model is told
- *   it currently lacks RAG access so its replies stay conservative.
+ *   SDK directly with tool-based Supabase queries so the model can still
+ *   read live data through the user's RLS-scoped session.
  */
 export async function POST(req: Request) {
   const profile = await requireProfile()
@@ -144,8 +145,7 @@ export async function POST(req: Request) {
     return new Response(mcp.body, { status: 200, headers })
   }
 
-  // ---- Path 2: AI Gateway fallback ----
-  // Surface why we fell back so operators don't have to grep logs blind.
+  // ---- Path 2: Fallback with direct Supabase tools ----
   if (mcp && !mcp.ok) {
     const text = await mcp.text().catch(() => "")
     console.warn(`[smart-ai] mcp returned error (${mcp.status}): ${text.slice(0, 200)}`)
@@ -155,24 +155,103 @@ export async function POST(req: Request) {
   if (!process.env.MCP_SERVICE_URL || !process.env.MCP_SERVICE_TOKEN) {
     fallbackReason = "mcp-not-configured"
   }
-  console.warn(`[smart-ai] using fallback: ${fallbackReason}`)
+  console.warn(`[smart-ai] using fallback with tools: ${fallbackReason}`)
 
+  // Build RLS-scoped tools so the model can query live data even without MCP.
+  // The user's JWT is used, so RLS enforces team/role scoping automatically.
+  const fallbackTools = {
+    queryDatabase: tool({
+      description:
+        "Read rows from a database table. RLS automatically restricts results " +
+        "to what the current user is allowed to see. " +
+        "Available tables: submissions, tasks, task_assignments, profiles, " +
+        "validation_rules, announcements, teams, activity_log, materials.",
+      inputSchema: z.object({
+        table: z.string().describe("Table name to query, e.g. 'tasks', 'submissions'"),
+        select: z.string().default("*").describe("Comma-separated columns to select. Use '*' for all."),
+        eq: z
+          .array(
+            z.object({
+              column: z.string(),
+              value: z.union([z.string(), z.number(), z.boolean()]),
+            }),
+          )
+          .optional()
+          .describe("Optional equality filters."),
+        order: z
+          .object({
+            column: z.string(),
+            ascending: z.boolean().default(false),
+          })
+          .optional()
+          .describe("Optional ORDER BY."),
+        limit: z.number().int().min(1).max(50).default(10),
+      }),
+      execute: async ({ table, select, eq, order, limit }) => {
+        const ALLOWED_TABLES = [
+          "submissions", "tasks", "task_assignments", "profiles",
+          "validation_rules", "announcements", "teams", "activity_log",
+          "materials",
+        ]
+        if (!ALLOWED_TABLES.includes(table)) {
+          return { error: `Table "${table}" is not queryable. Permitted: ${ALLOWED_TABLES.join(", ")}.` }
+        }
+
+        let builder: any = supabase.from(table).select(select)
+
+        if (eq) {
+          for (const f of eq) builder = builder.eq(f.column, f.value as any)
+        }
+
+        if (order) {
+          builder = builder.order(order.column, { ascending: order.ascending })
+        }
+
+        const { data, error: qErr } = await builder.limit(limit)
+
+        if (qErr) {
+          console.error(`[smart-ai] queryDatabase(${table}) error: ${qErr.message}`)
+          return { error: qErr.message }
+        }
+        return { data: data ?? [], count: Array.isArray(data) ? data.length : 0 }
+      },
+    }),
+  }
+
+  const roleLabel = profile.role.replace("_", " ")
   const systemPrompt = [
-    "You are Smart AI, an assistant embedded in the Hierarchia manager portal.",
-    `The current user is a ${profile.role.replace("_", " ")}` +
+    "You are Smart AI, an intelligent assistant embedded in the Hierarchia manager portal.",
+    `The current user is a ${roleLabel}` +
       (profile.team_id ? ` on team ${profile.team_id}` : "") +
       ".",
-    "When asked about specific submissions, tasks, validation runs, or analytics,",
-    "explain that the RAG retrieval service is currently unreachable and",
-    "answer only from what the user has shared in this conversation.",
-    "Be concise, neutral, and never invent submission IDs or scores.",
-  ].join(" ")
+    "",
+    "You have access to a queryDatabase tool that lets you read live portal data.",
+    "USE THIS TOOL to answer questions about submissions, tasks, assignments,",
+    "validation rules, announcements, team performance, and activity logs.",
+    "",
+    "When a user asks about their data, ALWAYS use the queryDatabase tool to fetch",
+    "the actual records. Never say you cannot access data — you CAN query it directly.",
+    "",
+    "Key tables and their important columns:",
+    "- submissions: id, title, status (queued/passed/failed/needs_review), score, summary, uploader_id, team_id, created_at",
+    "- tasks: id, title, instructions, due_date, team_id, created_at",
+    "- task_assignments: id, task_id, assignee_id, status (pending/submitted/missed), submitted_at",
+    "- profiles: id, email, full_name, role (main_admin/manager/member), team_id",
+    "- validation_rules: id, name, prompt, team_id, enabled",
+    "- announcements: id, title, content, author_id, team_id, created_at",
+    "- teams: id, name",
+    "- activity_log: id, actor_id, action, target_type, target_id, created_at",
+    "",
+    "Be concise, format data in tables when useful, and cite specific IDs and scores.",
+    "Never invent or fabricate data — only report what the queryDatabase tool returns.",
+  ].join("\n")
 
   const result = streamText({
     model: resolveModel(),
     system: systemPrompt,
     messages: await convertToModelMessages(body.messages),
-    stopWhen: stepCountIs(1),
+    tools: fallbackTools,
+    stopWhen: stepCountIs(5),
   })
 
   const res = result.toUIMessageStreamResponse()
