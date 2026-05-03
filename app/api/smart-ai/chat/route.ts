@@ -80,19 +80,19 @@ export async function POST(req: Request) {
   // Flatten UIMessage[] into the simple { role, content } shape the MCP
   // service expects. Anything that isn't user/assistant/system is dropped.
   const flat: ChatMessage[] = body.messages
-    .map((m) => {
+    .map((m: any) => {
       const role = m.role
       if (role !== "user" && role !== "assistant" && role !== "system") return null
       const content = (m.parts ?? [])
-        .filter((p) => p.type === "text")
-        .map((p) => (p as { text: string }).text)
+        .filter((p: any) => p.type === "text")
+        .map((p: any) => p.text)
         .join("")
         .trim()
       if (!content && !m.annotations) return null
       return { 
         role, 
         content,
-        metadata: m.annotations?.[0] as Record<string, any> // AI SDK use annotations for extra data
+        metadata: m.annotations?.[0] as Record<string, any>
       } as ChatMessage
     })
     .filter((m): m is ChatMessage => m !== null)

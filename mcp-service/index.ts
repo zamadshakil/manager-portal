@@ -49,6 +49,11 @@ const OPENROUTER_BASE_URL =
   process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1"
 
 function resolveModel() {
+  const openai = createOpenAI({
+    apiKey: process.env.OPENAI_API_KEY ?? "",
+    baseURL: process.env.OPENAI_BASE_URL, // Optional AI Gateway
+  })
+
   if (OPENROUTER_API_KEY) {
     const openrouter = createOpenAI({
       apiKey: OPENROUTER_API_KEY,
@@ -60,7 +65,8 @@ function resolveModel() {
     })
     return openrouter.chat(MODEL)
   }
-  return MODEL
+  
+  return openai.chat(MODEL)
 }
 
 // ---------------------------------------------------------------------------

@@ -28,13 +28,13 @@ export function createSupabaseTools(accessToken: string | null) {
         limit: z.number().describe("Max rows to return").default(10),
       }),
       execute: async ({ table, select, eq, limit }) => {
-        let query = supabase.from(table).select(select).limit(limit)
+        let builder: any = supabase.from(table).select(select)
         if (eq) {
           for (const filter of eq) {
-            query = query.eq(filter.column, filter.value)
+            builder = builder.eq(filter.column, filter.value)
           }
         }
-        const { data, error } = await query
+        const { data, error } = await builder.limit(limit)
         if (error) {
           console.error(`[mcp] queryDatabase error: ${error.message}`)
           return { error: error.message }
