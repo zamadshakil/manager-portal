@@ -244,3 +244,71 @@ export const onFailureSubmissionFn = inngest.createFunction(
     }
   }
 );
+
+export const markMissedCronFn = inngest.createFunction(
+  { id: "mark-missed-cron", triggers: [{ cron: "0 0 * * *" }] },
+  async ({ step }) => {
+    const result = await step.run("mark-missed-assignments-and-recover-stuck", async () => {
+      const admin = createAdminClient();
+      const nowIso = new Date().toISOString();
+      
+      // 1. Mark missed assignments for tasks that forbid lateness.
+      const { data: overdue } = await admin
+        .from("task_assignments")
+        .select("id, task:tasks!inner(id, due_at, allow_late)")
+        .eq("status", "assigned")
+        .not("task.due_at", "is", null)
+        .lt("task.due_at", nowIso);
+
+      let missedCount = 0;
+      const overdueRows = (overdue as unknown as any[]) || [];
+      if (overdueRows.length > 0) {
+        const toMiss = overdueRows
+          .filter((row) => row.task.allow_late === false)
+          .map((row) => row.id);
+
+        if (toMiss.length > 0) {
+          await admin
+            .from("task_assignments")
+            .update({ status: "missed" })
+            .in("id", toMiss);
+          missedCount = toMiss.length;
+        }
+      }
+
+      // 2. Auto-fail stuck submissions (pipeline crash recovery).
+      const stuckCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data: stuck } = await admin
+        .from("submissions")
+        .update({
+          status: "failed",
+          flags: [
+            {
+              severity: "fail",
+              message: "Validation pipeline timed out. Please retry.",
+            },
+          ],
+        } as any)
+        .in("status", ["queued", "parsing", "validating"])
+        .lt("updated_at", stuckCutoff)
+        .select("id");
+
+      const out = {
+        ok: true,
+        missedCount,
+        stuckRecovered: stuck?.length ?? 0,
+      };
+
+      try {
+        const { recordTaskExecution } = await import("@/lib/upstash-scheduler");
+        await recordTaskExecution("mark-missed", out);
+      } catch (e) {
+        console.error("Failed to record task execution", e);
+      }
+
+      return out;
+    });
+
+    return result;
+  }
+);
