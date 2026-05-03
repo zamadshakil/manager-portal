@@ -14,6 +14,8 @@ RUN npm install --no-audit --no-fund
 
 COPY tsconfig.json ./
 COPY index.ts ./
+COPY supabase-tools.ts ./
+COPY persistence.ts ./
 RUN npx tsc -p tsconfig.json
 
 FROM node:22-alpine AS runner
