@@ -4,81 +4,174 @@ import { createClient } from "@/lib/supabase/server"
 import { put } from "@/lib/r2"
 import { extractText } from "@/lib/parse"
 import { indexDocument } from "@/lib/smart-ai/indexer"
+import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
 
 export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
 
 /**
  * Smart AI Upload Endpoint
- * 
- * 1. Authenticates the user via Supabase session.
- * 2. Uploads the raw file to Cloudflare R2.
- * 3. Extracts text content for vector indexing.
- * 4. Stores metadata in the `chat_attachments` Postgres table.
- * 5. Pushes the content to the RAG service for semantic retrieval.
+ * ========================
+ *
+ *   1. Authenticate the user via Supabase session.
+ *   2. Validate file size + MIME (defense-in-depth — the client validates too).
+ *   3. Upload the raw bytes to Cloudflare R2 under a per-user prefix.
+ *   4. Extract text content for vector indexing.
+ *   5. Insert a row into `chat_documents` (RLS scopes it to auth.uid()).
+ *   6. Push the parsed text to the RAG service. We deliberately await this
+ *      and update `rag_status` to "completed" / "failed" so the UI can
+ *      reflect indexing health without a second round-trip.
+ *
+ * The response shape matches what the chat panel expects:
+ *
+ *   { id, file_name, file_url, file_type, rag_status, thread_id }
  */
+
+const ACCEPTED = new Set<string>(ACCEPTED_MIME_TYPES as readonly string[])
+
 export async function POST(req: Request) {
+  let profile: Awaited<ReturnType<typeof requireProfile>>
   try {
-    const profile = await requireProfile()
-    const formData = await req.formData()
-    const file = formData.get("file") as File
+    profile = await requireProfile()
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
 
-    if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 })
-    }
+  let formData: FormData
+  try {
+    formData = await req.formData()
+  } catch {
+    return NextResponse.json({ error: "Invalid form data" }, { status: 400 })
+  }
 
-    // 1. Upload to Cloudflare R2
-    // We prefix with the user ID to prevent namespace collisions.
-    const path = `chat-attachments/${profile.id}/${Date.now()}-${file.name}`
-    const uploadResult = await put(path, file, { 
+  const file = formData.get("file")
+  const threadId = (formData.get("thread_id") as string | null) || null
+
+  if (!(file instanceof File)) {
+    return NextResponse.json({ error: "No file provided" }, { status: 400 })
+  }
+
+  // ---- 2. Validation ---------------------------------------------------
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    return NextResponse.json(
+      {
+        error: `File exceeds the ${Math.round(
+          MAX_FILE_SIZE_BYTES / (1024 * 1024),
+        )} MB limit`,
+      },
+      { status: 413 },
+    )
+  }
+  if (file.type && !ACCEPTED.has(file.type)) {
+    return NextResponse.json(
+      { error: `Unsupported file type: ${file.type}` },
+      { status: 415 },
+    )
+  }
+
+  try {
+    // ---- 3. R2 upload -------------------------------------------------
+    // Strip path separators from the filename so users can't escape the prefix.
+    const safeName = file.name.replace(/[/\\]/g, "_").slice(0, 200)
+    const path = `chat-documents/${profile.id}/${Date.now()}-${safeName}`
+    const uploadResult = await put(path, file, {
       contentType: file.type,
-      addRandomSuffix: false // We already added timestamp
+      addRandomSuffix: false,
     })
 
-    // 2. Extract text for RAG indexing
-    const buffer = Buffer.from(await file.arrayBuffer())
-    const parseResult = await extractText(buffer, file.type)
+    // ---- 4. Text extraction (best-effort) -----------------------------
+    let parsedText = ""
+    let parsedPages: number | undefined
+    let parsedTruncated = false
+    let parseWarning: string | undefined
+    try {
+      const buffer = Buffer.from(await file.arrayBuffer())
+      const parseResult = await extractText(buffer, file.type)
+      parsedText = parseResult.text ?? ""
+      parsedPages = parseResult.pages
+      parsedTruncated = parseResult.truncated
+      parseWarning = parseResult.warning
+    } catch (parseErr) {
+      console.error("[upload] parse failed", parseErr)
+      parseWarning = "Text extraction failed; the document was uploaded but is not searchable yet."
+    }
 
-    // 3. Persist metadata to Postgres
+    // ---- 5. DB row ----------------------------------------------------
     const supabase = await createClient()
-    const { data: attachment, error: dbError } = await supabase
-      .from("chat_attachments")
+    const { data: doc, error: dbError } = await supabase
+      .from("chat_documents")
       .insert({
         user_id: profile.id,
-        r2_url: uploadResult.url,
-        filename: file.name,
-        content_type: file.type,
+        thread_id: threadId,
+        file_name: file.name,
+        file_url: uploadResult.url,
+        file_type: file.type,
+        rag_status: parsedText.trim().length >= 16 ? "processing" : "skipped",
+        text_excerpt: parsedText ? parsedText.slice(0, 4_000) : null,
       })
       .select()
       .single()
 
-    if (dbError) {
-      console.error("[upload] DB error:", dbError)
-      return NextResponse.json({ error: "Failed to save metadata" }, { status: 500 })
+    if (dbError || !doc) {
+      console.error("[upload] DB insert failed", dbError)
+      return NextResponse.json(
+        { error: "Failed to save document metadata", detail: dbError?.message },
+        { status: 500 },
+      )
     }
 
-    // 4. Index content in RAG service
-    // We index immediately so the AI can "read" the file in the same conversation.
-    await indexDocument({
-      source_type: "chat_attachment",
-      source_id: attachment.id,
-      owner_id: profile.id,
-      team_id: profile.team_id,
-      title: file.name,
-      content: parseResult.text || `[File attachment: ${file.name}]`,
-      metadata: {
-        r2_url: uploadResult.url,
-        content_type: file.type,
-        truncated: parseResult.truncated,
-        pages: parseResult.pages,
+    // ---- 6. RAG indexing ---------------------------------------------
+    // We await so we can flip `rag_status` to "completed" / "failed" before
+    // returning. Worst case it adds a few hundred ms to the upload — that
+    // tradeoff is worth the clearer UX.
+    let ragStatus: "completed" | "failed" | "skipped" = "skipped"
+    if (parsedText.trim().length >= 16) {
+      try {
+        await indexDocument({
+          source_type: "chat_attachment",
+          source_id: doc.id,
+          owner_id: profile.id,
+          team_id: profile.team_id,
+          title: file.name,
+          content: parsedText,
+          metadata: {
+            file_url: uploadResult.url,
+            file_type: file.type,
+            pages: parsedPages,
+            truncated: parsedTruncated,
+            thread_id: threadId,
+          },
+        })
+        ragStatus = "completed"
+      } catch (err) {
+        console.error("[upload] RAG indexing failed", err)
+        ragStatus = "failed"
       }
-    })
+    }
 
-    return NextResponse.json(attachment)
+    if (ragStatus !== "skipped") {
+      await supabase
+        .from("chat_documents")
+        .update({ rag_status: ragStatus, indexed_at: new Date().toISOString() })
+        .eq("id", doc.id)
+    }
+
+    return NextResponse.json({
+      id: doc.id,
+      file_name: doc.file_name,
+      file_url: doc.file_url,
+      file_type: doc.file_type,
+      thread_id: doc.thread_id,
+      rag_status: ragStatus,
+      pages: parsedPages,
+      truncated: parsedTruncated,
+      warning: parseWarning,
+    })
   } catch (err: any) {
-    console.error("[upload] Internal error:", err)
+    console.error("[upload] unexpected error", err)
     return NextResponse.json(
-      { error: err.message || "Internal server error" }, 
-      { status: 500 }
+      { error: err?.message || "Internal server error" },
+      { status: 500 },
     )
   }
 }

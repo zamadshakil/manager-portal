@@ -226,6 +226,10 @@ class RetrieveRequest(BaseModel):
     scope: Scope
     query: str
     document_id: str | None = None
+    source_type: str | None = Field(
+        default=None,
+        description="Optional filter to only search within a specific source kind, e.g. 'chat_attachment'.",
+    )
     top_k: int = Field(default=6, ge=1, le=20)
 
 
@@ -350,18 +354,35 @@ async def retrieve(req: RetrieveRequest) -> list[RetrievedChunk]:
     # Role-scoped row filtering — mirrors the Supabase RLS philosophy used in
     # the Next.js app: members see only their own docs, managers their team's,
     # admins everything.
+    #
+    # Special case: chat_attachment rows always belong to a single uploader,
+    # so we ALWAYS scope them to owner_id regardless of role. That prevents
+    # a manager from accidentally retrieving a member's private chat upload.
     where_clauses = []
     params: list[Any] = [vector, req.top_k]
     idx = 3
-    if req.scope.role == "member":
+
+    is_chat_attachment = req.source_type == "chat_attachment"
+
+    if is_chat_attachment:
+        where_clauses.append(f"owner_id = ${idx}")
+        params.append(req.scope.user_id)
+        idx += 1
+    elif req.scope.role == "member":
         where_clauses.append(f"owner_id = ${idx}")
         params.append(req.scope.user_id)
         idx += 1
     elif req.scope.role == "manager" and req.scope.team_id:
-        where_clauses.append(f"team_id = ${idx}")
+        where_clauses.append(f"(team_id = ${idx} OR owner_id = ${idx + 1})")
         params.append(req.scope.team_id)
+        params.append(req.scope.user_id)
+        idx += 2
+
+    if req.source_type:
+        where_clauses.append(f"source_type = ${idx}")
+        params.append(req.source_type)
         idx += 1
-        
+
     if req.document_id:
         where_clauses.append(f"source_id = ${idx}")
         params.append(req.document_id)

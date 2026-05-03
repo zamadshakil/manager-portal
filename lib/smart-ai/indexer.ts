@@ -67,14 +67,19 @@ export interface IndexDocumentInput {
 export async function indexDocument(input: IndexDocumentInput): Promise<void> {
   if (!isConfigured()) return
 
-  // Disable automatic indexing of general database rows to reserve RAG for explicit documents
-  if (["task", "submission", "validation_run", "announcement", "rule"].includes(input.source_type)) {
-    return
-  }
+  // Optional kill-switch — set RAG_INDEX_DISABLED_TYPES="task,submission" in
+  // the env to skip specific source kinds during incident triage without
+  // redeploying. Default: index everything.
+  const disabled = (process.env.RAG_INDEX_DISABLED_TYPES ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (disabled.includes(input.source_type)) return
 
   // Empty / whitespace-only content provides no retrieval value and would
-  // waste an embedding call. Skip those instead of polluting the index.
-  if (!input.content || input.content.trim().length < 4) return
+  // waste an embedding call. Bumped from 4 → 16 so a single-word title
+  // doesn't slip in as a useless "document".
+  if (!input.content || input.content.trim().length < 16) return
 
   try {
     const res = await fetch(`${RAG_URL}/v1/index`, {

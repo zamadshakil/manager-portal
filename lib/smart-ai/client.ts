@@ -70,25 +70,38 @@ export async function streamChatFromMcp(args: {
 }): Promise<Response | null> {
   if (!isMcpConfigured()) return null
 
-  const res = await fetch(`${MCP_URL.replace(/\/$/, "")}/v1/chat`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${MCP_TOKEN}`,
-    },
-    body: JSON.stringify({
-      scope: args.scope,
-      accessToken: args.accessToken,
-      threadId: args.threadId,
-      messages: args.messages,
-      stream: true,
-    }),
-    signal: args.signal,
-    // No caching — chat is per-request.
-    cache: "no-store",
-  })
+  let res: Response
+  try {
+    res = await fetch(`${MCP_URL.replace(/\/$/, "")}/v1/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${MCP_TOKEN}`,
+      },
+      body: JSON.stringify({
+        scope: args.scope,
+        accessToken: args.accessToken,
+        threadId: args.threadId,
+        messages: args.messages,
+        stream: true,
+      }),
+      signal: args.signal,
+      // No caching — chat is per-request.
+      cache: "no-store",
+    })
+  } catch (err) {
+    console.warn("[smart-ai] MCP fetch threw:", (err as Error)?.message ?? err)
+    return null
+  }
 
-  if (!res.ok || !res.body) return null
+  if (!res.ok || !res.body) {
+    // Surface the upstream error so deploys / token rotations are debuggable.
+    const detail = await res.text().catch(() => "")
+    console.warn(
+      `[smart-ai] MCP responded ${res.status} ${res.statusText}: ${detail.slice(0, 200)}`,
+    )
+    return null
+  }
   return res
 }
 
