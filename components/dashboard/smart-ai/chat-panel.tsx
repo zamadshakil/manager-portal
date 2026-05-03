@@ -16,9 +16,12 @@ import {
   Trash2,
   User2,
   Paperclip,
+  Search,
+  Plus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Profile } from "@/lib/types"
+import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
 import { FilePreview, type Attachment } from "./file-preview"
 
 type ProfileLite = Pick<Profile, "id" | "email" | "full_name" | "role" | "team_id">
@@ -36,6 +39,14 @@ interface SuggestedPrompt {
   prompt: string
   roles: ProfileLite["role"][]
 }
+
+// Typed message metadata that round-trips to the server. AI SDK 6 puts
+// custom per-message context here (replaces v4's `annotations`).
+interface PortalUIMessageMetadata {
+  attachments?: Array<{ id: string; filename: string }>
+}
+
+type PortalUIMessage = UIMessage<PortalUIMessageMetadata>
 
 const SUGGESTIONS: SuggestedPrompt[] = [
   {
@@ -82,6 +93,13 @@ const SUGGESTIONS: SuggestedPrompt[] = [
   },
 ]
 
+// Per-user localStorage key so two users on the same browser never share a thread.
+function threadIdKey(userId: string) {
+  return `smart_ai:thread_id:${userId}`
+}
+
+const ACCEPT_ATTR = (ACCEPTED_MIME_TYPES as readonly string[]).join(",")
+
 export function ChatPanel({
   profile,
   services,
@@ -90,30 +108,53 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [input, setInput] = useState("")
   const [threadId, setThreadId] = useState<string | null>(null)
+  const threadIdRef = useRef<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [isDragging, setIsDragging] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Keep the ref in sync so the transport callback below always reads
+  // the LATEST threadId — useChat captures its options once on mount.
+  threadIdRef.current = threadId
+
+  // Mint or restore a per-user thread ID on mount.
   useEffect(() => {
-    // Simple thread persistence in localStorage
-    const stored = localStorage.getItem("smart_ai_thread_id")
+    const key = threadIdKey(profile.id)
+    const stored = localStorage.getItem(key)
     if (stored) {
       setThreadId(stored)
     } else {
       const newId = crypto.randomUUID()
-      localStorage.setItem("smart_ai_thread_id", newId)
+      localStorage.setItem(key, newId)
       setThreadId(newId)
     }
-  }, [])
+  }, [profile.id])
+
+  // Build the transport once. The `prepareSendMessagesRequest` hook reads
+  // the current threadId on every send, so reseting the conversation works
+  // without re-creating the transport (which would also reset useChat).
+  const transportRef = useRef<DefaultChatTransport<PortalUIMessage> | null>(null)
+  if (!transportRef.current) {
+    transportRef.current = new DefaultChatTransport<PortalUIMessage>({
+      api: "/api/smart-ai/chat",
+      prepareSendMessagesRequest: ({ messages, body }) => ({
+        body: {
+          ...(body ?? {}),
+          messages,
+          threadId: threadIdRef.current,
+        },
+      }),
+    })
+  }
 
   const { messages, sendMessage, setMessages, status, error, regenerate, stop } =
-    useChat({
-      transport: new DefaultChatTransport({ api: "/api/smart-ai/chat" }),
-      body: { threadId },
+    useChat<PortalUIMessage>({
+      transport: transportRef.current,
     })
 
-  // Auto-stick to bottom whenever new tokens arrive.
+  // Auto-stick to the bottom whenever new tokens arrive.
   useEffect(() => {
     const el = scrollerRef.current
     if (!el) return
@@ -127,32 +168,89 @@ export function ChatPanel({
     onSeedConsumed()
   }, [seedPrompt, sendMessage, onSeedConsumed])
 
-  const visibleSuggestions = SUGGESTIONS.filter((s) => s.roles.includes(profile.role))
+  const visibleSuggestions = SUGGESTIONS.filter((s) =>
+    s.roles.includes(profile.role),
+  )
 
   const isStreaming = status === "streaming" || status === "submitted"
 
+  function startNewConversation() {
+    const newId = crypto.randomUUID()
+    localStorage.setItem(threadIdKey(profile.id), newId)
+    setThreadId(newId)
+    setMessages([])
+    setAttachments([])
+    setUploadError(null)
+  }
+
   async function handleUpload(file: File) {
-    const tempId = Math.random().toString(36).substring(7)
-    setAttachments((prev) => [...prev, { id: tempId, filename: file.name, status: "uploading" }])
+    // Client-side validation — defense in depth; the server validates too.
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setUploadError(
+        `${file.name} is too large (max ${Math.round(MAX_FILE_SIZE_BYTES / (1024 * 1024))} MB).`,
+      )
+      return
+    }
+    if (file.type && !(ACCEPTED_MIME_TYPES as readonly string[]).includes(file.type)) {
+      setUploadError(`${file.name}: unsupported file type (${file.type}).`)
+      return
+    }
+
+    const tempId = crypto.randomUUID()
+    setUploadError(null)
+    setAttachments((prev) => [
+      ...prev,
+      { id: tempId, filename: file.name, status: "uploading" },
+    ])
 
     try {
       const formData = new FormData()
       formData.append("file", file)
+      if (threadId) formData.append("thread_id", threadId)
+
       const res = await fetch("/api/smart-ai/upload", {
         method: "POST",
         body: formData,
       })
-      if (!res.ok) throw new Error("Upload failed")
-      const data = await res.json()
+
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null)
+        throw new Error(detail?.error || `Upload failed (${res.status})`)
+      }
+
+      const data = (await res.json()) as {
+        id: string
+        file_name: string
+        file_url: string
+        rag_status: "completed" | "failed" | "skipped"
+        warning?: string
+      }
 
       setAttachments((prev) =>
         prev.map((a) =>
-          a.id === tempId ? { id: data.id, filename: data.filename, status: "ready", url: data.r2_url } : a,
+          a.id === tempId
+            ? {
+                id: data.id,
+                filename: data.file_name,
+                status: data.rag_status === "failed" ? "error" : "ready",
+                url: data.file_url,
+              }
+            : a,
         ),
       )
-    } catch (err) {
+
+      if (data.rag_status === "failed" || data.warning) {
+        setUploadError(
+          data.warning ??
+            `${data.file_name} was uploaded but indexing failed. The AI may not be able to read its contents.`,
+        )
+      }
+    } catch (err: any) {
       console.error("Upload failed:", err)
-      setAttachments((prev) => prev.map((a) => (a.id === tempId ? { ...a, status: "error" } : a)))
+      setAttachments((prev) =>
+        prev.map((a) => (a.id === tempId ? { ...a, status: "error" } : a)),
+      )
+      setUploadError(err?.message ?? "Upload failed.")
     }
   }
 
@@ -183,17 +281,27 @@ export function ChatPanel({
     e.preventDefault()
     const trimmed = input.trim()
     const readyAttachments = attachments.filter((a) => a.status === "ready")
-    
+
     if ((!trimmed && readyAttachments.length === 0) || isStreaming) return
 
-    // Pass attachment metadata in annotations for the backend to process
-    sendMessage({ 
-      text: trimmed || `[Attached ${readyAttachments.length} files]`,
-      annotations: readyAttachments.length > 0 ? [{ attachments: readyAttachments }] : undefined
+    const metadata: PortalUIMessageMetadata | undefined =
+      readyAttachments.length > 0
+        ? {
+            attachments: readyAttachments.map((a) => ({
+              id: a.id,
+              filename: a.filename,
+            })),
+          }
+        : undefined
+
+    sendMessage({
+      text: trimmed || `[Attached ${readyAttachments.length} file(s)]`,
+      metadata,
     })
-    
+
     setInput("")
     setAttachments([])
+    setUploadError(null)
   }
 
   function handleSuggestion(p: SuggestedPrompt) {
@@ -211,26 +319,30 @@ export function ChatPanel({
         onDrop={onDrop}
         className={cn(
           "xl:col-span-2 flex flex-col rounded-xl border border-border bg-card shadow-card overflow-hidden min-h-[560px] transition-colors relative",
-          isDragging && "bg-primary/5 border-primary/30"
+          isDragging && "bg-primary/5 border-primary/30",
         )}
       >
-        {isDragging && (
+        {isDragging ? (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-primary/10 backdrop-blur-[2px] pointer-events-none">
             <div className="flex flex-col items-center gap-3 rounded-2xl bg-background px-8 py-6 shadow-2xl border border-primary/20">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
                 <ArrowUp className="h-6 w-6" />
               </div>
-              <p className="text-[15px] font-semibold text-foreground">Drop files to index and discuss</p>
+              <p className="text-[15px] font-semibold text-foreground">
+                Drop files to index and discuss
+              </p>
             </div>
           </div>
-        )}
+        ) : null}
         <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3.5 lg:px-5">
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#f2f9ff] text-[#097fe8]">
               <Sparkles className="h-4 w-4" aria-hidden="true" />
             </span>
             <div className="min-w-0">
-              <h2 className="text-[15px] font-semibold tracking-tight">Smart AI Assistant</h2>
+              <h2 className="text-[15px] font-semibold tracking-tight">
+                Smart AI Assistant
+              </h2>
               <p className="text-[12px] text-muted-foreground truncate">
                 {services.mcp
                   ? "Connected to MCP · grounded in your portal data"
@@ -239,12 +351,21 @@ export function ChatPanel({
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={startNewConversation}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              title="Start a new conversation"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              New
+            </button>
             {messages.length > 0 ? (
               <button
                 type="button"
                 onClick={() => setMessages([])}
                 className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                title="Clear conversation"
+                title="Clear conversation view"
               >
                 <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                 Clear
@@ -266,7 +387,11 @@ export function ChatPanel({
             />
           ) : (
             messages.map((m) => (
-              <Message key={m.id} message={m} userName={profile.full_name ?? profile.email} />
+              <Message
+                key={m.id}
+                message={m}
+                userName={profile.full_name ?? profile.email}
+              />
             ))
           )}
 
@@ -279,7 +404,8 @@ export function ChatPanel({
 
           {error ? (
             <div className="rounded-lg border border-[#dd5b00]/20 bg-[#fff1e6] px-3 py-2.5 text-[12.5px] text-[#a4400a]">
-              <strong className="font-semibold">Something went wrong.</strong> {error.message}
+              <strong className="font-semibold">Something went wrong.</strong>{" "}
+              {error.message}
               <button
                 type="button"
                 onClick={() => regenerate()}
@@ -314,8 +440,15 @@ export function ChatPanel({
             />
             <FilePreview
               attachments={attachments}
-              onRemove={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
+              onRemove={(id) =>
+                setAttachments((prev) => prev.filter((a) => a.id !== id))
+              }
             />
+            {uploadError ? (
+              <p className="px-3.5 pb-2 text-[11.5px] text-[#a4400a]">
+                {uploadError}
+              </p>
+            ) : null}
             <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
               <div className="flex items-center gap-1">
                 <input
@@ -323,6 +456,7 @@ export function ChatPanel({
                   ref={fileInputRef}
                   onChange={handleFileChange}
                   className="hidden"
+                  accept={ACCEPT_ATTR}
                   multiple
                 />
                 <button
@@ -356,7 +490,10 @@ export function ChatPanel({
               ) : (
                 <button
                   type="submit"
-                  disabled={!input.trim() && attachments.filter(a => a.status === 'ready').length === 0}
+                  disabled={
+                    !input.trim() &&
+                    attachments.filter((a) => a.status === "ready").length === 0
+                  }
                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.95] disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed"
                   aria-label="Send message"
                 >
@@ -427,49 +564,131 @@ function EmptyState({
   )
 }
 
-function Message({ message, userName }: { message: UIMessage; userName: string }) {
+function Message({ message, userName }: { message: PortalUIMessage; userName: string }) {
   const isUser = message.role === "user"
   const text = (message.parts ?? [])
     .filter((p): p is { type: "text"; text: string } => p.type === "text")
     .map((p) => p.text)
     .join("")
 
+  // Surface tool invocations so users see what the agent is doing instead
+  // of a perpetual "Thinking…" while a tool runs.
+  const toolParts = (message.parts ?? []).filter((p) => {
+    const t = (p as any).type
+    return typeof t === "string" && (t.startsWith("tool-") || t === "dynamic-tool")
+  }) as Array<{ type: string; [k: string]: any }>
+
+
   return (
     <div className={cn("flex items-start gap-3", isUser ? "flex-row-reverse" : "flex-row")}>
       <span
         className={cn(
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[12px] font-semibold",
-          isUser
-            ? "bg-warm-white text-foreground"
-            : "bg-[#f2f9ff] text-[#097fe8]",
+          isUser ? "bg-warm-white text-foreground" : "bg-[#f2f9ff] text-[#097fe8]",
         )}
         aria-hidden="true"
       >
-        {isUser ? (
-          <User2 className="h-3.5 w-3.5" />
-        ) : (
-          <Sparkles className="h-3.5 w-3.5" />
-        )}
+        {isUser ? <User2 className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
       </span>
       <div
         className={cn(
-          "max-w-[85%] rounded-2xl px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap",
-          isUser
-            ? "bg-primary text-primary-foreground rounded-tr-md"
-            : "bg-warm-white text-foreground rounded-tl-md",
+          "max-w-[85%] space-y-2",
+          isUser ? "items-end" : "items-start",
         )}
       >
-        <span className="sr-only">
-          {isUser ? `${userName} said:` : "Smart AI replied:"}
-        </span>
-        {text || (
-          <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
-            Thinking…
-          </span>
-        )}
+        {/* Tool calls (assistant only) */}
+        {!isUser && toolParts.length > 0 ? (
+          <div className="space-y-1.5">
+            {toolParts.map((p, idx) => (
+              <ToolBadge key={`tool-${idx}`} part={p} />
+            ))}
+          </div>
+        ) : null}
+
+        {/* Attachments echo on user turns */}
+        {isUser && message.metadata?.attachments?.length ? (
+          <div className="flex flex-wrap gap-1.5 justify-end">
+            {message.metadata.attachments.map((a) => (
+              <span
+                key={a.id}
+                className="inline-flex items-center gap-1 rounded-md bg-warm-white px-2 py-0.5 text-[11px] font-medium text-foreground/80"
+              >
+                <FileText className="h-3 w-3" aria-hidden="true" />
+                {a.filename}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Text bubble */}
+        {text || (!isUser && toolParts.length === 0) ? (
+          <div
+            className={cn(
+              "rounded-2xl px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap",
+              isUser
+                ? "bg-primary text-primary-foreground rounded-tr-md"
+                : "bg-warm-white text-foreground rounded-tl-md",
+            )}
+          >
+            <span className="sr-only">
+              {isUser ? `${userName} said:` : "Smart AI replied:"}
+            </span>
+            {text || (
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                Thinking…
+              </span>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
+  )
+}
+
+function ToolBadge({ part }: { part: { type: string; [k: string]: any } }) {
+  // AI SDK 6 names tool parts `tool-<toolName>` for static tools and emits
+  // `dynamic-tool` for dynamically-registered ones. Each part has a
+  // `state` field that tells us whether it's input-streaming, executing,
+  // or done.
+  const name =
+    part.type === "dynamic-tool"
+      ? (part.toolName as string) ?? "tool"
+      : part.type.replace(/^tool-/, "")
+  const state = (part.state as string) ?? "executing"
+  const isDone = state === "output-available" || state === "result"
+  const isError = state === "output-error" || state === "error"
+
+  const label =
+    name === "searchDocument"
+      ? "Searching documents"
+      : name === "queryDatabase"
+        ? "Querying database"
+        : name === "insertRecord"
+          ? "Inserting record"
+          : name === "updateRecord"
+            ? "Updating record"
+            : `Calling ${name}`
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
+        isError
+          ? "bg-[#fff1e6] text-[#a4400a]"
+          : isDone
+            ? "bg-[#e8f8eb] text-[#157a2a]"
+            : "bg-[#f2f9ff] text-[#097fe8]",
+      )}
+    >
+      {isDone || isError ? (
+        <Search className="h-3 w-3" aria-hidden="true" />
+      ) : (
+        <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+      )}
+      {label}
+      {isError ? " · failed" : isDone ? "" : "…"}
+    </span>
   )
 }
 

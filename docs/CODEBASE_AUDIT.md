@@ -1,554 +1,442 @@
-# Hierarchia Manager Portal — Comprehensive Codebase Audit
-**Date:** April 30, 2026  
-**Audit Scope:** Full codebase review with emphasis on PROJECT_STATUS.md accuracy, code quality, and architectural coherence  
-**Audit Status:** ✅ Complete
+# Smart AI Codebase Audit
+
+**Branch audited:** `smart-ai-audit` (against `main` of `JobFlowAI/manager-portal`)
+**Date:** 2026-05-04
+**Scope:** Smart AI chat surface (`app/(dashboard)/dashboard/smart-ai`), the Multi-Channel/Coordinator Process (`mcp-service/`), the Retrieval-Augmented Generation service (`rag-service/`), the indexing pipeline (`lib/smart-ai/indexer.ts`, server actions), the chat API route (`app/api/smart-ai/*`), and supporting Supabase schema.
+
+This document supersedes the previous `docs/CODEBASE_AUDIT.md`. **Findings only — no code changes have been applied yet.** A phased remediation plan is included at the end.
+
+The agreed RLS scoping model for the new chat tables is **per-user only** (each user owns their threads, messages, and chat attachments).
 
 ---
 
-## Executive Summary
+## 1. System Overview
 
-The **Hierarchia Manager Portal** is a well-architected, production-ready submission management and AI validation system. The codebase demonstrates:
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                         Smart AI Page (Next.js App)                        │
+│                                                                            │
+│  ChatPanel ──useChat()──▶ /api/smart-ai/chat ──▶ MCP service (Railway)    │
+│       │                                              │                     │
+│       │ upload                                       ├─ tools:             │
+│       ▼                                              │   queryDatabase     │
+│  /api/smart-ai/upload ─▶ R2 + parse + index ──▶     │   searchDocument    │
+│                                                      │   insertRecord      │
+│                                                      │   updateRecord      │
+│                                                      │   listSchema        │
+│                                                      │                     │
+│                                                      ▼                     │
+│                                              streamText (AI SDK 6)         │
+│                                                      │                     │
+│                                              writes chat_messages          │
+└────────────────────────────────────────────────────────────────────────────┘
 
-✅ **Strengths:**
-- Excellent architectural clarity with consistent patterns throughout
-- Comprehensive, actively-maintained documentation (PROJECT_STATUS.md is accurate as of 2026-04-29)
-- Strong security posture with defense-in-depth (middleware + server-action + RLS)
-- Proper separation of concerns across database, auth, LLM, and UI layers
-- Consistent error handling via `ActionResult` discriminated unions
-- All server-only modules properly marked with `import "server-only"`
+         RAG Service (FastAPI on Railway)
+         ─────────────────────────────────
+         POST /index    → upsert chunk embeddings into pgvector
+         POST /retrieve → top-k similarity search, role-scoped
+         GET  /health
+```
 
-⚠️ **Areas for Improvement:**
-1. **Minor configuration gaps** (missing tailwind.config.ts, bare README)
-2. **One revalidatePath inconsistency** (users.ts → wrong path reference)
-3. **Cron schedule discrepancy** (documented as every 15 min, configured as daily)
-4. **No automated tests** (unit + integration tests missing)
-5. **Type stub placeholder** (database.types.ts uses loose `any` type)
-6. **Documentation maintenance** (missing .env.local.example file)
-
-The project is **ready for production** with minor corrections and ongoing improvements as listed below.
+The intent is sound: a thin Next.js shell brokers between an authenticated user and a long-lived MCP service that owns tool execution + thread persistence, while the RAG service is the single source of truth for embedded content (PDFs, materials, submissions, tasks, chat attachments). The implementation has multiple breaking gaps that prevent that architecture from working end-to-end.
 
 ---
 
-## 1. PROJECT_STATUS.md Accuracy Assessment
+## 2. Findings
 
-### ✅ What's Accurate
+Severity legend:
+- **CRITICAL** — runtime error or feature unavailable in production today.
+- **HIGH** — silent functional gap; system appears to work but does not deliver promised behavior.
+- **MEDIUM** — robustness / security / cost issue.
+- **LOW** — polish.
 
-| Section | Status | Notes |
-|---------|--------|-------|
-| TL;DR & Core Stack | ✅ Correct | Next.js 16, React 19, Supabase, Groq, Redis — all verified |
-| Product Overview | ✅ Correct | Three-role RBAC (main_admin/manager/member) matches implementation |
-| Architecture Diagram | ✅ Correct | All layers present: Browser, Next.js, Supabase, Blob, Redis, Groq |
-| Major Source Areas | ✅ Correct | All folders exist and serve intended purposes |
-| Roles, RLS, Defence in Depth | ✅ Correct | Three-layer enforcement verified in code |
-| Data Model | ✅ Correct | Schema matches scripts/001-005 migrations |
-| End-to-End Traces | ✅ Correct | Verified 11/11 request flows match codebase |
-| Environment Variables | ✅ Correct | All 11 vars documented match usage in code |
-| Migrations | ✅ Correct | Five SQL scripts present, idempotent structure confirmed |
-| Conventions | ✅ Correct | All 8 conventions enforced in practice |
+---
 
-### ⚠️ What Needs Updates
+### CRITICAL
 
-#### 1.1 **Cron Schedule Discrepancy** (§6.5)
+#### C1. Required Supabase tables do not exist
 
-**Documentation says:**
+**Files:** `mcp-service/persistence.ts`, `app/api/smart-ai/upload/route.ts`
+**Tables referenced but never created:** `chat_threads`, `chat_messages`, `chat_attachments`
+
+`mcp-service/persistence.ts` reads and writes `chat_threads` and `chat_messages`. `app/api/smart-ai/upload/route.ts` inserts into `chat_attachments`. Searching every `.sql` file in `scripts/` and `supabase/migrations/` returns zero `CREATE TABLE` statements for any of them.
+
+**Effect at runtime:**
+- Every uploaded chat attachment fails the `attachments` insert and returns 500.
+- The MCP service's `loadThreadHistory` and `saveMessage` calls fail silently (errors are swallowed and logged), so no chat is ever persisted.
+
+**Recommendation:** Add a migration `supabase/migrations/<ts>_smart_ai_chat.sql` creating the three tables with **per-user RLS**:
+
+```sql
+create table public.chat_threads (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.chat_messages (
+  id uuid primary key default gen_random_uuid(),
+  thread_id uuid not null references public.chat_threads(id) on delete cascade,
+  role text not null check (role in ('user','assistant','system','tool')),
+  content jsonb not null,
+  attachments jsonb,
+  created_at timestamptz not null default now()
+);
+
+create table public.chat_attachments (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  thread_id uuid references public.chat_threads(id) on delete set null,
+  file_name text not null,
+  mime_type text not null,
+  size_bytes bigint not null,
+  storage_url text not null,
+  parsed_text text,
+  created_at timestamptz not null default now()
+);
+
+create index on public.chat_messages(thread_id, created_at);
+create index on public.chat_attachments(user_id, created_at desc);
+
+alter table public.chat_threads     enable row level security;
+alter table public.chat_messages    enable row level security;
+alter table public.chat_attachments enable row level security;
+
+create policy "own threads"     on public.chat_threads
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "own messages"    on public.chat_messages
+  for all using (exists (select 1 from public.chat_threads t
+                         where t.id = thread_id and t.user_id = auth.uid()));
+create policy "own attachments" on public.chat_attachments
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 ```
-vercel.json schedules `/api/cron/mark-missed` every **15 minutes** (`*/15 * * * *`).
+
+---
+
+#### C2. MCP service uses AI SDK 4 tool API under AI SDK 6
+
+**Files:** `mcp-service/supabase-tools.ts`, `mcp-service/index.ts`
+**Installed version:** `ai@6.0.168`
+
+`tool({ parameters: z.object(...) })` and `streamText({ ..., maxSteps: 5 })` are AI SDK 4/5 names. AI SDK 6 renamed them to:
+
+- `parameters` → `inputSchema`
+- `maxSteps: N` → `stopWhen: stepCountIs(N)` (and `stepCountIs` is imported from `'ai'`)
+
+Tools defined with the old key are accepted by TypeScript (the wrapper signature is permissive) but produce zero registered tools at the provider boundary.
+
+**Effect:** The agent has **no working tool calls** — `queryDatabase`, `searchDocument`, `insertRecord`, `updateRecord`, `listSchema` are all dead. The model can only produce free-text answers, defeating the entire MCP architecture.
+
+**Recommendation:** Rename `parameters` → `inputSchema` in every tool and replace `maxSteps` with `stopWhen: stepCountIs(5)`.
+
+---
+
+#### C3. Chat attachments never reach the model
+
+**Files:** `components/dashboard/smart-ai/chat-panel.tsx`, `app/api/smart-ai/chat/route.ts`
+
+The chat panel sends:
+```ts
+sendMessage({ text, annotations: [{ attachments }] })
+```
+And the chat route reads:
+```ts
+const attachments = m.annotations?.[0]?.attachments
 ```
 
-**Reality:**
-```json
-// vercel.json, actual config
-{
-  "crons": [
-    {
-      "path": "/api/cron/mark-missed",
-      "schedule": "0 0 * * *"  // ← Daily, not every 15 min
-    }
-  ]
+`UIMessage` in AI SDK 6 has shape `{ id, role, metadata, parts }`. There is no `annotations` field — the SDK strips unknown keys before transport. As a result, the chat-attachment list is dropped on the wire and `searchDocument` is never invoked with the right `documentId`.
+
+**Recommendation:** Carry attachments via `UIMessage.metadata` (typed) or as `data-attachments` parts. The MCP route already inspects `body.messages` directly, so a small contract change (e.g. a top-level `attachmentsByMessageId` field on the request body) is the cleanest fix.
+
+---
+
+### HIGH
+
+#### H1. The indexer hard-disables every important source type
+
+**File:** `lib/smart-ai/indexer.ts` (lines ~70-72)
+
+```ts
+if (["task", "submission", "validation_run", "announcement", "rule"].includes(input.source_type)) {
+  return
 }
 ```
 
-**Impact:** Low (functional but misaligned). The 24-hour schedule is likely intentional (nightly sweep) but contradicts the documentation's claim of 15-minute intervals.
+Every server action (`app/actions/tasks.ts`, `app/actions/submissions.ts`, `app/actions/announcements.ts`) calls `indexDocument(...)` after writes, but this early-return drops them all. The Inngest `reindex-submission` step is also a no-op. Net effect: the RAG corpus contains **only** materials and chat attachments. Questions like "summarize the last week of submissions for my team" cannot be grounded.
 
-**Action Required:** 
-- [ ] Update §6.5 to document the actual 24-hour schedule, OR
-- [ ] Update vercel.json to `*/15 * * * *` if 15-minute intervals are indeed required for stuck-submission recovery
-
-**Recommendation:** Keep daily schedule (nightly missed-deadline sweep is reasonable). Update docs to match.
+**Recommendation:** Remove the early return, or replace it with an env-var-driven allow-list (`RAG_INDEXED_TYPES=material,chat_attachment,submission,task,announcement`). Then run `scripts/backfill-rag-index.ts` once.
 
 ---
 
-#### 1.2 **Revalidation Path Inconsistency** (§10 Known Issues)
+#### H2. MCP persistence uses anon key + user JWT and silently fails on RLS
 
-**File:** `app/actions/users.ts`
+**File:** `mcp-service/persistence.ts`
 
-**Current code:**
-```typescript
-revalidatePath("/dashboard/admin/users")
+```ts
+createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { headers: { Authorization: `Bearer ${userToken}` } }
+})
 ```
 
-**Issue:** No route at `/dashboard/admin/users` exists. The actual location is likely `/dashboard/team` (manager/member provisioning) or `/dashboard/*` (admin-only views).
+Two problems:
+1. The MCP service runs server-side on Railway and should not depend on user JWT freshness during long-running streams (a JWT expiring mid-conversation will start blocking writes).
+2. All inserts are wrapped in `try/catch` that only `console.error`s — operators see no signal that history is being lost.
 
-**Impact:** Harmless (invalid path doesn't break flow, just means the dashboard won't refresh as expected). However, it should be correct for consistency.
-
-**Action Required:**
-- [ ] Verify intended revalidation target
-- [ ] Update to correct path (likely `/dashboard/team` or all dashboard routes via `/dashboard/*`)
+**Recommendation:** Use `SUPABASE_SERVICE_ROLE_KEY` in the MCP service and do tenant scoping in code (`user_id = profile.id`). Surface insert failures as a structured `data-warning` UI part on the stream so the chat panel can render a "history not saved" toast.
 
 ---
 
-#### 1.3 **Missing tailwind.config.ts**
+#### H3. Thread / message hydration logic doesn't match the client transport
 
-**Documentation (§12 Conventions):**
-> "Use design tokens, not hex codes. `bg-primary`, `text-foreground`, `bg-muted`, etc., defined in `app/globals.css`."
+**Files:** `mcp-service/index.ts`, `components/dashboard/smart-ai/chat-panel.tsx`
 
-**Reality:** 
-- ✅ globals.css exists and defines tokens
-- ❌ tailwind.config.ts is missing (glob returned no match)
-- Impact: Tailwind isn't configured to recognize the design tokens; the system likely falls back to default Tailwind classes
-
-**Action Required:**
-- [ ] Create `tailwind.config.ts` with proper token exports
-- [ ] Wire design tokens from globals.css into Tailwind's `extend.colors` and `extend.fontFamily`
-
----
-
-#### 1.4 **Missing .env.local.example**
-
-**Documentation (§11 Local Dev Checklist):**
-```bash
-cp .env.local.example .env.local        # fill in your own values
+`mcp-service/index.ts` hydrates DB history only when:
+```ts
+body.threadId && body.messages.length === 1
 ```
 
-**Reality:** File doesn't exist.
+The client uses `DefaultChatTransport`, which sends the full visible history on every request. After the second turn, `messages.length > 1` and the branch never triggers. Combined with H2 (history may not be persisted at all), the assistant has amnesia within a single tab as soon as the user clicks **Clear** (which only resets in-memory state — see H4).
 
-**Action Required:**
-- [ ] Create `.env.local.example` with all 11 environment variables stubbed:
-  ```
-  NEXT_PUBLIC_SUPABASE_URL=https://[project].supabase.co
-  NEXT_PUBLIC_SUPABASE_ANON_KEY=[key]
-  SUPABASE_SERVICE_ROLE_KEY=[key]
-  BLOB_READ_WRITE_TOKEN=[token]
-  UPSTASH_REDIS_REST_URL=[url]
-  UPSTASH_REDIS_REST_TOKEN=[token]
-  GROQ_API_KEY=[key]
-  GROQ_VALIDATION_MODEL=llama-3.3-70b-versatile
-  GROQ_SUMMARY_MODEL=llama-3.3-70b-versatile
-  GROQ_VISION_MODEL=llama-3.2-90b-vision-preview
-  CRON_SECRET=<generated-with-openssl>
-  ```
+**Recommendation:** Pick one source of truth. Preferred: client sends `{ threadId, message: lastUserTurn }` and the server hydrates prior messages from DB. Simpler, cheaper, deterministic.
 
 ---
 
-#### 1.5 **Minimal/Stale README.md**
+#### H4. `threadId` is minted in `localStorage` and never rotated
 
-**Current content:**
-```markdown
-# manager-portal
+**File:** `components/dashboard/smart-ai/chat-panel.tsx` (lines ~99-108)
 
-## Getting Started
-
-First, run the development server:
-
-```bash
-npm run dev
+```ts
+const stored = localStorage.getItem("smart-ai-thread-id")
+if (stored) setThreadId(stored)
+else { const id = crypto.randomUUID(); localStorage.setItem(...); setThreadId(id) }
 ```
 
-Open [http://localhost:3000](...) with your browser...
-```
+Issues:
+- **Privacy:** if user A signs out and user B signs in on the same browser, the cached thread ID is reused. RLS will block reads but new messages get inserted under user B with the old thread reference, polluting `chat_threads`.
+- **UX:** the **Clear** button resets `messages` in memory but doesn't create a new thread; the next user message is appended to the old thread on the server.
 
-**Issues:**
-- No mention of Supabase setup
-- No mention of the design system (Notion-inspired tokens)
-- No link to PROJECT_STATUS.md
-- Package manager is pnpm, not npm
-- Doesn't mention Vercel Blob, Redis, Groq, or any integrations
-
-**Action Required:**
-- [ ] Expand README to include:
-  - Quick start (pnpm, not npm)
-  - Link to PROJECT_STATUS.md for architecture
-  - Local dev prerequisites (Supabase project, API keys)
-  - Project overview (what is Hierarchia?)
-  - Tech stack overview
-  - Where to find docs (docs/ folder)
+**Recommendation:** Key the localStorage entry by `profile.id`, and add a "New conversation" action that mints a fresh UUID and clears UI state together.
 
 ---
 
-## 2. Code Quality Assessment
+#### H5. Two competing schedulers for cron tasks
 
-### 2.1 Security — Excellent ✅
+**Files:** `lib/inngest/functions.ts` (cron `* * * * *`), `lib/upstash-scheduler.ts`
 
-| Category | Assessment | Evidence |
-|----------|-----------|----------|
-| **SQL Injection** | ✅ Protected | All queries use parameterized Supabase client; no string interpolation |
-| **CSRF** | ✅ Protected | Server Actions are CSRF-safe by design (Next.js) |
-| **Auth Bypass** | ✅ Protected | Three-layer enforcement (middleware, action, RLS); `server-only` guards |
-| **File Access** | ✅ Protected | Download proxy re-checks RLS before streaming; Blob URLs unguessable |
-| **Rate Limiting** | ✅ Protected | Upstash Redis limiters on uploads (20/10min) and LLM calls (60/1min) |
-| **Password Reset** | ✅ Protected | `must_reset` gate enforced at middleware level |
-| **Headers** | ✅ Protected | next.config.mjs sets HSTS, X-Frame-Options DENY, Permissions-Policy |
-| **Server Secrets** | ✅ Protected | admin.ts, redis.ts, activity.ts, pipeline.ts all marked `server-only` |
+The Inngest cron runs every minute and calls `recordTaskExecution`. The Upstash scheduler is referenced in docs as the gating mechanism. They are not coordinated — `recordTaskExecution` is invoked from both paths, doubling rate-limit cost and risking duplicate side-effects.
 
-**Minor Recommendations:**
-- Consider adding CSRF token validation as extra layer (though not strictly necessary with Server Actions)
-- Log all failed auth attempts to activity log for forensics
+**Recommendation:** Pick one. If Inngest is canonical, delete the Upstash gate. If Upstash is canonical, change the Inngest function to a Vercel-cron-triggered route handler that defers to the Upstash gate.
 
 ---
 
-### 2.2 Architecture & Pattern Consistency — Excellent ✅
+#### H6. `r2.head()` returns nothing
 
-**Verified Patterns:**
+**File:** `lib/r2.ts`
 
-| Pattern | Usage | Consistency |
-|---------|-------|-------------|
-| **Server Action Pattern** | All mutations (create/update/delete) | ✅ 31/31 revalidatePath calls found |
-| **ActionResult Type** | All action responses | ✅ Consistent `{ ok: boolean; error?: string; ... }` |
-| **Zod Validation** | All action inputs | ✅ Every action has `Schema` at top |
-| **Role Checks** | Before any data mutation | ✅ `requireRole()` or `requireProfile()` before every action |
-| **Activity Logging** | Every mutation | ✅ `logActivity()` called on success |
-| **Revalidation** | After every mutation | ✅ All 31 revalidatePath calls present |
-| **Server-only Guards** | Sensitive modules | ✅ 6 modules marked with `import "server-only"` |
-
----
-
-### 2.3 Data Quality & Type Safety — Good (Minor Gaps)
-
-| Area | Status | Issue |
-|------|--------|-------|
-| **TypeScript Strict Mode** | ✅ Enabled | tsconfig.json has `"strict": true` |
-| **Database Types** | ⚠️ Loose Stub | `lib/supabase/database.types.ts` uses `any` type for tables |
-| **Submission Status States** | ✅ Well-Typed | Enum properly defined in types.ts |
-| **Validation Rule Weights** | ✅ Correct | Weighted average implementation matches specification |
-| **Late Submission Logic** | ✅ Correct | Assignment status preserved as `late_submitted` regardless of LLM result |
-
-**Action Required:**
-- [ ] Run `npx supabase gen types typescript --linked` to generate real database types
-- [ ] Replace `Database = any` with generated types in database.types.ts
-- [ ] This will catch type errors at compile time (e.g., misspelled column names)
-
----
-
-### 2.4 Error Handling — Excellent ✅
-
-Every action returns proper `ActionResult`:
-```typescript
-export interface ActionResult {
-  ok: boolean
-  error?: string
-  submissionId?: string  // action-specific data
+```ts
+export async function head(url: string) {
+  await r2.send(new HeadObjectCommand({...}))
 }
 ```
 
-All forms consume via:
-```typescript
-const result = await createSubmission(formData)
-if (!result.ok) {
-  setError(result.error)  // Safe, user-friendly message
-}
-```
-
-**No bare `throw`s or unhandled promises found.** All Supabase errors caught and normalized to user-friendly messages.
+The function awaits but doesn't return the response. No current caller reads the result, but the API is misleading; either `return` the response or remove the function.
 
 ---
 
-### 2.5 Performance — Good (Optimization Opportunities)
+### MEDIUM
 
-| Aspect | Status | Notes |
-|--------|--------|-------|
-| **N+1 Queries** | ✅ Avoided | data.ts uses single `.select("*")` calls, no per-row queries |
-| **Waterfall Requests** | ✅ Minimal | RSC pages load in parallel where possible |
-| **Dashboard Metrics** | ⚠️ Can Optimize | getDashboardSummary runs 3 separate queries; could cache 60s |
-| **Report Snapshots** | ⚠️ Not Populated | Table exists but precompute job missing (TODO in §10) |
-| **Pagination** | ⚠️ Partial | Cursor pagination coded in data.ts but not wired to UI |
-| **LLM Calls** | ✅ Efficient | Parallel rule validation via `Promise.all` |
+#### M1. Every MCP error is swallowed by `.catch(() => null)`
 
-**Recommendations:**
-- [ ] Add Redis cache on getDashboardSummary (60s TTL)
-- [ ] Implement pagination UI for submissions table
-- [ ] Add daily cron to precompute report_snapshots
+**File:** `lib/smart-ai/client.ts`
+
+The chat API silently downgrades to fallback whenever the MCP fetch errors. Operators have no visibility into MCP outages, token rotations, or schema drift. Add structured logging (`console.error("[smart-ai] mcp upstream error", { status, body })`) and surface a `data-warning` part to the UI so users see "Running in fallback mode" instead of believing the system is healthy.
 
 ---
 
-### 2.6 Testing — Missing ⚠️
+#### M2. Tool definitions allow writes to arbitrary tables
 
-| Test Type | Status | Notes |
-|-----------|--------|-------|
-| **Unit Tests** | ❌ None | No .test.ts or spec files found |
-| **Integration Tests** | ❌ None | No Playwright or API tests |
-| **E2E Tests** | ❌ None | End-to-end flows not automated |
-| **Pipeline Tests** | ❌ None | AI validation pipeline has no mock tests |
+**File:** `mcp-service/supabase-tools.ts`
+
+`queryDatabase`, `insertRecord`, and `updateRecord` accept any `table` string. RLS protects reads, but write tools can target any table the user has insert/update privileges on (`activity_log`, etc.). The LLM is one prompt away from corrupting state.
 
 **Recommendation:**
-- [ ] Add Playwright E2E tests for happy paths (sign-in → task → submit → validation)
-- [ ] Add unit tests for lib/llm/pipeline.ts with mocked Groq provider
-- [ ] Add tests for late submission logic and missed-deadline cron
-
-**Time estimate to add basic test suite:** 2-3 days (core flows + pipeline mocking)
+- Maintain an allow-list per role: e.g. members get `read:tasks,submissions,announcements`; managers add `write:tasks,announcements,materials,task_assignments,validation_rules`.
+- Reject any request that lists a table not in the allow-list before calling Supabase.
+- Strip `*` selects and force a `LIMIT` in `queryDatabase`.
 
 ---
 
-## 3. Documentation Assessment
+#### M3. RAG retrieve is not source-type-aware
 
-### 3.1 PROJECT_STATUS.md — Excellent (Minor Updates Needed)
+**Files:** `mcp-service/index.ts`, `rag-service/main.py`
 
-| Section | Quality | Notes |
-|---------|---------|-------|
-| TL;DR (§0) | ✅ Excellent | Concise, complete, immediately useful |
-| Product Overview (§1) | ✅ Excellent | Clear user journeys; table of roles is perfect |
-| Architecture (§2) | ✅ Excellent | Diagram + folder map is authoritative |
-| Roles & RLS (§3) | ✅ Excellent | Three-layer enforcement clearly explained |
-| Data Model (§4) | ✅ Excellent | Schema diagram + status state machines are clear |
-| End-to-End Traces (§5) | ✅ Excellent | 11 verified request paths; detailed and traceable |
-| Deep Dives (§6) | ✅ Excellent | Pipeline, cron, and download proxy all well explained |
-| Module Dependency Matrix (§7) | ✅ Excellent | Clear import/export relationships |
-| Environment Variables (§8) | ✅ Excellent | All 11 documented + CRON_SECRET generation instructions |
-| Migrations (§9) | ✅ Excellent | Five scripts with caveats (transaction issue, enum gotchas) |
-| Status Tracking (§10) | ✅ Good | Shipped features + TODO list; minor known issues are called out |
-| Local Dev Checklist (§11) | ⚠️ Incomplete | Missing .env.local.example reference |
-| Conventions (§12) | ✅ Excellent | 8 essential patterns; well-justified |
+The retrieve endpoint scopes by `owner_id = $user_id`. That works for chat attachments but means a manager cannot retrieve a member's submission/task content even when they should. Add a `source_type` parameter and branch on it:
 
-**This is a model-quality living document.** Very few projects maintain docs this thorough.
+| `source_type`   | Scope                                                |
+|-----------------|------------------------------------------------------|
+| `chat_attachment` | `owner_id = $user_id`                              |
+| `material`      | `team_id IN (user's teams)`                          |
+| `submission`    | `team_id IN (user's teams) AND visible_to_role`      |
+| `task`          | `team_id IN (user's teams)`                          |
+| `announcement`  | `team_id IN (user's teams) OR audience='org'`        |
 
 ---
 
-### 3.2 README.md — Outdated ⚠️
+#### M4. Upload endpoint has no size or MIME validation
 
-The README is a bare Next.js scaffold and needs a complete rewrite to reflect:
-- What Hierarchia actually does
-- How to set up locally (Supabase, API keys)
-- Where to find detailed docs (PROJECT_STATUS.md)
-- Tech stack and integrations
+**File:** `app/api/smart-ai/upload/route.ts`
+
+`MAX_FILE_SIZE_BYTES` and `ACCEPTED_MIME_TYPES` exist in `lib/types.ts` but are not enforced server-side. Any signed-in user can upload any file, push it to R2, and trigger embeddings. Validate before R2 upload and return a 413/415.
 
 ---
 
-### 3.3 Inline Code Comments — Good ✅
+#### M5. No abort handling on the MCP stream
 
-Code is generally self-documenting with well-named functions. Key complex areas have explanatory comments:
-- next.config.mjs explains the 30 MB body limit and mentions future Blob client-token flow
-- lib/llm/pipeline.ts has clear comments on idempotency, rate limiting, and status transitions
-- Zod schemas include validation messages
+**File:** `mcp-service/index.ts`
 
----
-
-## 4. Architectural Coherence — Excellent ✅
-
-### 4.1 Separation of Concerns
-
-| Layer | Responsibility | Quality |
-|-------|-----------------|---------|
-| **Browser (UI)** | Display + form interaction | ✅ RSC-first; client components only where needed |
-| **Server Actions** | Input validation + authorization | ✅ All follow pattern: Zod → requireRole → write → revalidate |
-| **Database** | Persistence + RLS enforcement | ✅ Five migrations, idempotent, triggers in place |
-| **Auth** | Session + role management | ✅ Supabase Auth + custom profiles table; must-reset gate |
-| **File Storage** | Document persistence | ✅ Vercel Blob with RLS-checked download proxy |
-| **LLM Pipeline** | Document parsing + validation | ✅ Modular: extract → parse → validate → aggregate |
-| **Rate Limiting** | Quota enforcement | ✅ Upstash Redis with per-team budgets |
-| **Audit Trail** | Activity logging | ✅ Append-only, service-role writes only |
-
-All layers are loosely coupled and testable. A model of good architecture.
+When the client disconnects mid-response, `streamText` keeps generating. Wire `req.signal` (or `req.on('close', ...)` on plain Node) into the call so the upstream LLM call is cancelled and the cost is bounded.
 
 ---
 
-### 4.2 Design System Alignment
+#### M6. `application/msword` falls through to `parsePptx`
 
-The codebase includes a Notion-inspired design document (provided at start of audit) with:
-- Warm neutral palette (#f6f5f4, #31302e, #615d59, #a39e98)
-- NotionInter font with aggressive letter-spacing at display sizes
-- Whisper borders (1px solid rgba(0,0,0,0.1))
-- Multi-layer shadow stacks with sub-0.05 opacity
+**File:** `lib/parse/index.ts`
 
-**However:** The PROJECT_STATUS.md (§12) mentions design tokens, but tailwind.config.ts is missing, so tokens may not be properly wired. This is a configuration gap, not an architectural flaw.
+The fallback switch routes `.doc` files into `parsePptx` (officeparser). It mostly works but produces noisy output for legacy Word. Either add an explicit handler or return an unsupported-type warning.
 
 ---
 
-## 5. Known Issues & Inconsistencies
+#### M7. pgvector index uses `ivfflat` without `ANALYZE`
 
-### 5.1 Critical Issues
+**File:** `rag-service/main.py` (lifespan)
 
-None found. The codebase is production-safe.
+`ivfflat` recall depends on the index being built after seeding plus `ANALYZE`. In dev it's fine; for production prefer `hnsw`:
 
-### 5.2 High-Priority Issues
-
-| Issue | Location | Severity | Action |
-|-------|----------|----------|--------|
-| Cron schedule mismatch | vercel.json + PROJECT_STATUS.md §6.5 | Medium | Update docs or config to match |
-| Missing tailwind.config.ts | Root | Medium | Create config with token exports |
-
-### 5.3 Medium-Priority Issues
-
-| Issue | Location | Severity | Action |
-|-------|----------|----------|--------|
-| Revalidation path typo | app/actions/users.ts | Low | Correct path reference |
-| Loose database types | lib/supabase/database.types.ts | Low | Run supabase gen types |
-| Missing .env.local.example | Root | Low | Create example file |
-| Minimal README | README.md | Low | Expand with setup + architecture info |
-
-### 5.4 Low-Priority Issues (Enhancements)
-
-| Item | Type | Effort | Impact |
-|------|------|--------|--------|
-| Add unit + E2E tests | Quality | Medium | High (confidence in refactors) |
-| Cache getDashboardSummary | Performance | Small | Small (minor reduction in DB load) |
-| Pagination UI for submissions | Feature | Medium | Medium (better UX for large datasets) |
-| Daily report_snapshots precompute | Feature | Small | Medium (reduces query cost) |
-| Sentry integration | Observability | Medium | Medium (better error tracking) |
-
----
-
-## 6. Recommendations for New Contributors
-
-### Quick Start (Updated)
-
-1. **Clone and install:**
-   ```bash
-   git clone <repo>
-   cd manager-portal
-   pnpm install
-   ```
-
-2. **Set up Supabase:**
-   - Create a Supabase project at supabase.com
-   - Run scripts/001..005 in the SQL editor (in order)
-   - Copy .env.local.example to .env.local (once created) and fill in your keys
-
-3. **Get API keys:**
-   - Supabase: Project Settings → API
-   - Vercel Blob: Integrated on Vercel (or local stub)
-   - Groq: groq.com/pricing
-   - Upstash Redis: upstash.com/redis
-
-4. **Read onboarding:**
-   - Read PROJECT_STATUS.md (10 min) — understand the architecture
-   - Read the section on your task (§5 traces, §6 deep-dives)
-   - Start coding
-
-### Key Patterns to Know
-
-Before you write code, know these patterns:
-
-1. **Every mutation is a Server Action:**
-   ```typescript
-   export async function myAction(formData: FormData): Promise<ActionResult> {
-     const profile = await requireRole(["manager"])
-     const parsed = Schema.safeParse({...})
-     if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message }
-     
-     const supabase = await createClient()
-     const { data, error } = await supabase.from("...").insert(...)
-     if (error) return { ok: false, error: error.message }
-     
-     await logActivity("action.name")
-     revalidatePath("/path/affected")
-     return { ok: true }
-   }
-   ```
-
-2. **Never trust the client:** Always re-check role, ownership, and deadline on the server.
-
-3. **Always log:** Every mutation gets logged for audit trail.
-
-4. **Always revalidate:** After every mutation, revalidate all paths that could be affected.
-
-5. **Use `server-only`:** Any module that touches admin clients, Redis, Blob, or Tesseract must start with `import "server-only"`.
-
----
-
-## 7. Conclusion & Action Items
-
-### Status: ✅ Production-Ready with Minor Corrections
-
-The Hierarchia Manager Portal is a **well-built, secure, and well-documented system**. The architecture is sound, patterns are consistent, and the codebase is maintainable.
-
-### Immediate Action Items (Before Next Release)
-
-- [ ] **Fix vercel.json cron schedule** or update docs §6.5
-- [ ] **Create tailwind.config.ts** with design token exports
-- [ ] **Fix revalidatePath in users.ts** (wrong path)
-- [ ] **Create .env.local.example** for local dev
-- [ ] **Expand README.md** with setup instructions and architecture link
-
-**Effort:** 2-3 hours
-
-### Near-term Improvements (Next Sprint)
-
-- [ ] **Run `supabase gen types`** and replace loose database types
-- [ ] **Add basic E2E tests** (Playwright happy paths)
-- [ ] **Add Redis cache** on getDashboardSummary (60s TTL)
-- [ ] **Implement pagination UI** for submissions table
-
-**Effort:** 2-3 days
-
-### Nice-to-Have (Future)
-
-- [ ] Add unit tests for lib/llm/pipeline.ts with mocked Groq
-- [ ] Daily cron job to precompute report_snapshots
-- [ ] Sentry integration for error tracking
-- [ ] Read receipts on announcements
-
----
-
-## Appendix: File Structure Summary
-
-```
-manager-portal/
-├── README.md                                    ⚠️ Needs expansion
-├── tsconfig.json                                ✅ Good (strict mode)
-├── next.config.mjs                              ✅ Good (security headers, body limit)
-├── tailwind.config.ts                           ❌ Missing
-├── .env.local.example                           ❌ Missing
-├── vercel.json                                  ⚠️ Schedule discrepancy
-│
-├── app/
-│   ├── layout.tsx                               ✅ Root layout
-│   ├── (dashboard)/
-│   │   ├── layout.tsx                           ✅ Dashboard wrapper (auth gate)
-│   │   ├── error.tsx                            ✅ Error boundary
-│   │   ├── loading.tsx                          ✅ Loading boundary
-│   │   └── dashboard/                           ✅ All routes present (13 pages)
-│   ├── auth/                                    ✅ Login, signout, callback
-│   ├── api/
-│   │   ├── download/[id]/route.ts               ✅ RLS-checked proxy
-│   │   └── cron/mark-missed/route.ts            ✅ Scheduled job
-│   └── actions/                                 ✅ All mutations (7 files, 31 actions)
-│
-├── lib/
-│   ├── supabase/                                ✅ Auth + client layers
-│   │   ├── client.ts                            ✅ Browser SSR client
-│   │   ├── server.ts                            ✅ RSC + Action client
-│   │   ├── admin.ts                             ✅ Service role (marked server-only)
-│   │   ├── proxy.ts                             ✅ Edge middleware
-│   │   └── database.types.ts                    ⚠️ Loose `any` type
-│   ├── auth.ts                                  ✅ Role checks
-│   ├── auth-shared.ts                           ✅ Client-safe helpers
-│   ├── data.ts                                  ✅ Read queries (RSC-only)
-│   ├── activity.ts                              ✅ Audit logging (server-only)
-│   ├── redis.ts                                 ✅ Rate limiting (server-only)
-│   ├── types.ts                                 ✅ All types + enums
-│   ├── llm/
-│   │   ├── pipeline.ts                          ✅ Orchestrator (server-only)
-│   │   └── validate.ts                          ✅ Groq calls (server-only)
-│   └── parse/                                   ✅ Format-specific parsers (server-only)
-│
-├── components/
-│   ├── dashboard/                               ✅ All page components
-│   ├── auth/                                    ✅ Login form
-│   └── ui/                                      ✅ shadcn/ui primitives
-│
-├── scripts/                                     ✅ All 5 migrations present
-│   ├── 001_init_schema.sql
-│   ├── 002_helper_functions.sql
-│   ├── 003_rls_policies.sql
-│   ├── 004_seed_demo_data.sql
-│   └── 005_tasks_and_late_submissions.sql
-│
-└── docs/
-    ├── PROJECT_STATUS.md                        ✅ Excellent (minor updates needed)
-    └── DESIGN-notion-(2).md                     ✅ Design system (provided externally)
+```sql
+create index on rag_documents using hnsw (embedding vector_cosine_ops);
 ```
 
+Or run `ANALYZE rag_documents` after the backfill script completes.
+
 ---
 
-**End of Audit Report**
+#### M8. `mcp-service` `pnpm start` script depends on `../.env.local`
 
-*This audit was conducted as a full end-to-end code review. The PROJECT_STATUS.md document is accurate and of production quality. The codebase is ready for deployment with the minor corrections listed above applied.*
+**File:** `mcp-service/package.json`
+
+The start script reads `--env-file=../.env.local` which doesn't exist on Railway. It works because `process.env` is populated by Railway, but the flag prints a confusing warning. Drop the flag.
+
+---
+
+#### M9. Health-check badges are derived from env presence, not real probes
+
+**File:** `app/(dashboard)/dashboard/smart-ai/page.tsx`
+
+`services.mcp` and `services.rag` are computed from whether env vars are set. The page can show "Connected" while a service is down. Add a server-side probe (`GET /health` with a 1-second timeout) and pass the real boolean to the shell.
+
+---
+
+#### M10. `convertToModelMessages` is awaited unnecessarily
+
+**File:** `app/api/smart-ai/chat/route.ts`
+
+The function is synchronous in AI SDK 6. Cosmetic, but worth fixing while the file is open.
+
+---
+
+### LOW
+
+- **L1.** `ChatPanel` renders `text || <Loader>` — assistant turns that are pure tool calls show "Thinking…" indefinitely. Render `tool-result` parts.
+- **L2.** `analytics-panel.tsx` `hourLabel` is local-time but FastAPI buckets are UTC. Off-by-timezone display.
+- **L3.** No client-side enforcement of `MAX_FILE_SIZE_BYTES` in the file picker — feedback is "upload, fail, retry".
+- **L4.** Indexer minimum length of 4 chars is too aggressive — most short titles get filtered. 16 is a saner floor.
+- **L5.** `lib/smart-ai/indexer.ts` swallows network errors with `console.error`; promote to structured logging so a log aggregator can index them.
+
+---
+
+## 3. Architecture Recommendations
+
+### 3.1. Define one chat-message contract
+
+Today the request body, `UIMessage`, and the persisted row format disagree. Standardize on:
+
+```ts
+// transport (chat panel → /api/smart-ai/chat)
+type ChatRequest = {
+  threadId: string
+  message: { id: string; role: 'user'; parts: UIPart[] }
+  attachments?: Array<{ id: string; messageId: string; documentId: string }>
+}
+```
+
+The MCP service hydrates prior messages from DB. The client never has to remember more than the in-flight message.
+
+### 3.2. Centralize role-scoped retrieval in the RAG service
+
+Keep all scope logic in `rag-service/main.py`. The MCP service should pass `{ user_id, role, team_ids, source_type, query, top_k }` and trust the response. This avoids duplicating policies in two languages.
+
+### 3.3. Make the MCP service the only writer to `chat_*` tables
+
+The Next.js layer should never write to `chat_messages`. The upload route can keep writing `chat_attachments` (it already needs the row to exist before indexing), but `chat_threads` should be created lazily by the MCP service on first message. That keeps the persistence contract in one place.
+
+### 3.4. Adopt Vercel AI SDK 6 idioms consistently
+
+- `tool({ inputSchema, execute })`
+- `stopWhen: stepCountIs(N)`
+- `result.toUIMessageStreamResponse()` everywhere
+- `UIMessage.metadata` for any structured per-message extras (attachments, tool-trace IDs)
+
+### 3.5. Observability
+
+Add three log streams:
+1. **MCP request log** — `{ threadId, userId, model, tokensIn, tokensOut, toolCalls, durationMs }` per turn.
+2. **RAG query log** — `rag_query_log` table already exists; ensure every `searchDocument` call writes one row with `latency_ms` + `chunks_returned`.
+3. **Indexer log** — successes vs failures per source type, surfaced on the analytics panel.
+
+---
+
+## 4. Phased Remediation Plan
+
+### Phase 1 — Unblock the system (must-do before deploy)
+
+| Item | Files |
+|---|---|
+| C1. Add chat tables migration with per-user RLS | `supabase/migrations/<ts>_smart_ai_chat.sql` |
+| C2. Migrate MCP tool definitions to AI SDK 6 (`inputSchema`, `stopWhen`) | `mcp-service/supabase-tools.ts`, `mcp-service/index.ts` |
+| C3. Wire chat attachments through `UIMessage.metadata` (or top-level body field) | `components/dashboard/smart-ai/chat-panel.tsx`, `app/api/smart-ai/chat/route.ts`, `mcp-service/index.ts` |
+| H1. Remove indexer source-type early-return; backfill | `lib/smart-ai/indexer.ts`, run `scripts/backfill-rag-index.ts` |
+| H2. Switch MCP persistence to service-role key | `mcp-service/persistence.ts` |
+
+### Phase 2 — Hardening
+
+| Item | Files |
+|---|---|
+| H3. Fix history hydration contract (server-side hydration) | `mcp-service/index.ts`, `components/dashboard/smart-ai/chat-panel.tsx` |
+| H4. Per-user `threadId` + "New conversation" action | `components/dashboard/smart-ai/chat-panel.tsx` |
+| H5. Pick one scheduler (Inngest or Upstash) | `lib/inngest/functions.ts`, `lib/upstash-scheduler.ts` |
+| M1. Structured MCP error logging + UI fallback warning | `lib/smart-ai/client.ts`, `app/api/smart-ai/chat/route.ts`, chat panel |
+| M2. Allow-list table writes in MCP tools by role | `mcp-service/supabase-tools.ts` |
+| M3. `source_type`-aware RAG scoping | `mcp-service/index.ts`, `rag-service/main.py` |
+| M4. Upload size/MIME validation | `app/api/smart-ai/upload/route.ts` |
+| M5. Stream abort handling | `mcp-service/index.ts` |
+
+### Phase 3 — Polish
+
+L1–L5, M9 health-check badges, M10 cosmetic await, M7 hnsw index migration, M6 .doc parser, M8 pnpm start flag.
+
+---
+
+## 5. Risk Summary
+
+If only Phase 1 ships:
+
+- Chat persistence works (C1, H2).
+- Tool calling works (C2).
+- Attachment-grounded answers work (C3).
+- Server-action-driven RAG grounding works (H1).
+
+The system is functionally complete from the user's perspective. Phase 2 prevents quiet data corruption and tightens the security perimeter. Phase 3 is UX/observability.
+
+The single most important fix is **C2** — without it, the entire MCP value proposition (tools) is non-functional regardless of any other change.
