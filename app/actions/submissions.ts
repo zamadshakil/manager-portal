@@ -10,6 +10,7 @@ import { logActivity } from "@/lib/activity"
 import { uploadLimiter } from "@/lib/redis"
 import { clearPipelineLock } from "@/lib/llm/pipeline"
 import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
+import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
 
 
 
@@ -212,6 +213,30 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
     revalidatePath(`/dashboard/tasks/${taskId}`)
   }
 
+  // Push a stub into the RAG index. The submission's extracted text /
+  // validation summary aren't ready yet — those land asynchronously when
+  // /api/pipeline/[id] finishes. The pipeline route re-indexes with the
+  // richer content. Even this stub is useful so Smart AI can answer
+  // "what did <member> just upload?" right away.
+  void indexDocument({
+    source_type: "submission",
+    source_id: data.id,
+    team_id: profile.team_id,
+    owner_id: profile.id,
+    title: parsed.data.title,
+    content: joinContent([
+      parsed.data.title,
+      `Uploaded by ${profile.id} on team ${profile.team_id}.`,
+      taskId ? `Linked to task ${taskId}.` : null,
+      isLate ? `Late submission. Reason: ${lateReason ?? "(none)"}` : null,
+    ]),
+    metadata: {
+      task_id: taskId,
+      is_late: isLate,
+      mime: file.type,
+    },
+  })
+
   // Return the submissionId so the client can trigger the pipeline via
   // POST /api/pipeline/[id] and poll for status updates.
   return { ok: true, submissionId: data.id }
@@ -319,6 +344,8 @@ export async function deleteSubmission(formData: FormData): Promise<ActionResult
     entityId: sub.id,
   })
 
+  void deleteIndexed({ source_type: "submission", source_id: sub.id })
+
   revalidatePath("/dashboard/submissions")
   return { ok: true }
 }
@@ -388,6 +415,11 @@ export async function bulkDeleteSubmissions(formData: FormData): Promise<ActionR
     entityId: allowedIds[0], // log against the first one
     metadata: { count: allowedIds.length },
   })
+
+  // Strip every deleted row from the RAG index in parallel — best-effort.
+  void Promise.all(
+    allowedIds.map((id) => deleteIndexed({ source_type: "submission", source_id: id })),
+  )
 
   revalidatePath("/dashboard/submissions")
   return { ok: true }
