@@ -14,6 +14,7 @@ import {
   Settings,
   ShieldCheck,
   ListChecks,
+  Sparkles,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { roleLabel } from "@/lib/auth-shared"
@@ -70,6 +71,12 @@ const NAV: NavGroup[] = [
   {
     label: "Intelligence",
     items: [
+      {
+        label: "Smart AI",
+        icon: Sparkles,
+        href: "/dashboard/smart-ai",
+        roles: ["main_admin", "manager", "member"],
+      },
       {
         label: "Reports",
         icon: BarChart3,

@@ -1,0 +1,18 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+asyncpg==0.30.0
+pydantic==2.10.4
+anyio==4.7.0
+
+# RAG / LLM tooling
+langchain==0.3.13
+langchain-openai==0.2.14
+langchain-community==0.3.13
+langgraph==0.2.60
+pgvector==0.3.6
+tiktoken==0.8.0
+
+# Document loaders (PDFs, docx, images)
+pypdf==5.1.0
+python-docx==1.1.2
+Pillow==11.0.0
