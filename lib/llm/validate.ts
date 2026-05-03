@@ -20,7 +20,7 @@ const VISION_MODEL = process.env.DO_VISION_MODEL || "nemotron-nano-12b-v2-vl"
 
 // Per-LLM-call hard timeout. With Inngest, each step runs in its own
 // serverless invocation, so we no longer need to squeeze into a shared 60s
-// budget. We set it to 45s to ensure it times out before Vercel's 60s hard limit.
+// budget. We set it to 45s to fit within the pipeline budget (default 50s).
 const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS ?? 45_000)
 
 // Bumped whenever the system prompt or schema changes so we can compare

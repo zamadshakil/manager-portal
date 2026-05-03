@@ -21,10 +21,10 @@ const RULE_CONCURRENCY = Number(process.env.LLM_RULE_CONCURRENCY ?? 4)
 const EXTRACTED_TEXT_PREVIEW_CHARS = 2_000
 
 /**
- * Soft pipeline deadline. Vercel Hobby caps function duration at 60s; we
- * leave a 10s buffer so the pipeline can always write its final status to
- * Supabase before the platform kills the function. Override via env when
- * running on a longer-budget plan.
+ * Soft pipeline deadline. Railway doesn't impose a strict function timeout,
+ * but we keep a budget to prevent runaway submissions. The Inngest path
+ * (processSubmissionFn) is preferred for production — this legacy pipeline
+ * is retained as a fallback from /api/pipeline/[id].
  */
 const PIPELINE_BUDGET_MS = Number(process.env.PIPELINE_BUDGET_MS ?? 50_000)
 
@@ -73,7 +73,7 @@ export async function clearPipelineLock(submissionId: string) {
 /**
  * End-to-end async validation pipeline. Called from the `/api/pipeline/[id]`
  * route via `after()` so the user sees an instant "queued" response while we:
- *   1. fetch the file from Vercel Blob
+ *   1. fetch the file from R2 (Cloudflare)
  *   2. extract plain text via the right parser for the MIME type
  *   3. (images) use Gemini vision; OCR is NOT used as a fallback in
  *      serverless because Tesseract's WASM cold-start is too slow
@@ -326,7 +326,7 @@ async function runPipeline(submissionId: string) {
       admin
         .from("validation_rules")
         .select("*")
-        .eq("team_id", submission.team_id)
+        .or(`team_id.eq.${submission.team_id},team_id.is.null`)
         .eq("enabled", true),
       submission.task_id
         ? admin.from("tasks").select("*").eq("id", submission.task_id).maybeSingle()

@@ -128,7 +128,7 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
     taskAssignmentId = assignment.id
   }
 
-  // ---------- Upload to Vercel Blob ----------
+  // ---------- Upload to R2 ----------
   // We add a random suffix so the URL is unguessable; the client never receives
   // `blob_url` directly — they hit `/api/download/[id]` which re-checks RLS.
   const safeName = file.name.replace(/[^\w.\-]+/g, "_")
@@ -257,7 +257,7 @@ export async function retrySubmission(formData: FormData): Promise<ActionResult>
     .single()
   if (error || !data) return { ok: false, error: "Submission not found." }
 
-  // Pre-flight check: verify the file still exists in Vercel Blob before
+  // Pre-flight check: verify the file still exists in R2 before
   // queueing a retry. If the blob was deleted, the pipeline will always fail.
   if (data.blob_url) {
     try {

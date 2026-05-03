@@ -98,7 +98,7 @@ export async function indexDocument(input: IndexDocumentInput): Promise<void> {
         metadata: input.metadata ?? {},
       }),
       cache: "no-store",
-      // Hard cap so a hung rag-service can't pin a Vercel function.
+      // Hard cap so a hung rag-service can't pin a Railway function.
       signal: AbortSignal.timeout(8_000),
     })
     if (!res.ok) {

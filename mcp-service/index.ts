@@ -16,7 +16,7 @@
  *
  * Why a separate service?
  *
- *   1. Keeps long-running streams off the Vercel function timeout budget.
+ *   1. Keeps long-running streams off the serverless function timeout budget.
  *   2. Lets us hold the service-role Supabase key for thread persistence
  *      without exposing it to the portal.
  *
@@ -405,7 +405,7 @@ function handleHealth(_req: IncomingMessage, res: ServerResponse) {
 // ---------------------------------------------------------------------------
 
 const server = createServer((req, res) => {
-  res.setHeader("access-control-allow-origin", "*")
+  res.setHeader("access-control-allow-origin", process.env.PORTAL_ORIGIN ?? "*")
   res.setHeader("access-control-allow-headers", "content-type, authorization")
   res.setHeader("access-control-allow-methods", "POST, GET, OPTIONS")
   res.setHeader("access-control-expose-headers", "x-mcp-thread-id")

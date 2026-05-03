@@ -50,9 +50,8 @@ export default function RootLayout({
           Resource hints. React 19 auto-hoists <link> tags to <head>, but
           declaring them inside an explicit <head> guarantees ordering above
           the body so the browser can act on them before parsing the rest of
-          the document. Vercel Blob serves uploaded files (downloads, avatar
-          previews) so a DNS warm-up pays off the first time a user opens a
-          submission.
+          the document. Preconnecting to the Supabase/Kong gateway shaves
+          100-300ms off the first auth round-trip on a cold load.
         */}
         {supabaseOrigin ? (
           <>
@@ -60,7 +59,7 @@ export default function RootLayout({
             <link rel="dns-prefetch" href={supabaseOrigin} />
           </>
         ) : null}
-        <link rel="dns-prefetch" href="https://blob.vercel-storage.com" />
+
       </head>
       <body className="font-sans antialiased">
         {children}

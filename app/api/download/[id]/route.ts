@@ -5,16 +5,16 @@ import { requireProfile } from "@/lib/auth"
 
 /**
  * Authenticated proxy for submission/material files. We never expose the raw
- * Vercel Blob URL to the client — instead the UI links to
+ * R2 URL to the client — instead the UI links to
  * `/api/download/[id]?type=submission|material` which:
  *   1. resolves the row through RLS (so members see only their own,
  *      managers see their team, admin sees everything)
- *   2. fetches the unguessable Blob URL on the server
+ *   2. fetches the file from R2 on the server
  *   3. streams the bytes back with a Content-Disposition header
  *
- * This keeps documents reasonably private even though the underlying Blob
- * objects are technically `public` (the only access mode @vercel/blob
- * supports today). Anyone without an authenticated session is bounced.
+ * This keeps documents reasonably private. R2 objects are accessed via
+ * server-side S3-compatible calls and never exposed directly.
+ * Anyone without an authenticated session is bounced.
  */
 export async function GET(
   request: NextRequest,

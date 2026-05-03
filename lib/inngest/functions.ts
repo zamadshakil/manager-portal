@@ -294,7 +294,7 @@ export const onFailureSubmissionFn = inngest.createFunction(
 );
 
 export const markMissedCronFn = inngest.createFunction(
-  { id: "mark-missed-cron", triggers: [{ cron: "* * * * *" }] },
+  { id: "mark-missed-cron", triggers: [{ cron: "*/15 * * * *" }] },
   async ({ step }) => {
     const result = await step.run("mark-missed-assignments-and-recover-stuck", async () => {
       const admin = createAdminClient();

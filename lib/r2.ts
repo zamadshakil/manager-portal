@@ -50,10 +50,16 @@ export async function del(url: string) {
 export async function head(url: string, options?: any) {
   if (!url) throw new Error("No URL provided");
   const key = url.replace(`${PUBLIC_URL}/`, "")
-  await r2.send(new HeadObjectCommand({
+  const res = await r2.send(new HeadObjectCommand({
     Bucket: BUCKET,
     Key: key
   }))
+  return {
+    contentType: res.ContentType,
+    contentLength: res.ContentLength,
+    lastModified: res.LastModified,
+    etag: res.ETag,
+  }
 }
 
 export async function get(url: string, options?: any) {

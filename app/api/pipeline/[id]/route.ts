@@ -4,10 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { inngest } from "@/lib/inngest/client"
 
 /**
- * Vercel Hobby plan allows up to 60s per serverless function. This route
- * owns the full AI pipeline lifecycle — parsing, LLM validation, scoring —
- * completely decoupled from the upload Server Action so the upload stays
- * fast (~2s) and the pipeline gets a dedicated 60s budget.
+ * This route owns the AI pipeline lifecycle — parsing, LLM validation,
+ * scoring — completely decoupled from the upload Server Action so the
+ * upload stays fast (~2s) and the pipeline gets a dedicated execution
+ * budget via Inngest.
  */
 export const maxDuration = 60
 
@@ -82,8 +82,8 @@ export async function POST(
     }
 
     // Trigger the background job via Inngest.
-    // This bypasses the Vercel 60s timeout entirely because Inngest orchestrates
-    // the execution across multiple serverless invocations and handles retries.
+    // This uses Inngest to orchestrate execution across multiple invocations
+    // with automatic retries, eliminating serverless timeout concerns.
     await inngest.send({
       name: "app/submission.process",
       data: { submissionId },

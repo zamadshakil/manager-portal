@@ -16,7 +16,7 @@ import {
 // is unreachable):
 //
 //   1. OpenRouter   (if OPENROUTER_API_KEY is set) — recommended for prod.
-//   2. AI Gateway   (if AI_GATEWAY_API_KEY is set or running on Vercel).
+//   2. AI Gateway   (if AI_GATEWAY_API_KEY is set).
 //   3. Bare OpenAI  key (legacy).
 // ---------------------------------------------------------------------------
 
