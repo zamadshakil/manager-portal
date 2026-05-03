@@ -4,7 +4,7 @@
     "builder": "RAILPACK"
   },
   "deploy": {
-    "startCommand": "HOSTNAME=0.0.0.0 node .next/standalone/server.js",
+    "startCommand": "cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/ && HOSTNAME=0.0.0.0 node .next/standalone/server.js",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
