@@ -20,6 +20,13 @@ export default function LoginForm() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
+    
+    // Basic email validation to prevent 500 schema error from Supabase
+    if (!email || !email.includes("@")) {
+      setError("Please enter a valid email address (e.g., admin@hierarchia.app)")
+      return
+    }
+
     setError(null)
     setLoading(true)
     try {
@@ -48,7 +55,7 @@ export default function LoginForm() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+        <form onSubmit={onSubmit} className="flex flex-col gap-4">
           <div className="grid gap-2">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -59,6 +66,7 @@ export default function LoginForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={loading}
+              placeholder="admin@hierarchia.app"
             />
           </div>
           <div className="grid gap-2">
