@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireRole, canManageTeam } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
+import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
 
 export interface TaskActionResult {
   ok: boolean
@@ -168,6 +169,25 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
     },
   })
 
+  void indexDocument({
+    source_type: "task",
+    source_id: task.id,
+    team_id: parsed.data.team_id,
+    owner_id: profile.id,
+    title: parsed.data.title,
+    content: joinContent([
+      parsed.data.title,
+      parsed.data.description ?? null,
+      parsed.data.instructions ?? null,
+      parsed.data.due_at ? `Deadline: ${parsed.data.due_at}` : null,
+    ]),
+    metadata: {
+      due_at: parsed.data.due_at,
+      allow_late: parsed.data.allow_late,
+      assigned_count: assignedCount,
+    },
+  })
+
   revalidatePath("/dashboard/tasks")
   revalidatePath(`/dashboard/tasks/${task.id}`)
   return { ok: true, taskId: task.id, assignedCount }
@@ -277,6 +297,8 @@ export async function deleteTask(formData: FormData): Promise<TaskActionResult> 
     entityType: "task",
     entityId: task.id,
   })
+
+  void deleteIndexed({ source_type: "task", source_id: task.id })
 
   revalidatePath("/dashboard/tasks")
   return { ok: true }

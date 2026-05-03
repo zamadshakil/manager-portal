@@ -2,6 +2,7 @@ import { inngest } from "./client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractText } from "@/lib/parse";
 import { runRule, summarize, describeImage, PROMPT_VERSION } from "@/lib/llm/validate";
+import { indexDocument, joinContent } from "@/lib/smart-ai/indexer";
 import type { Submission, SubmissionFlag, ValidationRule, Task } from "@/lib/types";
 
 const EXTRACTED_TEXT_PREVIEW_CHARS = 2_000;
@@ -216,6 +217,53 @@ export const processSubmissionFn = inngest.createFunction(
         summary: summaryData.summary,
         flags: aggregateFlags,
       }).eq("id", submissionId);
+    });
+
+    // Stage 7: Refresh the RAG index with the rich content now that we have
+    // extracted text, summary, score, and flags. This is the version Smart AI
+    // will actually retrieve when a manager asks "what's wrong with X?".
+    // Best-effort and non-fatal — the submission is already saved.
+    await step.run("reindex-submission", async () => {
+      try {
+        const admin = createAdminClient();
+        const { data: finalSub } = await admin
+          .from("submissions")
+          .select("id, team_id, uploader_id, title, status, score, summary, extracted_text, flags, task_id, is_late")
+          .eq("id", submissionId)
+          .single();
+        if (!finalSub) return { ok: false, reason: "missing" };
+
+        await indexDocument({
+          source_type: "submission",
+          source_id: finalSub.id,
+          team_id: finalSub.team_id,
+          owner_id: finalSub.uploader_id,
+          title: finalSub.title,
+          content: joinContent([
+            finalSub.title,
+            finalSub.summary,
+            // Truncated text preview captured during validation. Full text is
+            // intentionally NOT pushed to the index — it can balloon embedding
+            // cost and is rarely the most useful retrieval target.
+            finalSub.extracted_text,
+            (finalSub.flags as SubmissionFlag[] | null ?? [])
+              .map((f) => `[${f.severity}] ${f.rule_name ?? ""}: ${f.message}`)
+              .join("\n"),
+          ]),
+          metadata: {
+            status: finalSub.status,
+            score: finalSub.score,
+            task_id: finalSub.task_id,
+            is_late: finalSub.is_late,
+            flag_count: (finalSub.flags as SubmissionFlag[] | null ?? []).length,
+          },
+        });
+        return { ok: true };
+      } catch (err) {
+        // Never fail the function over an indexing hiccup.
+        console.warn("[inngest] reindex-submission threw", err);
+        return { ok: false };
+      }
     });
 
     return { status: "completed" };

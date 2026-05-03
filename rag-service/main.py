@@ -127,9 +127,18 @@ async def lifespan(app: FastAPI):
                     content TEXT NOT NULL,
                     embedding vector({EMBEDDING_DIM}),
                     metadata JSONB DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
+            )
+            # The upsert in /v1/index relies on this unique pair; without it
+            # ON CONFLICT silently inserts duplicates. CREATE UNIQUE INDEX IF
+            # NOT EXISTS is idempotent so this is safe to run on every boot
+            # AND on tables that pre-date this column add.
+            await conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS rag_documents_source_uniq "
+                "ON rag_documents (source_type, source_id)"
             )
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS rag_documents_team_idx ON rag_documents (team_id)"
@@ -294,7 +303,8 @@ async def index_document(req: IndexRequest) -> dict[str, Any]:
                     title = EXCLUDED.title,
                     content = EXCLUDED.content,
                     embedding = EXCLUDED.embedding,
-                    metadata = EXCLUDED.metadata
+                    metadata = EXCLUDED.metadata,
+                    updated_at = NOW()
             RETURNING id
             """,
             req.source_type,
@@ -307,6 +317,27 @@ async def index_document(req: IndexRequest) -> dict[str, Any]:
             req.metadata,
         )
     return {"ok": True, "id": str(row["id"])}
+
+
+@app.delete("/v1/index", dependencies=[Depends(require_bearer)])
+async def delete_indexed(source_type: str, source_id: str) -> dict[str, Any]:
+    """Remove a single document from the index. Idempotent: 404 only when
+    the row genuinely doesn't exist, so the portal doesn't have to track
+    whether something was previously indexed."""
+    if app.state.pool is None:
+        raise HTTPException(503, "Database not configured")
+    async with app.state.pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM rag_documents WHERE source_type = $1 AND source_id = $2",
+            source_type,
+            source_id,
+        )
+    # asyncpg returns "DELETE <n>"; treat 0 rows as a soft 404 so callers
+    # can distinguish "wasn't there" from "deleted".
+    deleted = int(result.split(" ")[-1]) if result.startswith("DELETE") else 0
+    if deleted == 0:
+        raise HTTPException(404, f"No row for {source_type}:{source_id}")
+    return {"ok": True, "deleted": deleted}
 
 
 @app.post("/v1/retrieve", dependencies=[Depends(require_bearer)])

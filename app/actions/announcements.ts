@@ -5,6 +5,7 @@ import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
 import { requireRole } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
+import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
 
 const Schema = z.object({
   title: z.string().trim().min(2).max(200),
@@ -65,6 +66,16 @@ export async function createAnnouncement(formData: FormData): Promise<ActionResu
     metadata: { priority: parsed.data.priority, target: parsed.data.target },
   })
 
+  void indexDocument({
+    source_type: "announcement",
+    source_id: data.id,
+    team_id: teamId,
+    owner_id: profile.id,
+    title: parsed.data.title,
+    content: joinContent([parsed.data.title, parsed.data.body]),
+    metadata: { priority: parsed.data.priority },
+  })
+
   revalidatePath("/dashboard")
   revalidatePath("/dashboard/announcements")
   return { ok: true }
@@ -92,6 +103,8 @@ export async function deleteAnnouncement(formData: FormData): Promise<ActionResu
     entityType: "announcement",
     entityId: id,
   })
+
+  void deleteIndexed({ source_type: "announcement", source_id: id })
 
   revalidatePath("/dashboard")
   revalidatePath("/dashboard/announcements")

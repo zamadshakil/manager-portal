@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server"
 import { requireRole } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
 import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
+import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
 
 const MetaSchema = z.object({
   title: z.string().trim().min(2).max(200),
@@ -98,6 +99,24 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
     metadata: { mime: file.type, size: file.size, tags },
   })
 
+  // Index title + description + tags. The file itself is *not* yet parsed
+  // into the RAG index — that's the next step (server-side text extraction
+  // for PDFs / DOCX / images). Even the metadata-only index already lets
+  // Smart AI answer "what materials cover X?" by tag.
+  void indexDocument({
+    source_type: "material",
+    source_id: data.id,
+    team_id: teamId,
+    owner_id: profile.id,
+    title: parsed.data.title,
+    content: joinContent([
+      parsed.data.title,
+      parsed.data.description ?? null,
+      tags.length ? `Tags: ${tags.join(", ")}` : null,
+    ]),
+    metadata: { tags, mime: file.type },
+  })
+
   revalidatePath("/dashboard/materials")
   return { ok: true }
 }
@@ -134,6 +153,8 @@ export async function deleteMaterial(formData: FormData): Promise<{ ok: boolean;
     entityType: "material",
     entityId: id,
   })
+
+  void deleteIndexed({ source_type: "material", source_id: id })
 
   revalidatePath("/dashboard/materials")
   return { ok: true }
