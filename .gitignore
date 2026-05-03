@@ -16,6 +16,7 @@ local.env
 node_modules
 .next/
 .DS_Store
+tsconfig.tsbuildinfo
 
 # Large binary assets
 eng.traineddata
