@@ -24,7 +24,8 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
-import { streamText, convertToModelMessages, type ModelMessage } from "ai"
+import { streamText, type ModelMessage } from "ai"
+import { createOpenAI } from "@ai-sdk/openai"
 
 // ---------------------------------------------------------------------------
 // Config
@@ -34,8 +35,30 @@ const PORT = Number(process.env.PORT ?? 3030)
 const MCP_SERVICE_TOKEN = process.env.MCP_SERVICE_TOKEN ?? ""
 const RAG_SERVICE_URL = (process.env.RAG_SERVICE_URL ?? "").replace(/\/$/, "")
 const RAG_SERVICE_TOKEN = process.env.RAG_SERVICE_TOKEN ?? ""
-const MODEL = process.env.SMART_AI_MODEL ?? "openai/gpt-5-mini"
+const MODEL = process.env.SMART_AI_MODEL ?? "openai/gpt-4o-mini"
 const MAX_TOP_K = Number(process.env.SMART_AI_TOP_K ?? 6)
+
+// LLM provider — OpenRouter when OPENROUTER_API_KEY is set, otherwise the
+// AI Gateway / bare OpenAI key. OpenRouter is OpenAI-compatible so we just
+// swap the base URL.
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
+const OPENROUTER_BASE_URL =
+  process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1"
+
+function resolveModel() {
+  if (OPENROUTER_API_KEY) {
+    const openrouter = createOpenAI({
+      apiKey: OPENROUTER_API_KEY,
+      baseURL: OPENROUTER_BASE_URL,
+      headers: {
+        "HTTP-Referer": process.env.SITE_URL ?? "https://hierarchia.app",
+        "X-Title": "Hierarchia Smart AI",
+      },
+    })
+    return openrouter(MODEL)
+  }
+  return MODEL
+}
 
 // ---------------------------------------------------------------------------
 // Types matching the contract with the Next.js portal
@@ -213,7 +236,7 @@ async function handleChat(req: IncomingMessage, res: ServerResponse) {
 
   try {
     const result = streamText({
-      model: MODEL,
+      model: resolveModel(),
       system,
       messages: modelMessages,
       onFinish: async ({ usage }) => {
