@@ -5,18 +5,28 @@ import { z } from "zod"
 import type { ValidationRule } from "@/lib/types"
 
 // ── Model configuration ────────────────────────────────────────────────────
-// Configure DigitalOcean AI Inference using the OpenAI-compatible endpoint.
-// Requires DO_AI_API_KEY in your environment variables.
-const doai = createOpenAI({
-  baseURL: process.env.DO_AI_BASE_URL || "https://inference.do-ai.run/v1",
-  apiKey: process.env.DO_AI_API_KEY,
+// Uses OpenRouter as the LLM provider for validation, summarisation, and
+// vision. OpenRouter provides a single OpenAI-compatible gateway to dozens
+// of models — the same key that powers Smart AI chat.
+//
+// Env-var overrides are preserved so you can swap models on Railway without
+// redeploying. The DO_* vars are checked first for backwards-compat.
+const provider = createOpenAI({
+  baseURL: process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
+  apiKey: process.env.OPENROUTER_API_KEY || process.env.DO_AI_API_KEY || "",
+  headers: {
+    "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL ?? "https://manager-portal-production-55a7.up.railway.app",
+
+    "X-Title": "Hierarchia Validation Pipeline",
+  },
 });
 
 // Override via env vars for A/B testing or model upgrades.
-// DeepSeek V3 (deepseek-3.2) is currently one of the highest-quality open models.
-const MODEL = process.env.DO_VALIDATION_MODEL || "deepseek-3.2"
-const SUMMARY_MODEL = process.env.DO_SUMMARY_MODEL || "deepseek-3.2"
-const VISION_MODEL = process.env.DO_VISION_MODEL || "nemotron-nano-12b-v2-vl"
+// Gemini 2.0 Flash is fast, cheap, handles structured output well, and
+// supports vision natively — ideal for all three pipeline stages.
+const MODEL = process.env.DO_VALIDATION_MODEL || process.env.VALIDATION_MODEL || "google/gemini-2.0-flash-001"
+const SUMMARY_MODEL = process.env.DO_SUMMARY_MODEL || process.env.SUMMARY_MODEL || "google/gemini-2.0-flash-001"
+const VISION_MODEL = process.env.DO_VISION_MODEL || process.env.VISION_MODEL || "google/gemini-2.0-flash-001"
 
 // Per-LLM-call hard timeout. With Inngest, each step runs in its own
 // serverless invocation, so we no longer need to squeeze into a shared 60s
@@ -132,22 +142,22 @@ function buildRulePrompt(rule: ValidationRule, text: string, truncated: boolean)
   const filled = hasPlaceholder
     ? template.replace(/\{\{\s*TEXT\s*\}\}/gi, text)
     : [
-        `Rule: ${rule.rule_name}`,
-        rule.description ? `Description: ${rule.description}` : "",
-        `Threshold: ${rule.threshold}`,
-        `Instructions: ${template}`,
-        "",
-        "IMPORTANT: Evaluate the document ONLY against the criteria stated above in Instructions.",
-        "Do NOT invent, assume, or check for requirements that are not explicitly mentioned.",
-        "If the instructions ask to check for specific items (e.g. specific sections), only check for those exact items.",
-        "",
-        "Document text:",
-        "---",
-        text,
-        "---",
-      ]
-        .filter(Boolean)
-        .join("\n")
+      `Rule: ${rule.rule_name}`,
+      rule.description ? `Description: ${rule.description}` : "",
+      `Threshold: ${rule.threshold}`,
+      `Instructions: ${template}`,
+      "",
+      "IMPORTANT: Evaluate the document ONLY against the criteria stated above in Instructions.",
+      "Do NOT invent, assume, or check for requirements that are not explicitly mentioned.",
+      "If the instructions ask to check for specific items (e.g. specific sections), only check for those exact items.",
+      "",
+      "Document text:",
+      "---",
+      text,
+      "---",
+    ]
+      .filter(Boolean)
+      .join("\n")
 
   return truncated
     ? `${filled}\n\nNote: the document was truncated for analysis; consider this when evaluating completeness.`
@@ -167,7 +177,7 @@ export async function runRule(
     withTimeout(
       (signal) =>
         generateObject({
-          model: doai.chat(MODEL),
+          model: provider.chat(MODEL),
           temperature: 0,
           topP: 0.01,
           schema: RuleResultSchema,
@@ -239,7 +249,7 @@ export async function summarize(
     withTimeout(
       (signal) =>
         generateObject({
-          model: doai.chat(SUMMARY_MODEL),
+          model: provider.chat(SUMMARY_MODEL),
           temperature: 0,
           topP: 0.01,
           schema: SummarySchema,
@@ -279,7 +289,7 @@ export async function describeImage(
     withTimeout(
       (signal) =>
         generateText({
-          model: doai.chat(VISION_MODEL),
+          model: provider.chat(VISION_MODEL),
           temperature: 0,
           topP: 0.01,
           system:
