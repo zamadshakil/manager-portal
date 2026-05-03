@@ -49,7 +49,7 @@ const nextConfig = {
         value: [
           "default-src 'self'",
           "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-          "style-src 'self' 'unsafe-inline'",
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "img-src 'self' blob: data: https://*.r2.dev",
           "font-src 'self' https://fonts.gstatic.com https://frontend-cdn.perplexity.ai",
           "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.up.railway.app wss://*.up.railway.app https://*.r2.dev",

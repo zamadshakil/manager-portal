@@ -55,7 +55,7 @@ function resolveModel() {
         "X-Title": "Hierarchia Smart AI",
       },
     })
-    return openrouter(MODEL)
+    return openrouter.chat(MODEL)
   }
   return MODEL
 }

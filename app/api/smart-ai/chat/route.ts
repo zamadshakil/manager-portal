@@ -33,7 +33,8 @@ function resolveModel() {
         "X-Title": "Hierarchia Smart AI",
       },
     })
-    return openrouter(SMART_AI_MODEL)
+    // Force the use of the /chat/completions endpoint (avoiding the new Responses API)
+    return openrouter.chat(SMART_AI_MODEL)
   }
   // AI Gateway / direct OpenAI: bare model string is resolved by AI SDK 6.
   return SMART_AI_MODEL
