@@ -1,10 +1,10 @@
 import { Suspense } from "react"
-import LoginForm from "@/components/auth/login-form"
+import UpdatePasswordForm from "@/components/auth/update-password-form"
 import Image from "next/image"
 
 export const dynamic = "force-dynamic"
 
-export default function LoginPage() {
+export default function UpdatePasswordPage() {
   return (
     <main className="relative min-h-svh flex items-center justify-center px-4 py-10 overflow-hidden">
       {/* Background Image */}
@@ -22,7 +22,7 @@ export default function LoginPage() {
 
       <div className="relative z-10 w-full max-w-[420px]">
         <Suspense fallback={null}>
-          <LoginForm />
+          <UpdatePasswordForm />
         </Suspense>
       </div>
     </main>
