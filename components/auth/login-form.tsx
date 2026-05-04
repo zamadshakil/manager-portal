@@ -124,19 +124,11 @@ export default function LoginForm() {
           >
             {loading ? "AUTHENTICATING..." : "LOGIN"}
           </Button>
-
-          <div className="text-center">
-            <p className="text-xs text-slate-500">
-              Not registered yet?{" "}
-              <button type="button" className="text-emerald-500 hover:underline font-medium">
-                Create an account
-              </button>
-            </p>
-          </div>
         </form>
       </div>
     </div>
   )
 }
+
 
 
