@@ -1,9 +1,38 @@
 import { NextResponse } from "next/server"
 import { requireProfile } from "@/lib/auth"
-import { createClient } from "@/lib/supabase/server"
+import { createClient as createBrowserClient } from "@/lib/supabase/server"
+import { createClient as createSBClient } from "@supabase/supabase-js"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
+
+/**
+ * Build a Supabase client for thread operations.
+ *
+ * Prefers the service-role key so reads are never blocked by cookie-session
+ * issues in API routes (the write path already uses service-role). When the
+ * service-role key is unavailable (local dev without secrets) we fall back
+ * to the user's RLS-scoped session client.
+ */
+async function getSupabase() {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? ""
+
+  if (serviceRoleKey && supabaseUrl) {
+    return {
+      client: createSBClient(supabaseUrl, serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      }),
+      mode: "service_role" as const,
+    }
+  }
+
+  return {
+    client: await createBrowserClient(),
+    mode: "user_jwt" as const,
+  }
+}
 
 /**
  * GET /api/smart-ai/threads
@@ -11,21 +40,17 @@ export const dynamic = "force-dynamic"
  * Returns all chat threads for the authenticated user, sorted by most recent
  * activity. Each thread includes a preview of the last message so the UI
  * can show a meaningful label without a second round-trip.
- *
- * RLS on `chat_threads` enforces user_id = auth.uid(), so we only ever
- * return threads belonging to the caller.
  */
 export async function GET(req: Request) {
   const profile = await requireProfile()
-  const supabase = await createClient()
+  const { client: supabase, mode } = await getSupabase()
 
   const limit = Math.min(
     Number(new URL(req.url).searchParams.get("limit") ?? "50"),
     100,
   )
 
-  // Fetch threads with the latest message content as a preview.
-  // We use a subquery to grab the most recent message per thread.
+  // Fetch threads — service-role bypasses RLS so we filter explicitly.
   const { data: threads, error } = await supabase
     .from("chat_threads")
     .select("id, title, created_at, updated_at")
@@ -34,13 +59,17 @@ export async function GET(req: Request) {
     .limit(limit)
 
   if (error) {
-    console.error("[threads] list failed:", error.message)
+    console.error(`[threads] list failed (${mode}):`, error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  if (!threads || threads.length === 0) {
+    return NextResponse.json({ threads: [] })
   }
 
   // For each thread, fetch the latest message as a preview
   const threadsWithPreview = await Promise.all(
-    (threads ?? []).map(async (thread) => {
+    threads.map(async (thread) => {
       const { data: lastMsg } = await supabase
         .from("chat_messages")
         .select("role, content, created_at")
@@ -81,8 +110,8 @@ export async function GET(req: Request) {
 /**
  * DELETE /api/smart-ai/threads?id=<uuid>
  *
- * Deletes a chat thread and all its messages. RLS ensures only the
- * owning user can delete. Messages are expected to cascade via FK.
+ * Deletes a chat thread and all its messages. Uses service-role so the
+ * delete succeeds regardless of cookie session state.
  */
 export async function DELETE(req: Request) {
   const profile = await requireProfile()
@@ -92,9 +121,10 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "Thread ID required" }, { status: 400 })
   }
 
-  const supabase = await createClient()
+  const { client: supabase } = await getSupabase()
 
-  // Delete messages first (if no FK cascade), then the thread
+  // Delete messages first (if no FK cascade), then the thread.
+  // Always scope to user_id to prevent cross-user deletion.
   await supabase
     .from("chat_messages")
     .delete()

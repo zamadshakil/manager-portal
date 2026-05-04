@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireProfile } from "@/lib/auth"
-import { createClient } from "@/lib/supabase/server"
+import { createClient as createBrowserClient } from "@/lib/supabase/server"
+import { createClient as createSBClient } from "@supabase/supabase-js"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -8,9 +9,9 @@ export const dynamic = "force-dynamic"
 /**
  * GET /api/smart-ai/threads/[id]/messages
  *
- * Returns all messages for a specific thread. RLS on chat_messages
- * ensures the user can only read messages from threads they own
- * (via the parent chat_threads.user_id = auth.uid() policy).
+ * Returns all messages for a specific thread. Uses service-role to avoid
+ * cookie-session RLS issues, with explicit ownership verification via the
+ * parent thread's user_id.
  *
  * The response shape is compatible with AI SDK v6 UIMessage[] so
  * the chat panel can load them directly via setMessages().
@@ -19,9 +20,34 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  await requireProfile()
+  const profile = await requireProfile()
   const { id: threadId } = await params
-  const supabase = await createClient()
+
+  // Build client — prefer service-role for reliable reads
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? ""
+
+  const supabase =
+    serviceRoleKey && supabaseUrl
+      ? createSBClient(supabaseUrl, serviceRoleKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        })
+      : await createBrowserClient()
+
+  // Verify the thread belongs to the authenticated user
+  const { data: thread } = await supabase
+    .from("chat_threads")
+    .select("id, user_id")
+    .eq("id", threadId)
+    .maybeSingle()
+
+  if (!thread || thread.user_id !== profile.id) {
+    return NextResponse.json(
+      { error: "Thread not found or access denied" },
+      { status: 404 },
+    )
+  }
 
   const { data: messages, error } = await supabase
     .from("chat_messages")

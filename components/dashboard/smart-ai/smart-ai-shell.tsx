@@ -25,6 +25,7 @@ interface SmartAiShellProps {
   profile: ProfileLite
   submissions: Submission[]
   services: { mcp: boolean; rag: boolean }
+  initialThreadId?: string | null
 }
 
 const TABS: {
@@ -53,7 +54,7 @@ const TABS: {
   },
 ]
 
-export function SmartAiShell({ profile, submissions, services }: SmartAiShellProps) {
+export function SmartAiShell({ profile, submissions, services, initialThreadId }: SmartAiShellProps) {
   const [active, setActive] = useState<TabId>("chat")
   const [seedPrompt, setSeedPrompt] = useState<string | null>(null)
 
@@ -133,6 +134,7 @@ export function SmartAiShell({ profile, submissions, services }: SmartAiShellPro
             services={services}
             seedPrompt={seedPrompt}
             onSeedConsumed={() => setSeedPrompt(null)}
+            initialThreadId={initialThreadId}
           />
         ) : null}
         {active === "submissions" ? (

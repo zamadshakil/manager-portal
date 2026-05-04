@@ -15,9 +15,24 @@ export const metadata = {
  * Server-renders the shell with role-scoped initial data and a service
  * health snapshot. The chat/analytics tabs hydrate via SWR + the AI SDK
  * `useChat` hook so the page paints instantly.
+ *
+ * Reads the `?thread=<uuid>` search param so reloading or sharing a URL
+ * re-opens the exact conversation (like ChatGPT / Claude desktop).
  */
-export default async function SmartAiPage() {
+export default async function SmartAiPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
   const profile = await requireProfile()
+  const resolvedParams = await searchParams
+
+  // Extract thread ID from URL — supports ?thread=<uuid>
+  const threadParam = resolvedParams.thread
+  const initialThreadId =
+    typeof threadParam === "string" && threadParam.length > 0
+      ? threadParam
+      : null
 
   // Pull a small first page of recent submissions so the "Submissions
   // Review" tab has something to show before any client fetch.
@@ -39,6 +54,7 @@ export default async function SmartAiPage() {
       }}
       submissions={recentSubmissions}
       services={services}
+      initialThreadId={initialThreadId}
     />
   )
 }
