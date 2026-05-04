@@ -150,7 +150,7 @@ export function ChatPanel({
   )
 
   // ---------- Mount: resolve initial thread ----------
-  // Priority: URL ?thread > localStorage > mint new
+  // Priority: URL ?thread > localStorage > show empty state (lazy create on first msg)
   useEffect(() => {
     if (initializedRef.current) return
     initializedRef.current = true
@@ -159,10 +159,9 @@ export function ChatPanel({
       // URL has a thread — load it from DB
       setThreadId(initialThreadId)
       localStorage.setItem(threadIdKey(profile.id), initialThreadId)
-      // Load messages asynchronously
       loadThreadMessages(initialThreadId)
     } else {
-      // No URL thread — check localStorage
+      // No URL thread — check localStorage for the last active thread
       const key = threadIdKey(profile.id)
       const stored = localStorage.getItem(key)
       if (stored) {
@@ -173,11 +172,9 @@ export function ChatPanel({
         router.replace(`${pathname}${url.search}`, { scroll: false })
         // Try to load messages for this stored thread
         loadThreadMessages(stored)
-      } else {
-        const newId = crypto.randomUUID()
-        localStorage.setItem(key, newId)
-        setThreadId(newId)
       }
+      // else: threadId stays null → user sees the empty/welcome state.
+      // A new thread is only minted when the user sends their first message.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -272,14 +269,15 @@ export function ChatPanel({
   const isStreaming = status === "streaming" || status === "submitted"
 
   function startNewConversation() {
-    const newId = crypto.randomUUID()
-    localStorage.setItem(threadIdKey(profile.id), newId)
-    setThreadId(newId)
+    // Don't mint a thread ID yet — it will be created lazily when
+    // the user sends their first message. This avoids empty orphan threads.
+    setThreadId(null)
     setMessages([])
     setAttachments([])
     setUploadError(null)
-    // Clear ?thread from URL — will be set after first message
+    // Clear ?thread from URL and localStorage
     updateUrlThread(null)
+    localStorage.removeItem(threadIdKey(profile.id))
   }
 
   async function handleUpload(file: File) {
@@ -383,6 +381,19 @@ export function ChatPanel({
 
     if ((!trimmed && readyAttachments.length === 0) || isStreaming) return
 
+    // Lazy thread creation: mint a new thread ID on the very first message
+    // instead of on page load. This prevents empty orphan threads.
+    let activeThreadId = threadId
+    if (!activeThreadId) {
+      activeThreadId = crypto.randomUUID()
+      setThreadId(activeThreadId)
+      localStorage.setItem(threadIdKey(profile.id), activeThreadId)
+      // Immediately update the ref so the transport picks it up for this send
+      threadIdRef.current = activeThreadId
+      // Set the thread in the URL so a reload reopens this conversation
+      updateUrlThread(activeThreadId)
+    }
+
     const metadata: PortalUIMessageMetadata | undefined =
       readyAttachments.length > 0
         ? {
@@ -401,12 +412,6 @@ export function ChatPanel({
     setInput("")
     setAttachments([])
     setUploadError(null)
-
-    // After the first message in a new conversation, put the thread ID in
-    // the URL so a reload re-opens this conversation.
-    if (threadId && messages.length === 0) {
-      updateUrlThread(threadId)
-    }
   }
 
   function handleSuggestion(p: SuggestedPrompt) {

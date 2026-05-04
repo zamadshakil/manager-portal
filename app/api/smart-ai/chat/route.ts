@@ -198,19 +198,26 @@ export async function POST(req: Request) {
 
   // ---- Persistence: save user message ----
   if (lastUserMsg?.role === "user") {
+    // Build the insert payload — only include metadata if non-empty, for
+    // resilience against schemas missing the metadata column.
+    const msgPayload: Record<string, unknown> = {
+      thread_id: threadId,
+      role: "user",
+      content: lastUserMsg.content ?? "",
+    }
+    if (lastUserMsg.metadata && Object.keys(lastUserMsg.metadata).length > 0) {
+      msgPayload.metadata = lastUserMsg.metadata
+    }
+
     const { error: msgErr } = await persistClient
       .from("chat_messages")
-      .insert({
-        thread_id: threadId,
-        role: "user",
-        content: lastUserMsg.content ?? "",
-        metadata: lastUserMsg.metadata ?? {},
-      })
+      .insert(msgPayload)
 
     if (msgErr) {
-      console.error("[smart-ai] user message save failed:", msgErr.message)
+      console.error("[smart-ai] user message save failed:", msgErr.message, msgErr.code)
     }
   }
+
 
   // Build RLS-scoped tools so the model can query live data even without MCP.
   // The user's JWT is used, so RLS enforces team/role scoping automatically.
@@ -318,7 +325,6 @@ export async function POST(req: Request) {
             thread_id: threadId,
             role: "assistant",
             content: text,
-            metadata: {},
           })
         if (assistErr) {
           console.error("[smart-ai] assistant message save failed:", assistErr.message)
