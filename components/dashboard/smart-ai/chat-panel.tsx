@@ -692,11 +692,11 @@ function Message({ message, userName }: { message: PortalUIMessage; userName: st
         {text || (!isUser && toolParts.length === 0) ? (
           <div
             className={cn(
-              "rounded-2xl px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap max-w-[100%]",
+              "rounded-2xl px-4 py-2.5 text-[13.5px] leading-relaxed max-w-[100%]",
               isUser
-                ? "bg-primary text-primary-foreground rounded-tr-md"
+                ? "bg-primary text-primary-foreground rounded-tr-md whitespace-pre-wrap"
                 : "bg-warm-white text-foreground rounded-tl-md",
-              !isUser && "prose prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-black/5 prose-pre:text-foreground prose-code:text-foreground prose-code:bg-black/5 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-table:border-border prose-th:border-border prose-td:border-border prose-tr:border-b-border"
+              !isUser && "prose prose-sm max-w-none prose-p:my-1.5 prose-p:leading-relaxed prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:bg-black/5 prose-pre:text-foreground prose-code:text-foreground prose-code:bg-black/5 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-table:border-border prose-th:border-border prose-td:border-border prose-tr:border-b-border"
             )}
           >
             <span className="sr-only">

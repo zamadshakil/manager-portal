@@ -1,15 +1,63 @@
-import { Users } from "lucide-react"
+"use client"
+
+import { useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
+import { Users, Trash2, Loader2, Eye, EyeOff, Key, Mail, ShieldCheck } from "lucide-react"
 import { roleLabel } from "@/lib/auth-shared"
 import { formatRelative } from "@/lib/format"
+import { deleteUser } from "@/app/actions/users"
 import type { Profile, Team } from "@/lib/types"
 
 interface Props {
   members: Profile[]
   teams: Team[]
+  /** When true the viewer is a main_admin — enables delete + credentials. */
+  isMainAdmin?: boolean
 }
 
-export function TeamMembers({ members, teams }: Props) {
+export function TeamMembers({ members, teams, isMainAdmin = false }: Props) {
   const teamMap = new Map(teams.map((t) => [t.id, t.name]))
+  const router = useRouter()
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [pending, start] = useTransition()
+  const [expandedCredentials, setExpandedCredentials] = useState<Set<string>>(new Set())
+
+  function handleDeleteClick(id: string) {
+    setError(null)
+    if (confirmId === id) {
+      // Second click — actually delete
+      setDeletingId(id)
+      start(async () => {
+        const res = await deleteUser(id)
+        if (!res.ok) {
+          setError(res.error ?? "Could not delete user.")
+          setDeletingId(null)
+          setConfirmId(null)
+          return
+        }
+        setDeletingId(null)
+        setConfirmId(null)
+        router.refresh()
+      })
+    } else {
+      // First click — confirm
+      setConfirmId(id)
+    }
+  }
+
+  function toggleCredentials(id: string) {
+    setExpandedCredentials((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
 
   return (
     <section
@@ -30,6 +78,14 @@ export function TeamMembers({ members, teams }: Props) {
         </div>
       </header>
 
+      {error && (
+        <div className="px-4 py-2 lg:px-5">
+          <p role="alert" className="text-[12px] font-semibold text-destructive">
+            {error}
+          </p>
+        </div>
+      )}
+
       {members.length === 0 ? (
         <div className="px-5 py-12 text-center">
           <p className="text-[13px] font-semibold">No members yet</p>
@@ -48,23 +104,119 @@ export function TeamMembers({ members, teams }: Props) {
               .join("")
               .toUpperCase()
             const teamName = m.team_id ? teamMap.get(m.team_id) ?? "—" : "—"
+            const isConfirming = confirmId === m.id
+            const isDeleting = deletingId === m.id
+            const showCredentials = expandedCredentials.has(m.id)
+            const isSelf = false // We don't have actor.id here but the server action guards this
+
             return (
-              <li key={m.id} className="flex items-center gap-3 px-4 py-3 lg:px-5">
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-warm-white text-[12px] font-semibold">
-                  {initials || "U"}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-semibold truncate">
-                    {m.full_name ?? m.email}
-                  </p>
-                  <p className="text-[11.5px] text-muted-foreground truncate">
-                    {m.email} · joined {formatRelative(m.created_at)}
-                  </p>
+              <li key={m.id} className="px-4 py-3 lg:px-5">
+                <div className="flex items-center gap-3">
+                  {/* Avatar */}
+                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warm-white text-[12px] font-semibold">
+                    {initials || "U"}
+                  </span>
+
+                  {/* Name + email */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-semibold truncate">
+                      {m.full_name ?? m.email}
+                    </p>
+                    <p className="text-[11.5px] text-muted-foreground truncate">
+                      {m.email} · joined {formatRelative(m.created_at)}
+                    </p>
+                  </div>
+
+                  {/* Role + Team badge */}
+                  <div className="hidden sm:flex flex-col items-end leading-tight">
+                    <span className="text-[12px] font-semibold">{roleLabel(m.role)}</span>
+                    <span className="text-[11px] text-muted-foreground">{teamName}</span>
+                  </div>
+
+                  {/* Actions for main_admin */}
+                  {isMainAdmin && (
+                    <div className="flex items-center gap-1 ml-2">
+                      {/* View credentials toggle */}
+                      <button
+                        type="button"
+                        onClick={() => toggleCredentials(m.id)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        aria-label={showCredentials ? "Hide credentials" : "Show credentials"}
+                        title={showCredentials ? "Hide credentials" : "Show credentials"}
+                      >
+                        {showCredentials ? (
+                          <EyeOff className="h-3.5 w-3.5" aria-hidden="true" />
+                        ) : (
+                          <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                        )}
+                      </button>
+
+                      {/* Delete button */}
+                      {m.role !== "main_admin" && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteClick(m.id)}
+                          disabled={isDeleting}
+                          className={`inline-flex h-8 items-center justify-center gap-1 rounded-lg border px-2 text-[11px] font-semibold transition-all ${
+                            isConfirming
+                              ? "border-destructive bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              : "border-border text-muted-foreground hover:border-destructive/40 hover:bg-destructive/5 hover:text-destructive"
+                          } disabled:opacity-50`}
+                          aria-label={isConfirming ? "Confirm delete" : "Delete user"}
+                          title={isConfirming ? "Click again to confirm" : "Delete user"}
+                        >
+                          {isDeleting ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                          )}
+                          {isConfirming && !isDeleting && (
+                            <span>Confirm</span>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="hidden sm:flex flex-col items-end leading-tight">
-                  <span className="text-[12px] font-semibold">{roleLabel(m.role)}</span>
-                  <span className="text-[11px] text-muted-foreground">{teamName}</span>
-                </div>
+
+                {/* Expanded credentials panel */}
+                {isMainAdmin && showCredentials && (
+                  <div className="mt-2.5 ml-12 rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                      Account Credentials
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-hidden="true" />
+                      <span className="text-[12px] text-muted-foreground w-14 shrink-0">Email:</span>
+                      <span className="text-[12px] font-mono font-medium select-all">{m.email}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-hidden="true" />
+                      <span className="text-[12px] text-muted-foreground w-14 shrink-0">Role:</span>
+                      <span className="text-[12px] font-semibold">{roleLabel(m.role)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Key className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-hidden="true" />
+                      <span className="text-[12px] text-muted-foreground w-14 shrink-0">ID:</span>
+                      <span className="text-[12px] font-mono text-muted-foreground select-all truncate">{m.id}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-hidden="true" />
+                      <span className="text-[12px] text-muted-foreground w-14 shrink-0">Team:</span>
+                      <span className="text-[12px] font-medium">{teamName}</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1 pt-1 border-t border-border">
+                      Password is managed via Supabase Auth. Use the provisioning form to set a temporary password on new accounts.
+                    </p>
+                  </div>
+                )}
+
+                {/* Cancel confirm on blur — clicking outside resets confirm state */}
+                {isConfirming && !isDeleting && (
+                  <p className="mt-1.5 ml-12 text-[11px] text-destructive font-medium animate-pulse">
+                    Click &quot;Confirm&quot; to permanently delete this user, or click elsewhere to cancel.
+                  </p>
+                )}
               </li>
             )
           })}

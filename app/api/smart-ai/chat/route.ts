@@ -157,6 +157,61 @@ export async function POST(req: Request) {
   }
   console.warn(`[smart-ai] using fallback with tools: ${fallbackReason}`)
 
+  // ---- Persistence: ensure thread exists in DB ----
+  // The client sends a threadId (UUID from localStorage). We upsert a
+  // matching row so the thread drawer and history loading work correctly.
+  const threadId = body.threadId ?? crypto.randomUUID()
+  const lastUserMsg = flat[flat.length - 1]
+  const threadTitle =
+    lastUserMsg?.content?.slice(0, 60)?.replace(/\n/g, " ")?.trim() || "New conversation"
+
+  // Use service-role client for persistence so RLS doesn't block the insert
+  // when the thread is brand-new (user_id must match auth.uid() under anon,
+  // but upsert with service-role bypasses RLS). Fall back to the user's
+  // RLS-scoped client if service-role key is unavailable.
+  const { createClient: createSBClient } = await import("@supabase/supabase-js")
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? ""
+  const persistClient =
+    serviceRoleKey && supabaseUrl
+      ? createSBClient(supabaseUrl, serviceRoleKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        })
+      : supabase
+
+  // Check if thread exists; create if not.
+  const { data: existingThread } = await persistClient
+    .from("chat_threads")
+    .select("id")
+    .eq("id", threadId)
+    .maybeSingle()
+
+  if (!existingThread) {
+    const { error: threadErr } = await persistClient
+      .from("chat_threads")
+      .insert({ id: threadId, user_id: profile.id, title: threadTitle })
+
+    if (threadErr) {
+      console.error("[smart-ai] thread insert failed:", threadErr.message, threadErr.code)
+    }
+  }
+
+  // ---- Persistence: save user message ----
+  if (lastUserMsg?.role === "user") {
+    const { error: msgErr } = await persistClient
+      .from("chat_messages")
+      .insert({
+        thread_id: threadId,
+        role: "user",
+        content: lastUserMsg.content ?? "",
+        metadata: lastUserMsg.metadata ?? {},
+      })
+
+    if (msgErr) {
+      console.error("[smart-ai] user message save failed:", msgErr.message)
+    }
+  }
+
   // Build RLS-scoped tools so the model can query live data even without MCP.
   // The user's JWT is used, so RLS enforces team/role scoping automatically.
   const fallbackTools = {
@@ -231,6 +286,8 @@ export async function POST(req: Request) {
     "",
     "When a user asks about their data, ALWAYS use the queryDatabase tool to fetch",
     "the actual records. Never say you cannot access data — you CAN query it directly.",
+    "CRITICAL TABLE MAPPINGS: 'Team' or 'Departments' -> 'teams', 'Validation Rules' -> 'validation_rules', 'Submission' -> 'submissions'.",
+    "CRITICAL TOOL INSTRUCTION: Once you receive tool results, you MUST answer the user immediately in the next step. Do NOT loop or make multiple consecutive tool calls unless absolutely necessary.",
     "",
     "Key tables and their important columns:",
     "- submissions: id, title, status (queued/passed/failed/needs_review), score, summary, uploader_id, team_id, created_at",
@@ -252,6 +309,30 @@ export async function POST(req: Request) {
     messages: await convertToModelMessages(body.messages),
     tools: fallbackTools,
     stopWhen: stepCountIs(5),
+    onFinish: async ({ text }) => {
+      // ---- Persistence: save assistant reply ----
+      if (text) {
+        const { error: assistErr } = await persistClient
+          .from("chat_messages")
+          .insert({
+            thread_id: threadId,
+            role: "assistant",
+            content: text,
+            metadata: {},
+          })
+        if (assistErr) {
+          console.error("[smart-ai] assistant message save failed:", assistErr.message)
+        }
+
+        // Update thread title to first user message if this is the first exchange
+        if (lastUserMsg?.content && threadTitle !== "New conversation") {
+          await persistClient
+            .from("chat_threads")
+            .update({ title: threadTitle })
+            .eq("id", threadId)
+        }
+      }
+    },
   })
 
   const res = result.toUIMessageStreamResponse()

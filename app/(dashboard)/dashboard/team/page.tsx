@@ -37,7 +37,7 @@ export default async function TeamPage() {
 
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-[minmax(0,1fr)_420px] items-start">
         <div className="min-w-0">
-          <TeamMembers members={allProfiles} teams={teams} />
+          <TeamMembers members={allProfiles} teams={teams} isMainAdmin />
         </div>
         <div className="min-w-0 lg:sticky lg:top-6">
           <ProvisionUserForm teams={teams} />

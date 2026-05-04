@@ -75,3 +75,60 @@ export async function provisionUser(formData: FormData) {
   revalidatePath("/dashboard/admin/users")
   return { ok: true }
 }
+
+/**
+ * Delete a user account. Only main_admin can do this.
+ * Removes the user from Supabase Auth (cascading to the profiles row
+ * via the on_delete trigger/FK) and logs the action.
+ */
+export async function deleteUser(userId: string): Promise<{ ok: boolean; error?: string }> {
+  const actor = await requireRole(["main_admin"])
+
+  if (!userId || typeof userId !== "string") {
+    return { ok: false, error: "Invalid user ID." }
+  }
+
+  // Prevent self-deletion
+  if (userId === actor.id) {
+    return { ok: false, error: "You cannot delete your own account." }
+  }
+
+  const admin = createAdminClient()
+
+  // Fetch the target profile first so we can log meaningful metadata
+  const { data: targetProfile } = await admin
+    .from("profiles")
+    .select("email, full_name, role")
+    .eq("id", userId)
+    .single()
+
+  if (!targetProfile) {
+    return { ok: false, error: "User not found." }
+  }
+
+  // Remove from Supabase Auth — this cascades to delete the profile row
+  const { error } = await admin.auth.admin.deleteUser(userId)
+  if (error) {
+    return { ok: false, error: error.message }
+  }
+
+  // If the profile row wasn't cascade-deleted, remove it explicitly
+  await admin.from("profiles").delete().eq("id", userId)
+
+  await logActivity({
+    actorId: actor.id,
+    teamId: null,
+    action: "user.deleted",
+    entityType: "profile",
+    entityId: userId,
+    metadata: {
+      email: targetProfile.email,
+      full_name: targetProfile.full_name,
+      role: targetProfile.role,
+    },
+  })
+
+  revalidatePath("/dashboard/team")
+  revalidatePath("/dashboard/admin/users")
+  return { ok: true }
+}

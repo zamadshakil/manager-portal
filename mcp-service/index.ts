@@ -212,6 +212,8 @@ function buildSystemPrompt(scope: Scope): string {
     "These tools respect the user's Row Level Security (RLS) policies, so the data you see is the data they're allowed to see.",
     "If the user asks about a specific document (PDF, log, image, transcript), call the 'searchDocument' tool with the document's id to retrieve grounded snippets.",
     "If the user asks about their tasks, submissions, team performance, or announcements, call 'queryDatabase' to look up the real data instead of guessing.",
+    "CRITICAL TABLE MAPPINGS: 'Team' or 'Departments' -> 'teams', 'Validation Rules' -> 'validation_rules', 'Submission' -> 'submissions'.",
+    "CRITICAL TOOL INSTRUCTION: Once you receive tool results, you MUST answer the user immediately in the next step. Do NOT loop or make multiple consecutive tool calls unless absolutely necessary.",
     "Prefer concrete, cited answers over speculation. If a tool returns no rows, say so plainly.",
     "Never invent IDs, scores, or submission text. If retrieval comes back empty, ask a clarifying question.",
     "If the most recent user message includes attachment metadata (filename + id), those are documents the user has just uploaded; use 'searchDocument' with those IDs and source_type='chat_attachment' before answering.",
