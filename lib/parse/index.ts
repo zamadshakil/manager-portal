@@ -50,7 +50,7 @@ async function parseDocx(buf: Buffer): Promise<ParseResult> {
   }
 }
 
-async function parsePptx(buf: Buffer): Promise<ParseResult> {
+async function parseOfficeFile(buf: Buffer): Promise<ParseResult> {
   // officeparser v6+ exports `parseOffice` (not `parseOfficeAsync`).
   const { parseOffice } = await import("officeparser")
   const text = String(await parseOffice(buf))
@@ -89,14 +89,17 @@ export async function extractText(buf: Buffer, mimeType: string): Promise<ParseR
       return parseDocx(buf)
     case "application/msword":
       // Legacy .doc: best-effort via officeparser.
-      return parsePptx(buf)
+      return parseOfficeFile(buf)
     case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
     case "application/vnd.ms-powerpoint":
-      return parsePptx(buf)
+    case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+    case "application/vnd.ms-excel":
+      return parseOfficeFile(buf)
     case "image/png":
     case "image/jpeg":
       return parseImage(buf, mimeType)
     case "text/plain":
+    case "text/markdown":
       const txt = buf.toString("utf8")
       const clampedTxt = clamp(txt)
       return { text: clampedTxt.text, truncated: clampedTxt.truncated }

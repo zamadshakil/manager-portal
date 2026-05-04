@@ -78,7 +78,7 @@ export function MaterialUploader({
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,.doc,.docx,.txt,.ppt,.pptx,.png,.jpg,.jpeg"
+          accept=".pdf,.doc,.docx,.txt,.ppt,.pptx,.png,.jpg,.jpeg,.xlsx,.md"
           onChange={(e) => {
             const f = e.target.files?.[0] ?? null
             setFile(f)
