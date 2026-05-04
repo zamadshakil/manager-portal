@@ -140,7 +140,7 @@ export async function sendWelcomeEmail({ email, fullName, role, password }: Welc
             </div>
 
             <div class="button-container">
-              <a href="${siteUrl}/login" class="button">Log In to Your Account</a>
+              <a href="${siteUrl}/auth/login" class="button">Log In to Your Account</a>
             </div>
             
             <p style="font-size: 14px;">If you have any questions, feel free to contact your administrator.</p>
