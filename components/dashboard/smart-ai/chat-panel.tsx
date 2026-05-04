@@ -258,11 +258,11 @@ export function ChatPanel({
         prev.map((a) =>
           a.id === tempId
             ? {
-                id: data.id,
-                filename: data.file_name,
-                status: data.rag_status === "failed" ? "error" : "ready",
-                url: data.file_url,
-              }
+              id: data.id,
+              filename: data.file_name,
+              status: data.rag_status === "failed" ? "error" : "ready",
+              url: data.file_url,
+            }
             : a,
         ),
       )
@@ -270,7 +270,7 @@ export function ChatPanel({
       if (data.rag_status === "failed" || data.warning) {
         setUploadError(
           data.warning ??
-            `${data.file_name} was uploaded but indexing failed. The AI may not be able to read its contents.`,
+          `${data.file_name} was uploaded but indexing failed. The AI may not be able to read its contents.`,
         )
       }
     } catch (err: any) {
@@ -315,11 +315,11 @@ export function ChatPanel({
     const metadata: PortalUIMessageMetadata | undefined =
       readyAttachments.length > 0
         ? {
-            attachments: readyAttachments.map((a) => ({
-              id: a.id,
-              filename: a.filename,
-            })),
-          }
+          attachments: readyAttachments.map((a) => ({
+            id: a.id,
+            filename: a.filename,
+          })),
+        }
         : undefined
 
     sendMessage({
@@ -644,7 +644,7 @@ function Message({ message, userName }: { message: PortalUIMessage; userName: st
   const toolParts = (message.parts ?? []).filter((p) => {
     const t = (p as any).type
     return typeof t === "string" && (t.startsWith("tool-") || t === "dynamic-tool")
-  }) as Array<{ type: string; [k: string]: any }>
+  }) as Array<{ type: string;[k: string]: any }>
 
 
   return (
@@ -721,7 +721,7 @@ function Message({ message, userName }: { message: PortalUIMessage; userName: st
   )
 }
 
-function ToolBadge({ part }: { part: { type: string; [k: string]: any } }) {
+function ToolBadge({ part }: { part: { type: string;[k: string]: any } }) {
   // AI SDK 6 names tool parts `tool-<toolName>` for static tools and emits
   // `dynamic-tool` for dynamically-registered ones. Each part has a
   // `state` field that tells us whether it's input-streaming, executing,
