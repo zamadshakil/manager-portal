@@ -21,6 +21,8 @@ import {
   History,
   Zap,
 } from "lucide-react"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { cn } from "@/lib/utils"
 import type { Profile } from "@/lib/types"
 import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
@@ -690,16 +692,23 @@ function Message({ message, userName }: { message: PortalUIMessage; userName: st
         {text || (!isUser && toolParts.length === 0) ? (
           <div
             className={cn(
-              "rounded-2xl px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap",
+              "rounded-2xl px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap max-w-[100%]",
               isUser
                 ? "bg-primary text-primary-foreground rounded-tr-md"
                 : "bg-warm-white text-foreground rounded-tl-md",
+              !isUser && "prose prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-black/5 prose-pre:text-foreground prose-code:text-foreground prose-code:bg-black/5 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-table:border-border prose-th:border-border prose-td:border-border prose-tr:border-b-border"
             )}
           >
             <span className="sr-only">
               {isUser ? `${userName} said:` : "Smart AI replied:"}
             </span>
-            {text || (
+            {text ? (
+              isUser ? (
+                text
+              ) : (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+              )
+            ) : (
               <span className="inline-flex items-center gap-1.5 text-muted-foreground">
                 <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
                 Thinking…

@@ -116,11 +116,11 @@ export function ThreadDrawer({
         />
       ) : null}
 
-      {/* Drawer panel */}
+      {/* Modal panel */}
       <div
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-[320px] max-w-[85vw] flex flex-col bg-card border-r border-border shadow-2xl transition-transform duration-300 ease-out",
-          open ? "translate-x-0" : "-translate-x-full",
+          "fixed top-1/2 left-1/2 z-50 w-[500px] max-h-[85vh] max-w-[90vw] -translate-x-1/2 -translate-y-1/2 flex flex-col bg-card border border-border shadow-2xl rounded-2xl transition-all duration-200 ease-out",
+          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none",
         )}
         role="dialog"
         aria-label="Chat history"
