@@ -6,25 +6,46 @@ export const dynamic = "force-dynamic"
 
 export default function LoginPage() {
   return (
-    <main className="relative min-h-svh flex items-center justify-center px-4 py-10 overflow-hidden">
-      {/* Background Image */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
-        <Image
-          src="/cloud-bg.png"
-          alt="Cloud Background"
-          fill
-          className="object-cover opacity-90"
-          priority
-        />
-        {/* Subtle overlay gradient to ensure readability */}
-        <div className="absolute inset-0 bg-gradient-to-b from-white/20 to-white/60 dark:from-background/60 dark:to-background/90" />
+    <main className="min-h-svh bg-[#0a1118] flex flex-col md:flex-row overflow-hidden">
+      {/* Left Sidebar - Login Form */}
+      <div className="w-full md:w-[450px] lg:w-[500px] flex flex-col justify-between p-8 lg:p-12 bg-[#0d161f] border-r border-white/5 z-10">
+        <header className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-full bg-emerald-500/20 flex items-center justify-center">
+              <div className="h-4 w-4 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
+            </div>
+            <span className="text-xl font-bold tracking-tight text-white">Hierarchia</span>
+          </div>
+          <div className="flex items-center gap-1 text-xs font-medium text-slate-400 cursor-pointer hover:text-white transition-colors">
+             <span className="uppercase">English</span>
+             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </header>
+
+        <div className="flex-1 flex items-center justify-center py-12">
+          <div className="w-full max-w-sm">
+            <Suspense fallback={null}>
+              <LoginForm />
+            </Suspense>
+          </div>
+        </div>
+
+        <footer className="text-xs text-slate-500">
+          © {new Date().getFullYear()} Hierarchia AI. All rights reserved.
+        </footer>
       </div>
 
-      <div className="relative z-10 w-full max-w-[420px]">
-        <Suspense fallback={null}>
-          <LoginForm />
-        </Suspense>
+      {/* Right Side - Hero Image */}
+      <div className="hidden md:block relative flex-1 bg-[#0a1118]">
+        <img 
+          src="/digital_globe_hero_1777914645138.png" 
+          alt="Hierarchia World" 
+          className="absolute inset-0 w-full h-full object-cover opacity-80"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#0d161f] via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(16,185,129,0.05)_0%,transparent_70%)]" />
       </div>
     </main>
   )
 }
+
