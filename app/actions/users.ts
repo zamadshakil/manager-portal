@@ -5,6 +5,7 @@ import { z } from "zod"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireRole } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
+import { sendWelcomeEmail } from "@/lib/email"
 
 const Schema = z
   .object({
@@ -69,6 +70,17 @@ export async function provisionUser(formData: FormData) {
     entityType: "profile",
     entityId: data.user.id,
     metadata: { email: parsed.data.email, role: parsed.data.role },
+  })
+
+  // Send the welcome email with their credentials asynchronously
+  // We don't await this so it doesn't block the UI response
+  sendWelcomeEmail({
+    email: parsed.data.email,
+    fullName: parsed.data.full_name,
+    role: parsed.data.role || "member",
+    password: parsed.data.password,
+  }).catch((err) => {
+    console.error("[provisionUser] Failed to send welcome email:", err)
   })
 
   revalidatePath("/dashboard/team")
