@@ -63,30 +63,6 @@ export default function LoginForm() {
       </div>
 
       <div className="space-y-6">
-        {/* Metamask Button */}
-        <Button 
-          type="button" 
-          variant="outline" 
-          className="w-full h-11 bg-transparent border-slate-700 hover:bg-slate-800 text-slate-300 gap-3 group transition-all"
-        >
-          <div className="h-5 w-5 flex items-center justify-center bg-orange-500/10 rounded-sm group-hover:bg-orange-500/20 transition-colors">
-            <svg viewBox="0 0 24 24" className="h-4 w-4 text-orange-500" fill="currentColor">
-              <path d="M22 12l-4-4v3H6v2h12v3l4-4z" />
-            </svg>
-          </div>
-          <span className="text-xs font-semibold uppercase tracking-wider">Sign in with Metamask</span>
-        </Button>
-
-        {/* Divider */}
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t border-slate-800" />
-          </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-[#0d161f] px-4 text-slate-500 font-medium tracking-widest">or sign in with email</span>
-          </div>
-        </div>
-
         <form onSubmit={onSubmit} className="space-y-5">
           <div className="space-y-2">
             <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-slate-400">Email</Label>
