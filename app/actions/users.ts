@@ -78,8 +78,10 @@ export async function provisionUser(formData: FormData) {
 
 /**
  * Delete a user account. Only main_admin can do this.
- * Removes the user from Supabase Auth (cascading to the profiles row
- * via the on_delete trigger/FK) and logs the action.
+ * Handles multiple scenarios:
+ *  - Normal user (exists in auth + profiles): deletes from auth, then cleans up profile
+ *  - Orphaned profile (exists in profiles but not auth): deletes profile directly
+ *  - Logs the action to the audit trail
  */
 export async function deleteUser(userId: string): Promise<{ ok: boolean; error?: string }> {
   const actor = await requireRole(["main_admin"])
@@ -95,25 +97,43 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
 
   const admin = createAdminClient()
 
-  // Fetch the target profile first so we can log meaningful metadata
-  const { data: targetProfile } = await admin
+  // Fetch the target profile for logging — use maybeSingle() to avoid
+  // throwing when the profile row is missing or has a query error.
+  const { data: targetProfile, error: profileError } = await admin
     .from("profiles")
     .select("email, full_name, role")
     .eq("id", userId)
-    .single()
+    .maybeSingle()
 
-  if (!targetProfile) {
-    return { ok: false, error: "User not found." }
+  if (profileError) {
+    console.error("[deleteUser] profile lookup error:", profileError.message)
   }
 
-  // Remove from Supabase Auth — this cascades to delete the profile row
-  const { error } = await admin.auth.admin.deleteUser(userId)
-  if (error) {
-    return { ok: false, error: error.message }
+  // Try to delete from Supabase Auth first (this cascades if FK is set up).
+  // If the user only exists in profiles (orphan row), this will fail — that's OK.
+  const { error: authError } = await admin.auth.admin.deleteUser(userId)
+  if (authError) {
+    console.warn("[deleteUser] auth delete failed (may be orphan profile):", authError.message)
   }
 
-  // If the profile row wasn't cascade-deleted, remove it explicitly
-  await admin.from("profiles").delete().eq("id", userId)
+  // Always try to delete the profile row directly — handles orphaned rows
+  // and cases where the FK cascade didn't fire.
+  const { error: deleteProfileError } = await admin
+    .from("profiles")
+    .delete()
+    .eq("id", userId)
+
+  if (deleteProfileError) {
+    console.error("[deleteUser] profile delete error:", deleteProfileError.message)
+  }
+
+  // If both auth and profile deletes failed, the user truly can't be removed
+  if (authError && deleteProfileError) {
+    return {
+      ok: false,
+      error: `Could not delete user: ${deleteProfileError.message}`,
+    }
+  }
 
   await logActivity({
     actorId: actor.id,
@@ -122,9 +142,9 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
     entityType: "profile",
     entityId: userId,
     metadata: {
-      email: targetProfile.email,
-      full_name: targetProfile.full_name,
-      role: targetProfile.role,
+      email: targetProfile?.email ?? "unknown",
+      full_name: targetProfile?.full_name ?? "unknown",
+      role: targetProfile?.role ?? "unknown",
     },
   })
 
