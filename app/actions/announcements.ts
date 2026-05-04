@@ -12,6 +12,7 @@ const Schema = z.object({
   body: z.string().trim().min(2).max(5_000),
   priority: z.enum(["low", "normal", "high", "urgent"]),
   target: z.string(),
+  expiresAt: z.string().optional().or(z.literal("")),
 })
 
 export interface ActionResult {
@@ -26,6 +27,7 @@ export async function createAnnouncement(formData: FormData): Promise<ActionResu
     body: formData.get("body") || "",
     priority: formData.get("priority") || undefined,
     target: formData.get("target") || "global",
+    expiresAt: formData.get("expiresAt") || undefined,
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
 
@@ -52,6 +54,7 @@ export async function createAnnouncement(formData: FormData): Promise<ActionResu
       title: parsed.data.title,
       body: parsed.data.body,
       priority: parsed.data.priority,
+      expires_at: parsed.data.expiresAt ? new Date(parsed.data.expiresAt).toISOString() : null,
     })
     .select("id")
     .single()

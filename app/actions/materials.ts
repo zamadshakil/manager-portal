@@ -14,6 +14,7 @@ const MetaSchema = z.object({
   description: z.string().trim().max(2_000).optional().or(z.literal("")),
   tags: z.string().trim().max(500).optional().or(z.literal("")),
   target: z.string(),
+  expiresAt: z.string().optional().or(z.literal("")),
 })
 
 export async function createMaterial(formData: FormData): Promise<{ ok: boolean; error?: string }> {
@@ -34,6 +35,7 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
     description: formData.get("description") ?? "",
     tags: formData.get("tags") ?? "",
     target: formData.get("target") || "global",
+    expiresAt: formData.get("expiresAt") || undefined,
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
 
@@ -80,6 +82,7 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
       file_type: file.type,
       size_bytes: file.size,
       tags,
+      expires_at: parsed.data.expiresAt ? new Date(parsed.data.expiresAt).toISOString() : null,
     })
     .select("id")
     .single()

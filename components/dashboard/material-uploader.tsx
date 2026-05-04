@@ -22,6 +22,7 @@ export function MaterialUploader({
   const [description, setDescription] = useState("")
   const [tags, setTags] = useState("")
   const [target, setTarget] = useState<string>("global")
+  const [expiresAt, setExpiresAt] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [pending, start] = useTransition()
 
@@ -40,6 +41,9 @@ export function MaterialUploader({
     
     // For managers, force their own team id
     fd.set("target", role === "manager" && currentTeamId ? currentTeamId : target)
+    if (expiresAt) {
+      fd.set("expiresAt", expiresAt)
+    }
 
     start(async () => {
       const res = await createMaterial(fd)
@@ -51,6 +55,7 @@ export function MaterialUploader({
       setTitle("")
       setDescription("")
       setTags("")
+      setExpiresAt("")
       if (inputRef.current) inputRef.current.value = ""
       router.refresh()
     })
@@ -118,6 +123,16 @@ export function MaterialUploader({
             value={tags}
             onChange={(e) => setTags(e.target.value)}
             placeholder="onboarding, compliance, q2"
+            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </label>
+
+        <label className="block">
+          <span className="text-[12px] font-semibold text-muted-foreground">Expires At (optional)</span>
+          <input
+            type="datetime-local"
+            value={expiresAt}
+            onChange={(e) => setExpiresAt(e.target.value)}
             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </label>

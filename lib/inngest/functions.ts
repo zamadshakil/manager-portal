@@ -341,10 +341,66 @@ export const markMissedCronFn = inngest.createFunction(
         .lt("updated_at", stuckCutoff)
         .select("id");
 
+      // 3. Clean up expired announcements
+      const { data: expiredAnnouncements } = await admin
+        .from("announcements")
+        .select("id")
+        .lt("expires_at", nowIso);
+
+      const expiredAnnRows = (expiredAnnouncements as any[]) || [];
+      if (expiredAnnRows.length > 0) {
+        const toDeleteIds = expiredAnnRows.map((r) => r.id);
+        await admin.from("announcements").delete().in("id", toDeleteIds);
+        
+        try {
+          const { deleteIndexed } = await import("@/lib/smart-ai/indexer");
+          for (const id of toDeleteIds) {
+            void deleteIndexed({ source_type: "announcement", source_id: id });
+          }
+        } catch (e) {
+          console.error("Failed to unindex expired announcements", e);
+        }
+      }
+
+      // 4. Clean up expired materials
+      const { data: expiredMaterials } = await admin
+        .from("materials")
+        .select("id, blob_url")
+        .lt("expires_at", nowIso);
+
+      const expiredMatRows = (expiredMaterials as any[]) || [];
+      if (expiredMatRows.length > 0) {
+        const toDeleteIds = expiredMatRows.map((r) => r.id);
+        
+        try {
+          const { del } = await import("@/lib/r2");
+          for (const row of expiredMatRows) {
+            if (row.blob_url) {
+              await del(row.blob_url).catch(e => console.error("Failed to delete blob", row.blob_url, e));
+            }
+          }
+        } catch (e) {
+          console.error("Failed to delete expired material blobs", e);
+        }
+
+        await admin.from("materials").delete().in("id", toDeleteIds);
+
+        try {
+          const { deleteIndexed } = await import("@/lib/smart-ai/indexer");
+          for (const id of toDeleteIds) {
+            void deleteIndexed({ source_type: "material", source_id: id });
+          }
+        } catch (e) {
+          console.error("Failed to unindex expired materials", e);
+        }
+      }
+
       const out = {
         ok: true,
         missedCount,
         stuckRecovered: stuck?.length ?? 0,
+        expiredAnnouncementsDeleted: expiredAnnRows.length,
+        expiredMaterialsDeleted: expiredMatRows.length,
       };
 
       try {

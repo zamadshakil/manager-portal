@@ -32,10 +32,10 @@ export function DepartmentForm({ department, onSuccess }: Props) {
         setError(res.error ?? "Failed to save department.")
         return
       }
-      
       router.refresh()
       if (onSuccess) onSuccess()
       else if (!isEditing) router.push(`/dashboard/departments/${res.departmentId}`)
+      else router.push("/dashboard/departments")
     })
   }
 
