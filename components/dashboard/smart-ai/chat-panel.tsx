@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback, Suspense } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport, type UIMessage } from "ai"
 import {
@@ -105,7 +106,15 @@ function threadIdKey(userId: string) {
 
 const ACCEPT_ATTR = (ACCEPTED_MIME_TYPES as readonly string[]).join(",")
 
-export function ChatPanel({
+export function ChatPanel(props: ChatPanelProps) {
+  return (
+    <Suspense fallback={<div className="flex h-[560px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
+      <ChatPanelInner {...props} />
+    </Suspense>
+  )
+}
+
+function ChatPanelInner({
   profile,
   services,
   seedPrompt,
@@ -122,22 +131,13 @@ export function ChatPanel({
   const scrollerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const threadParam = searchParams.get("thread")
+
   // Keep the ref in sync so the transport callback below always reads
   // the LATEST threadId — useChat captures its options once on mount.
   threadIdRef.current = threadId
-
-  // Mint or restore a per-user thread ID on mount.
-  useEffect(() => {
-    const key = threadIdKey(profile.id)
-    const stored = localStorage.getItem(key)
-    if (stored) {
-      setThreadId(stored)
-    } else {
-      const newId = crypto.randomUUID()
-      localStorage.setItem(key, newId)
-      setThreadId(newId)
-    }
-  }, [profile.id])
 
   // Build the transport once. The `prepareSendMessagesRequest` hook reads
   // the current threadId on every send, so reseting the conversation works
@@ -173,14 +173,50 @@ export function ChatPanel({
         setMessages(msgs)
         setThreadId(id)
         localStorage.setItem(threadIdKey(profile.id), id)
+
+        const params = new URLSearchParams(searchParams.toString())
+        if (params.get("thread") !== id) {
+          params.set("thread", id)
+          router.replace("?" + params.toString(), { scroll: false })
+        }
       } catch (err) {
         console.error("[chat] failed to load thread:", err)
       } finally {
         setLoadingThread(false)
       }
     },
-    [profile.id, setMessages],
+    [profile.id, setMessages, searchParams, router],
   )
+
+  // Mint or restore a per-user thread ID on mount.
+  useEffect(() => {
+    const key = threadIdKey(profile.id)
+
+    // Case 1: A thread is specified in the URL
+    if (threadParam) {
+      if (threadParam !== threadIdRef.current) {
+        loadThread(threadParam)
+      }
+      return
+    }
+
+    // Case 2: No thread in URL, restore from storage or create new
+    if (!threadIdRef.current) {
+      const stored = localStorage.getItem(key)
+      const params = new URLSearchParams(searchParams.toString())
+      if (stored) {
+        setThreadId(stored)
+        params.set("thread", stored)
+        router.replace("?" + params.toString(), { scroll: false })
+      } else {
+        const newId = crypto.randomUUID()
+        localStorage.setItem(key, newId)
+        setThreadId(newId)
+        params.set("thread", newId)
+        router.replace("?" + params.toString(), { scroll: false })
+      }
+    }
+  }, [profile.id, threadParam, loadThread, searchParams, router])
 
   // Auto-stick to the bottom whenever new tokens arrive.
   useEffect(() => {
@@ -209,6 +245,10 @@ export function ChatPanel({
     setMessages([])
     setAttachments([])
     setUploadError(null)
+
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("thread", newId)
+    router.replace("?" + params.toString(), { scroll: false })
   }
 
   async function handleUpload(file: File) {
