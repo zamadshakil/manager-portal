@@ -14,17 +14,16 @@ Architecture
                                        │                            │
                                        │                            ├─ pgvector (PostgreSQL on Railway)
                                        │                            ├─ LangChain text splitters
-                                       │                            └─ LangGraph retrieval workflow
+                                       │                            └─ Embeddings (OpenAI / OpenRouter)
                                        │
                                        └─ AI Gateway / model providers (LLM completions)
 
 The RAG service never returns LLM completions itself — orchestration of
-the chat turn happens in the MCP service, which uses LangGraph to compose:
+the chat turn happens in the MCP service, which uses the AI SDK to compose:
 
     1. POST /v1/retrieve   → top-k pgvector chunks for the user's question
-    2. (optional) POST /v1/rerank
-    3. LLM completion in MCP land
-    4. POST /v1/log/query  → audit trail + analytics counters
+    2. LLM completion in MCP land
+    3. POST /v1/log/query  → audit trail + analytics counters
 
 Endpoints implemented here:
 
@@ -55,7 +54,9 @@ Run locally with:
 
 from __future__ import annotations
 
+import math
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
@@ -72,6 +73,14 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 RAG_SERVICE_TOKEN = os.environ.get("RAG_SERVICE_TOKEN", "")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "1536"))
+
+# Chunking configuration
+CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "800"))
+CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "200"))
+
+# Retrieval configuration
+SCORE_THRESHOLD = float(os.environ.get("SCORE_THRESHOLD", "0.35"))
+RERANK_KEYWORD_WEIGHT = float(os.environ.get("RERANK_KEYWORD_WEIGHT", "0.15"))
 
 # Embedding provider resolution.
 #
@@ -97,6 +106,267 @@ EMBEDDING_BASE_URL = (
     )
 )
 
+# Semantic cache configuration
+CACHE_ENABLED = os.environ.get("CACHE_ENABLED", "true").lower() == "true"
+CACHE_MAX_SIZE = int(os.environ.get("CACHE_MAX_SIZE", "200"))
+CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "300"))  # 5 minutes
+CACHE_SIMILARITY_THRESHOLD = float(os.environ.get("CACHE_SIMILARITY_THRESHOLD", "0.92"))
+
+
+# ---------------------------------------------------------------------------
+# Semantic Query Cache
+#
+# Saves embedding API calls and pgvector queries by caching recent
+# query-vector + result pairs. When a new query's cosine similarity to
+# a cached query exceeds the threshold, we return cached results directly.
+#
+# Uses an in-memory LRU approach — no Redis dependency needed since the
+# RAG service is a long-running process (not serverless).
+# ---------------------------------------------------------------------------
+
+import time
+from collections import OrderedDict
+
+
+def _cosine_sim(a: list[float], b: list[float]) -> float:
+    """Fast cosine similarity between two vectors."""
+    dot = sum(x * y for x, y in zip(a, b))
+    mag_a = math.sqrt(sum(x * x for x in a))
+    mag_b = math.sqrt(sum(x * x for x in b))
+    if mag_a == 0 or mag_b == 0:
+        return 0.0
+    return dot / (mag_a * mag_b)
+
+
+class SemanticCache:
+    """
+    In-memory LRU cache with semantic similarity matching.
+
+    Each entry stores:
+      - cache_key: a composite of scope + filters for exact-match partitioning
+      - query_vector: the embedding of the query text
+      - results: the retrieval results
+      - timestamp: for TTL expiration
+    """
+
+    def __init__(
+        self,
+        max_size: int = CACHE_MAX_SIZE,
+        ttl_seconds: int = CACHE_TTL_SECONDS,
+        similarity_threshold: float = CACHE_SIMILARITY_THRESHOLD,
+    ):
+        self.max_size = max_size
+        self.ttl_seconds = ttl_seconds
+        self.similarity_threshold = similarity_threshold
+        self._cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._stats = {"hits": 0, "misses": 0, "evictions": 0}
+
+    def _make_partition_key(
+        self,
+        user_id: str,
+        role: str,
+        team_id: str | None,
+        source_type: str | None,
+        document_id: str | None,
+    ) -> str:
+        """Partition key ensures we never return results from a different user's scope."""
+        return f"{user_id}:{role}:{team_id or ''}:{source_type or ''}:{document_id or ''}"
+
+    def _evict_expired(self) -> None:
+        """Remove entries older than TTL."""
+        now = time.monotonic()
+        keys_to_remove = [
+            k for k, v in self._cache.items()
+            if now - v["timestamp"] > self.ttl_seconds
+        ]
+        for k in keys_to_remove:
+            del self._cache[k]
+            self._stats["evictions"] += 1
+
+    def get(
+        self,
+        query_vector: list[float],
+        user_id: str,
+        role: str,
+        team_id: str | None = None,
+        source_type: str | None = None,
+        document_id: str | None = None,
+    ) -> list[dict[str, Any]] | None:
+        """
+        Look for a cached result whose query embedding is semantically
+        similar to the new query. Returns None on cache miss.
+        """
+        if not CACHE_ENABLED:
+            return None
+
+        self._evict_expired()
+        partition = self._make_partition_key(user_id, role, team_id, source_type, document_id)
+
+        for key, entry in self._cache.items():
+            if entry["partition"] != partition:
+                continue
+            sim = _cosine_sim(query_vector, entry["vector"])
+            if sim >= self.similarity_threshold:
+                # Cache hit — move to end (most recently used)
+                self._cache.move_to_end(key)
+                self._stats["hits"] += 1
+                return entry["results"]
+
+        self._stats["misses"] += 1
+        return None
+
+    def put(
+        self,
+        query_vector: list[float],
+        results: list[dict[str, Any]],
+        user_id: str,
+        role: str,
+        team_id: str | None = None,
+        source_type: str | None = None,
+        document_id: str | None = None,
+    ) -> None:
+        """Store a query+results in the cache."""
+        if not CACHE_ENABLED:
+            return
+
+        partition = self._make_partition_key(user_id, role, team_id, source_type, document_id)
+        cache_key = f"{partition}:{id(query_vector)}:{time.monotonic()}"
+
+        # Evict oldest if at capacity
+        while len(self._cache) >= self.max_size:
+            self._cache.popitem(last=False)
+            self._stats["evictions"] += 1
+
+        self._cache[cache_key] = {
+            "partition": partition,
+            "vector": query_vector,
+            "results": results,
+            "timestamp": time.monotonic(),
+        }
+
+    def invalidate_for_source(self, source_type: str, source_id: str) -> int:
+        """
+        Invalidate cache entries that might contain results from a
+        specific source. Called after index updates.
+        """
+        keys_to_remove = []
+        for key, entry in self._cache.items():
+            for result in entry.get("results", []):
+                if result.get("source_type") == source_type and result.get("source_id") == source_id:
+                    keys_to_remove.append(key)
+                    break
+        for k in keys_to_remove:
+            del self._cache[k]
+        return len(keys_to_remove)
+
+    def clear(self) -> None:
+        """Clear the entire cache."""
+        self._cache.clear()
+
+    @property
+    def stats(self) -> dict[str, int]:
+        return {**self._stats, "size": len(self._cache)}
+
+
+# Module-level singleton
+_semantic_cache = SemanticCache()
+
+
+# ---------------------------------------------------------------------------
+# Text Chunking
+# ---------------------------------------------------------------------------
+
+def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """
+    Split text into overlapping chunks using LangChain's
+    RecursiveCharacterTextSplitter. Falls back to naive splitting if
+    LangChain is unavailable.
+
+    Each chunk becomes a separate vector in pgvector, dramatically improving
+    retrieval precision for long documents.
+    """
+    if not text or len(text.strip()) < chunk_size:
+        return [text.strip()] if text and text.strip() else []
+
+    try:
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=overlap,
+            length_function=len,
+            separators=["\n\n", "\n", ". ", " ", ""],
+        )
+        chunks = splitter.split_text(text)
+    except ImportError:
+        # Fallback: naive split by paragraphs then by size
+        chunks = []
+        paragraphs = text.split("\n\n")
+        current = ""
+        for para in paragraphs:
+            if len(current) + len(para) + 2 > chunk_size:
+                if current.strip():
+                    chunks.append(current.strip())
+                current = para
+            else:
+                current = f"{current}\n\n{para}" if current else para
+        if current.strip():
+            chunks.append(current.strip())
+
+    # Filter out trivially short chunks
+    return [c for c in chunks if len(c.strip()) >= 20]
+
+
+# ---------------------------------------------------------------------------
+# Keyword Reranker
+# ---------------------------------------------------------------------------
+
+def rerank_by_keywords(
+    query: str,
+    chunks: list[dict[str, Any]],
+    keyword_weight: float = RERANK_KEYWORD_WEIGHT,
+) -> list[dict[str, Any]]:
+    """
+    Lightweight reranking: boost chunks that contain exact keyword matches
+    from the query. This improves precision without needing a paid
+    cross-encoder API.
+
+    Each chunk's final score = (1 - keyword_weight) * vector_score + keyword_weight * keyword_score
+    """
+    if not chunks or not query.strip():
+        return chunks
+
+    # Extract meaningful keywords (3+ chars, lowercased, deduplicated)
+    stop_words = {
+        "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
+        "her", "was", "one", "our", "out", "has", "have", "from", "with",
+        "they", "been", "this", "that", "each", "which", "their", "what",
+        "about", "would", "there", "when", "make", "like", "will", "how",
+        "show", "give", "tell", "find",
+    }
+    words = re.findall(r'\b[a-z]{3,}\b', query.lower())
+    keywords = [w for w in words if w not in stop_words]
+
+    if not keywords:
+        return chunks
+
+    for chunk in chunks:
+        snippet_lower = (chunk.get("snippet", "") or "").lower()
+        if not snippet_lower:
+            continue
+
+        # Count keyword hits as a fraction of total keywords
+        hits = sum(1 for kw in keywords if kw in snippet_lower)
+        keyword_score = hits / len(keywords)
+
+        # Blend with vector similarity score
+        vector_score = chunk.get("score", 0.0)
+        chunk["score"] = (1.0 - keyword_weight) * vector_score + keyword_weight * keyword_score
+
+    # Re-sort by blended score
+    chunks.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+    return chunks
+
 
 # ---------------------------------------------------------------------------
 # Lifespan: open a single asyncpg pool reused across requests
@@ -121,6 +391,7 @@ async def lifespan(app: FastAPI):
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     source_type TEXT NOT NULL,
                     source_id TEXT NOT NULL,
+                    chunk_index INT NOT NULL DEFAULT 0,
                     team_id TEXT,
                     owner_id TEXT,
                     title TEXT,
@@ -132,13 +403,33 @@ async def lifespan(app: FastAPI):
                 )
                 """
             )
-            # The upsert in /v1/index relies on this unique pair; without it
-            # ON CONFLICT silently inserts duplicates. CREATE UNIQUE INDEX IF
-            # NOT EXISTS is idempotent so this is safe to run on every boot
-            # AND on tables that pre-date this column add.
+            # Unique constraint on (source_type, source_id, chunk_index) so
+            # re-indexing replaces stale chunks cleanly.
             await conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS rag_documents_source_uniq "
-                "ON rag_documents (source_type, source_id)"
+                "CREATE UNIQUE INDEX IF NOT EXISTS rag_documents_source_chunk_uniq "
+                "ON rag_documents (source_type, source_id, chunk_index)"
+            )
+            # Add chunk_index column to existing tables that predate chunking.
+            # ALTER TABLE ADD COLUMN IF NOT EXISTS is idempotent.
+            try:
+                await conn.execute(
+                    "ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS chunk_index INT NOT NULL DEFAULT 0"
+                )
+            except Exception:
+                pass  # Column already exists
+
+            # Drop the old IVFFlat index if it exists — it requires 10k+ rows
+            # to be effective and gives worse recall than HNSW at low counts.
+            await conn.execute(
+                "DROP INDEX IF EXISTS rag_documents_embedding_idx"
+            )
+
+            # HNSW index: works well at ANY data size, better recall than
+            # IVFFlat, and doesn't need retraining as data grows.
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS rag_documents_embedding_hnsw_idx "
+                "ON rag_documents USING hnsw (embedding vector_cosine_ops) "
+                "WITH (m = 16, ef_construction = 64)"
             )
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS rag_documents_team_idx ON rag_documents (team_id)"
@@ -147,8 +438,7 @@ async def lifespan(app: FastAPI):
                 "CREATE INDEX IF NOT EXISTS rag_documents_owner_idx ON rag_documents (owner_id)"
             )
             await conn.execute(
-                "CREATE INDEX IF NOT EXISTS rag_documents_embedding_idx "
-                "ON rag_documents USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
+                "CREATE INDEX IF NOT EXISTS rag_documents_source_idx ON rag_documents (source_type, source_id)"
             )
             await conn.execute(
                 """
@@ -166,6 +456,14 @@ async def lifespan(app: FastAPI):
                 )
                 """
             )
+
+            # Migrate existing data: drop the old unique index that doesn't
+            # include chunk_index (if it still exists).
+            try:
+                await conn.execute("DROP INDEX IF EXISTS rag_documents_source_uniq")
+            except Exception:
+                pass
+
         yield
         await app.state.pool.close()
     else:
@@ -176,7 +474,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Hierarchia RAG Service",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -253,26 +551,53 @@ class LogQueryRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Embedding helper
+# Embedding helper — singleton cached
 #
-# We import lazily so the service can boot in environments without OpenAI
-# credentials (e.g. health checks during the first deploy).
+# The embedder is constructed ONCE at module level and reused across all
+# requests. This avoids creating a new HTTP client + TLS handshake per call.
 # ---------------------------------------------------------------------------
 
+_embedder_instance = None
+
+
+def _get_embedder():
+    global _embedder_instance
+    if _embedder_instance is None:
+        from langchain_openai import OpenAIEmbeddings  # type: ignore[import-not-found]
+
+        kwargs: dict[str, Any] = {"model": EMBEDDING_MODEL}
+        if EMBEDDING_API_KEY:
+            kwargs["api_key"] = EMBEDDING_API_KEY
+        if EMBEDDING_BASE_URL:
+            kwargs["base_url"] = EMBEDDING_BASE_URL
+
+        _embedder_instance = OpenAIEmbeddings(**kwargs)
+    return _embedder_instance
+
+
 async def embed(text: str) -> list[float]:
-    from langchain_openai import OpenAIEmbeddings  # type: ignore[import-not-found]
-
-    kwargs: dict[str, Any] = {"model": EMBEDDING_MODEL}
-    if EMBEDDING_API_KEY:
-        kwargs["api_key"] = EMBEDDING_API_KEY
-    if EMBEDDING_BASE_URL:
-        kwargs["base_url"] = EMBEDDING_BASE_URL
-
-    embedder = OpenAIEmbeddings(**kwargs)
-    # langchain's embed_query is sync; offload to a thread to avoid blocking
+    """Embed a single text string."""
     import anyio
 
+    embedder = _get_embedder()
     return await anyio.to_thread.run_sync(embedder.embed_query, text)
+
+
+async def embed_batch(texts: list[str]) -> list[list[float]]:
+    """
+    Embed multiple texts in a single API call. Much more efficient than
+    calling embed() in a loop — the OpenAI API supports batch embedding
+    natively.
+    """
+    if not texts:
+        return []
+    if len(texts) == 1:
+        return [await embed(texts[0])]
+
+    import anyio
+
+    embedder = _get_embedder()
+    return await anyio.to_thread.run_sync(embedder.embed_documents, texts)
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +611,10 @@ async def health() -> dict[str, Any]:
         "version": app.version,
         "embedding_model": EMBEDDING_MODEL,
         "embedding_dim": EMBEDDING_DIM,
+        "chunking": {"chunk_size": CHUNK_SIZE, "chunk_overlap": CHUNK_OVERLAP},
+        "score_threshold": SCORE_THRESHOLD,
         "db": app.state.pool is not None,
+        "cache": _semantic_cache.stats if CACHE_ENABLED else {"enabled": False},
     }
 
 
@@ -294,41 +622,56 @@ async def health() -> dict[str, Any]:
 async def index_document(req: IndexRequest) -> dict[str, Any]:
     if app.state.pool is None:
         raise HTTPException(503, "Database not configured")
-    vector = await embed(req.content)
+
+    # Split content into chunks for better retrieval precision
+    chunks = chunk_text(req.content)
+    if not chunks:
+        raise HTTPException(400, "Content is too short to index")
+
+    # Batch embed all chunks in a single API call
+    vectors = await embed_batch(chunks)
+
     async with app.state.pool.acquire() as conn:
-        # Upsert by (source_type, source_id) so re-indexing replaces stale rows.
-        row = await conn.fetchrow(
-            """
-            INSERT INTO rag_documents
-                (source_type, source_id, team_id, owner_id, title, content, embedding, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-            ON CONFLICT (source_type, source_id) DO UPDATE
-                SET team_id = EXCLUDED.team_id,
-                    owner_id = EXCLUDED.owner_id,
-                    title = EXCLUDED.title,
-                    content = EXCLUDED.content,
-                    embedding = EXCLUDED.embedding,
-                    metadata = EXCLUDED.metadata,
-                    updated_at = NOW()
-            RETURNING id
-            """,
+        # Delete existing chunks for this source before re-indexing.
+        # This handles the case where a document shrinks (fewer chunks).
+        await conn.execute(
+            "DELETE FROM rag_documents WHERE source_type = $1 AND source_id = $2",
             req.source_type,
             req.source_id,
-            req.team_id,
-            req.owner_id,
-            req.title,
-            req.content,
-            vector,
-            req.metadata,
         )
-    return {"ok": True, "id": str(row["id"])}
+
+        # Insert all chunks
+        inserted_ids = []
+        for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
+            row = await conn.fetchrow(
+                """
+                INSERT INTO rag_documents
+                    (source_type, source_id, chunk_index, team_id, owner_id,
+                     title, content, embedding, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                RETURNING id
+                """,
+                req.source_type,
+                req.source_id,
+                i,
+                req.team_id,
+                req.owner_id,
+                req.title,
+                chunk,
+                vector,
+                {**req.metadata, "chunk_index": i, "total_chunks": len(chunks)},
+            )
+            inserted_ids.append(str(row["id"]))
+
+    # Invalidate cached queries that might have returned this source
+    _semantic_cache.invalidate_for_source(req.source_type, req.source_id)
+
+    return {"ok": True, "chunks": len(chunks), "ids": inserted_ids}
 
 
 @app.delete("/v1/index", dependencies=[Depends(require_bearer)])
 async def delete_indexed(source_type: str, source_id: str) -> dict[str, Any]:
-    """Remove a single document from the index. Idempotent: 404 only when
-    the row genuinely doesn't exist, so the portal doesn't have to track
-    whether something was previously indexed."""
+    """Remove all chunks for a document from the index. Idempotent."""
     if app.state.pool is None:
         raise HTTPException(503, "Database not configured")
     async with app.state.pool.acquire() as conn:
@@ -337,11 +680,11 @@ async def delete_indexed(source_type: str, source_id: str) -> dict[str, Any]:
             source_type,
             source_id,
         )
-    # asyncpg returns "DELETE <n>"; treat 0 rows as a soft 404 so callers
-    # can distinguish "wasn't there" from "deleted".
     deleted = int(result.split(" ")[-1]) if result.startswith("DELETE") else 0
     if deleted == 0:
-        raise HTTPException(404, f"No row for {source_type}:{source_id}")
+        raise HTTPException(404, f"No rows for {source_type}:{source_id}")
+    # Purge any cached results that referenced this document
+    _semantic_cache.invalidate_for_source(source_type, source_id)
     return {"ok": True, "deleted": deleted}
 
 
@@ -349,7 +692,24 @@ async def delete_indexed(source_type: str, source_id: str) -> dict[str, Any]:
 async def retrieve(req: RetrieveRequest) -> list[RetrievedChunk]:
     if app.state.pool is None:
         raise HTTPException(503, "Database not configured")
+
     vector = await embed(req.query)
+
+    # --- Semantic cache check ---
+    # If a semantically similar query was recently made with the same scope,
+    # return cached results without hitting pgvector.
+    cached = _semantic_cache.get(
+        query_vector=vector,
+        user_id=req.scope.user_id,
+        role=req.scope.role,
+        team_id=req.scope.team_id,
+        source_type=req.source_type,
+        document_id=req.document_id,
+    )
+    if cached is not None:
+        return [
+            RetrievedChunk(**c) for c in cached
+        ]
 
     # Role-scoped row filtering — mirrors the Supabase RLS philosophy used in
     # the Next.js app: members see only their own docs, managers their team's,
@@ -359,7 +719,7 @@ async def retrieve(req: RetrieveRequest) -> list[RetrievedChunk]:
     # so we ALWAYS scope them to owner_id regardless of role. That prevents
     # a manager from accidentally retrieving a member's private chat upload.
     where_clauses = []
-    params: list[Any] = [vector, req.top_k]
+    params: list[Any] = [vector, req.top_k * 2]  # Fetch 2x top_k for reranking headroom
     idx = 3
 
     is_chat_attachment = req.source_type == "chat_attachment"
@@ -392,7 +752,7 @@ async def retrieve(req: RetrieveRequest) -> list[RetrievedChunk]:
 
     sql = f"""
         SELECT id, source_type, source_id, title,
-               LEFT(content, 600) AS snippet,
+               LEFT(content, 800) AS snippet,
                metadata,
                1 - (embedding <=> $1) AS score
         FROM rag_documents
@@ -403,17 +763,64 @@ async def retrieve(req: RetrieveRequest) -> list[RetrievedChunk]:
     async with app.state.pool.acquire() as conn:
         rows = await conn.fetch(sql, *params)
 
-    return [
-        RetrievedChunk(
-            id=str(r["id"]),
-            source_type=r["source_type"],
-            source_id=r["source_id"],
-            title=r["title"],
-            snippet=r["snippet"],
-            score=float(r["score"]),
-            metadata=r["metadata"] or {},
-        )
+    # Stage 1: Score threshold — filter out low-relevance noise
+    raw_chunks = [
+        {
+            "id": str(r["id"]),
+            "source_type": r["source_type"],
+            "source_id": r["source_id"],
+            "title": r["title"],
+            "snippet": r["snippet"],
+            "score": float(r["score"]),
+            "metadata": r["metadata"] or {},
+        }
         for r in rows
+        if float(r["score"]) >= SCORE_THRESHOLD
+    ]
+
+    # Stage 2: Keyword reranking — boost chunks with exact query term matches
+    reranked = rerank_by_keywords(req.query, raw_chunks)
+
+    # Stage 3: Deduplicate by source_id — if multiple chunks from the same
+    # document score highly, keep only the best one to give the LLM diverse
+    # context. (A user asking about "submission X" shouldn't get 5 chunks
+    # from the same submission crowding out other relevant results.)
+    seen_sources: set[str] = set()
+    deduplicated: list[dict[str, Any]] = []
+    for chunk in reranked:
+        key = f"{chunk['source_type']}:{chunk['source_id']}"
+        if key not in seen_sources:
+            seen_sources.add(key)
+            deduplicated.append(chunk)
+        if len(deduplicated) >= req.top_k:
+            break
+
+    final_results = [
+        {
+            "id": c["id"],
+            "source_type": c["source_type"],
+            "source_id": c["source_id"],
+            "title": c["title"],
+            "snippet": c["snippet"],
+            "score": c["score"],
+            "metadata": c["metadata"],
+        }
+        for c in deduplicated
+    ]
+
+    # --- Cache the results for future similar queries ---
+    _semantic_cache.put(
+        query_vector=vector,
+        results=final_results,
+        user_id=req.scope.user_id,
+        role=req.scope.role,
+        team_id=req.scope.team_id,
+        source_type=req.source_type,
+        document_id=req.document_id,
+    )
+
+    return [
+        RetrievedChunk(**c) for c in final_results
     ]
 
 

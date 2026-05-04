@@ -14,12 +14,8 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.58",
-    "@langchain/core": "^0.3.30",
-    "@langchain/langgraph": "^0.2.40",
-    "@langchain/openai": "^0.3.16",
     "@supabase/supabase-js": "^2.105.1",
     "ai": "^6.0.168",
-    "langchain": "^0.3.10",
     "zod": "^3.25.76"
   },
   "devDependencies": {

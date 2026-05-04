@@ -67,39 +67,97 @@ export async function GET(req: Request) {
     return NextResponse.json({ threads: [] })
   }
 
-  // For each thread, fetch the latest message as a preview
-  const threadsWithPreview = await Promise.all(
-    threads.map(async (thread) => {
-      const { data: lastMsg } = await supabase
-        .from("chat_messages")
-        .select("role, content, created_at")
-        .eq("thread_id", thread.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
+  const threadIds = threads.map((t) => t.id)
 
-      // Count messages in thread
-      const { count } = await supabase
-        .from("chat_messages")
-        .select("id", { count: "exact", head: true })
-        .eq("thread_id", thread.id)
+  // Batch fetch: last message + count for ALL threads in two queries
+  // instead of 2 queries per thread (N+1 → 2 total).
+  const [lastMsgsResult, countsResult] = await Promise.all([
+    // Get the most recent message for each thread using DISTINCT ON
+    supabase.rpc("get_latest_thread_messages", { thread_ids: threadIds }).then(
+      (res) => res,
+      // Fallback if the RPC doesn't exist yet — individual queries
+      () => null,
+    ),
+    // Get message counts per thread
+    supabase
+      .from("chat_messages")
+      .select("thread_id", { count: "exact", head: false })
+      .in("thread_id", threadIds),
+  ])
 
-      return {
-        id: thread.id,
-        title: thread.title ?? "New conversation",
-        created_at: thread.created_at,
-        updated_at: thread.updated_at,
-        message_count: count ?? 0,
-        last_message: lastMsg
-          ? {
-              role: lastMsg.role as string,
-              content: (lastMsg.content as string)?.slice(0, 120) ?? "",
-              created_at: lastMsg.created_at as string,
-            }
-          : null,
+  // Build lookup maps for O(1) access
+  const lastMsgMap = new Map<string, { role: string; content: string; created_at: string }>()
+  const countMap = new Map<string, number>()
+
+  // If the RPC worked, use it. Otherwise fall back to the old per-thread approach.
+  if (lastMsgsResult?.data) {
+    for (const row of lastMsgsResult.data as any[]) {
+      lastMsgMap.set(row.thread_id, {
+        role: row.role,
+        content: (row.content as string)?.slice(0, 120) ?? "",
+        created_at: row.created_at,
+      })
+    }
+  } else {
+    // Fallback: fetch last message per thread in parallel (still better than sequential)
+    const msgResults = await Promise.all(
+      threadIds.map((tid) =>
+        supabase
+          .from("chat_messages")
+          .select("thread_id, role, content, created_at")
+          .eq("thread_id", tid)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ),
+    )
+    for (const res of msgResults) {
+      if (res.data) {
+        lastMsgMap.set(res.data.thread_id as string, {
+          role: res.data.role as string,
+          content: (res.data.content as string)?.slice(0, 120) ?? "",
+          created_at: res.data.created_at as string,
+        })
       }
-    }),
-  )
+    }
+  }
+
+  // Count messages per thread — group by thread_id in-memory since Supabase
+  // doesn't support GROUP BY directly. We just need to know if count > 0.
+  if (countsResult?.data) {
+    const grouped: Record<string, number> = {}
+    for (const row of countsResult.data as any[]) {
+      const tid = row.thread_id as string
+      grouped[tid] = (grouped[tid] ?? 0) + 1
+    }
+    for (const [tid, count] of Object.entries(grouped)) {
+      countMap.set(tid, count)
+    }
+  }
+
+  // If we couldn't get counts from the batch query, fall back to individual counts
+  if (countMap.size === 0) {
+    const countResults = await Promise.all(
+      threadIds.map((tid) =>
+        supabase
+          .from("chat_messages")
+          .select("id", { count: "exact", head: true })
+          .eq("thread_id", tid),
+      ),
+    )
+    for (let i = 0; i < threadIds.length; i++) {
+      countMap.set(threadIds[i], countResults[i].count ?? 0)
+    }
+  }
+
+  const threadsWithPreview = threads.map((thread) => ({
+    id: thread.id,
+    title: thread.title ?? "New conversation",
+    created_at: thread.created_at,
+    updated_at: thread.updated_at,
+    message_count: countMap.get(thread.id) ?? 0,
+    last_message: lastMsgMap.get(thread.id) ?? null,
+  }))
 
   // Filter out empty threads (no messages) to keep the list clean
   const nonEmpty = threadsWithPreview.filter((t) => t.message_count > 0)

@@ -9,6 +9,7 @@ import {
   streamChatFromMcp,
   type ChatMessage,
 } from "@/lib/smart-ai/client"
+import { applySlidingWindow, type SimpleMessage } from "@/lib/smart-ai/sliding-window"
 
 // ---------------------------------------------------------------------------
 // Provider resolution
@@ -221,13 +222,32 @@ export async function POST(req: Request) {
 
   // Build RLS-scoped tools so the model can query live data even without MCP.
   // The user's JWT is used, so RLS enforces team/role scoping automatically.
-  const fallbackTools = {
+  //
+  // IMPORTANT: This table list MUST stay in sync with READABLE_TABLES in
+  // mcp-service/supabase-tools.ts to avoid behavioral differences between
+  // the primary (MCP) and fallback paths.
+  const ALLOWED_TABLES = [
+    "tasks",
+    "task_assignments",
+    "submissions",
+    "validation_runs",
+    "validation_rules",
+    "announcements",
+    "materials",
+    "profiles",
+    "teams",
+    "report_snapshots",
+    "activity_log",
+    "chat_documents",
+  ]
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fallbackTools: Record<string, any> = {
     queryDatabase: tool({
       description:
-        "Read rows from a database table. RLS automatically restricts results " +
+        "Read rows from a permitted database table. RLS automatically restricts results " +
         "to what the current user is allowed to see. " +
-        "Available tables: submissions, tasks, task_assignments, profiles, " +
-        "validation_rules, announcements, teams, activity_log, materials.",
+        `Permitted tables: ${ALLOWED_TABLES.join(", ")}.`,
       inputSchema: z.object({
         table: z.string().describe("Table name to query, e.g. 'tasks', 'submissions'"),
         select: z.string().default("*").describe("Comma-separated columns to select. Use '*' for all."),
@@ -250,11 +270,6 @@ export async function POST(req: Request) {
         limit: z.number().int().min(1).max(50).default(10),
       }),
       execute: async ({ table, select, eq, order, limit }) => {
-        const ALLOWED_TABLES = [
-          "submissions", "tasks", "task_assignments", "profiles",
-          "validation_rules", "announcements", "teams", "activity_log",
-          "materials",
-        ]
         if (!ALLOWED_TABLES.includes(table)) {
           return { error: `Table "${table}" is not queryable. Permitted: ${ALLOWED_TABLES.join(", ")}.` }
         }
@@ -280,21 +295,75 @@ export async function POST(req: Request) {
     }),
   }
 
+  // Add searchDocument tool if RAG service is configured — this ensures
+  // document retrieval works even when the MCP service is down.
+  const ragUrl = (process.env.RAG_SERVICE_URL ?? "").replace(/\/$/, "")
+  const ragToken = process.env.RAG_SERVICE_TOKEN ?? ""
+  if (ragUrl && ragToken) {
+    fallbackTools.searchDocument = tool({
+      description:
+        "Search inside a specific user-uploaded document, material, or other indexed source by ID, or across the user's entire RAG corpus.",
+      inputSchema: z.object({
+        documentId: z
+          .string()
+          .optional()
+          .describe("UUID of a specific document. Omit to search the user's full corpus."),
+        sourceType: z
+          .enum([
+            "chat_attachment",
+            "material",
+            "submission",
+            "task",
+            "announcement",
+            "validation_run",
+            "rule",
+          ])
+          .optional()
+          .describe("Restrict search to a single source kind."),
+        query: z
+          .string()
+          .min(1)
+          .describe("Natural-language question or keyword to search for."),
+      }),
+      execute: async ({ documentId, sourceType, query }) => {
+        try {
+          const res = await fetch(`${ragUrl}/v1/retrieve`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${ragToken}`,
+            },
+            body: JSON.stringify({
+              scope,
+              document_id: documentId ?? null,
+              source_type: sourceType ?? null,
+              query,
+              top_k: 6,
+            }),
+            signal: AbortSignal.timeout(8_000),
+          })
+          if (!res.ok) return { results: [], count: 0 }
+          const chunks = await res.json()
+          return { results: chunks, count: Array.isArray(chunks) ? chunks.length : 0 }
+        } catch {
+          return { results: [], count: 0 }
+        }
+      },
+    })
+  }
+
   const roleLabel = profile.role.replace("_", " ")
   const systemPrompt = [
-    "You are Smart AI, an intelligent assistant embedded in the Hierarchia manager portal.",
-    `The current user is a ${roleLabel}` +
-      (profile.team_id ? ` on team ${profile.team_id}` : "") +
-      ".",
-    "",
-    "You have access to a queryDatabase tool that lets you read live portal data.",
-    "USE THIS TOOL to answer questions about submissions, tasks, assignments,",
-    "validation rules, announcements, team performance, and activity logs.",
-    "",
-    "When a user asks about their data, ALWAYS use the queryDatabase tool to fetch",
-    "the actual records. Never say you cannot access data — you CAN query it directly.",
+    "You are Smart AI, the agentic assistant inside the Hierarchia manager portal.",
+    `The current user's role is "${roleLabel}". You have access to database tools that run queries on their behalf.`,
+    "These tools respect the user's Row Level Security (RLS) policies, so the data you see is the data they're allowed to see.",
+    "If the user asks about a specific document (PDF, log, image, transcript), call the 'searchDocument' tool with the document's id to retrieve grounded snippets.",
+    "If the user asks about their tasks, submissions, team performance, or announcements, call 'queryDatabase' to look up the real data instead of guessing.",
     "CRITICAL TABLE MAPPINGS: 'Team' or 'Departments' -> 'teams', 'Validation Rules' -> 'validation_rules', 'Submission' -> 'submissions'.",
     "CRITICAL TOOL INSTRUCTION: Once you receive tool results, you MUST answer the user immediately in the next step. Do NOT loop or make multiple consecutive tool calls unless absolutely necessary.",
+    "Prefer concrete, cited answers over speculation. If a tool returns no rows, say so plainly.",
+    "Never invent IDs, scores, or submission text. If retrieval comes back empty, ask a clarifying question.",
+    "If the most recent user message includes attachment metadata (filename + id), those are documents the user has just uploaded; use 'searchDocument' with those IDs and source_type='chat_attachment' before answering.",
     "",
     "Key tables and their important columns:",
     "- submissions: id, title, status (queued/passed/failed/needs_review), score, summary, uploader_id, team_id, created_at",
@@ -302,18 +371,38 @@ export async function POST(req: Request) {
     "- task_assignments: id, task_id, assignee_id, status (pending/submitted/missed), submitted_at",
     "- profiles: id, email, full_name, role (main_admin/manager/member), team_id",
     "- validation_rules: id, name, prompt, team_id, enabled",
+    "- validation_runs: id, submission_id, rule_id, pass, score, reasons, flags",
     "- announcements: id, title, content, author_id, team_id, created_at",
     "- teams: id, name",
     "- activity_log: id, actor_id, action, target_type, target_id, created_at",
+    "- report_snapshots: id, team_id, period, data, created_at",
+    "- chat_documents: id, user_id, file_name, file_url, rag_status, created_at",
     "",
     "Be concise, format data in tables when useful, and cite specific IDs and scores.",
-    "Never invent or fabricate data — only report what the queryDatabase tool returns.",
+    "Never invent or fabricate data — only report what the tools return.",
   ].join("\n")
+
+  // --- Sliding window: trim old messages to save tokens on long chats ---
+  const trimmedMessages = applySlidingWindow(
+    body.messages.map((m: any) => ({
+      role: m.role ?? "user",
+      content: typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""),
+      metadata: m.metadata,
+    })) as SimpleMessage[],
+    { maxTokens: 12_000, recentKeepCount: 6 },
+  )
+
+  // Convert trimmed messages to UIMessage format for convertToModelMessages
+  const trimmedUIMessages = trimmedMessages.map((m, i) => ({
+    ...m,
+    id: `trimmed-${i}`,
+    parts: [{ type: "text" as const, text: m.content }],
+  }))
 
   const result = streamText({
     model: resolveModel(),
     system: systemPrompt,
-    messages: await convertToModelMessages(body.messages),
+    messages: await convertToModelMessages(trimmedUIMessages as any),
     tools: fallbackTools,
     stopWhen: stepCountIs(5),
     onFinish: async ({ text }) => {
