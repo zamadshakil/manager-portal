@@ -7,77 +7,78 @@ export const dynamic = "force-dynamic"
 /**
  * GET /api/smart-ai/health
  *
- * Diagnostic endpoint that checks connectivity to both the MCP and RAG
- * services. Returns a structured JSON report for debugging deployment
- * issues — especially useful when the AI reports "cannot retrieve data."
+ * Diagnostic endpoint that checks the native RAG pipeline health.
+ * All AI orchestration now runs natively in Next.js — no external
+ * MCP or RAG services needed.
  */
 export async function GET() {
   await requireProfile()
 
-  const mcpUrl = process.env.MCP_SERVICE_URL ?? ""
-  const mcpToken = process.env.MCP_SERVICE_TOKEN ?? ""
-  const ragUrl = process.env.RAG_SERVICE_URL ?? ""
-  const ragToken = process.env.RAG_SERVICE_TOKEN ?? ""
   const openrouterKey = process.env.OPENROUTER_API_KEY ?? ""
+  const dbUrl = process.env.POSTGRES_URL ?? process.env.DATABASE_URL ?? ""
+  const embeddingModel = process.env.EMBEDDING_MODEL ?? "text-embedding-3-small"
 
   const checks: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
+    architecture: "native (Next.js serverless)",
     env: {
-      MCP_SERVICE_URL: mcpUrl ? "✅ set" : "❌ missing",
-      MCP_SERVICE_TOKEN: mcpToken ? "✅ set" : "❌ missing",
-      RAG_SERVICE_URL: ragUrl ? "✅ set" : "❌ missing",
-      RAG_SERVICE_TOKEN: ragToken ? "✅ set" : "❌ missing",
       OPENROUTER_API_KEY: openrouterKey ? "✅ set" : "❌ missing",
+      POSTGRES_URL: dbUrl ? "✅ set" : "❌ missing",
+      EMBEDDING_MODEL: embeddingModel,
       SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL ? "✅ set" : "❌ missing",
+      SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? "✅ set" : "❌ missing",
     },
   }
 
-  // Check MCP service health
-  if (mcpUrl) {
+  // Check direct Postgres connectivity
+  if (dbUrl) {
     try {
-      const res = await fetch(`${mcpUrl.replace(/\/$/, "")}/health`, {
-        headers: mcpToken ? { authorization: `Bearer ${mcpToken}` } : {},
-        signal: AbortSignal.timeout(5_000),
+      const { Pool } = await import("pg")
+      const pool = new Pool({
+        connectionString: dbUrl,
+        max: 1,
+        connectionTimeoutMillis: 5_000,
       })
-      const body = await res.json().catch(() => null)
-      checks.mcp = {
-        status: res.ok ? "✅ healthy" : `⚠️ status ${res.status}`,
-        url: mcpUrl,
-        response: body,
+      const client = await pool.connect()
+      const result = await client.query(
+        "SELECT COUNT(*) as count FROM rag_documents"
+      )
+      client.release()
+      await pool.end()
+
+      checks.database = {
+        status: "✅ connected",
+        rag_documents_count: parseInt(result.rows[0].count, 10),
       }
     } catch (err: any) {
-      checks.mcp = {
-        status: "❌ unreachable",
-        url: mcpUrl,
+      checks.database = {
+        status: "❌ error",
         error: err?.message ?? String(err),
       }
     }
   } else {
-    checks.mcp = { status: "❌ not configured" }
+    checks.database = { status: "❌ not configured" }
   }
 
-  // Check RAG service health
-  if (ragUrl) {
+  // Check OpenRouter embedding endpoint
+  if (openrouterKey) {
     try {
-      const res = await fetch(`${ragUrl.replace(/\/$/, "")}/health`, {
-        headers: ragToken ? { authorization: `Bearer ${ragToken}` } : {},
+      const res = await fetch("https://openrouter.ai/api/v1/models", {
+        headers: { authorization: `Bearer ${openrouterKey}` },
         signal: AbortSignal.timeout(5_000),
       })
-      const body = await res.json().catch(() => null)
-      checks.rag = {
-        status: res.ok ? "✅ healthy" : `⚠️ status ${res.status}`,
-        url: ragUrl,
-        response: body,
+      checks.embeddings = {
+        status: res.ok ? "✅ reachable" : `⚠️ status ${res.status}`,
+        model: embeddingModel,
       }
     } catch (err: any) {
-      checks.rag = {
+      checks.embeddings = {
         status: "❌ unreachable",
-        url: ragUrl,
         error: err?.message ?? String(err),
       }
     }
   } else {
-    checks.rag = { status: "❌ not configured" }
+    checks.embeddings = { status: "❌ no API key" }
   }
 
   return NextResponse.json(checks, {

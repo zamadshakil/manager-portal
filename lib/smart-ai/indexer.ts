@@ -1,12 +1,12 @@
 import "server-only"
 
 /**
- * RAG indexing helpers.
+ * RAG Indexing – Native Next.js Implementation
+ * =============================================
  *
- * The portal pushes content into the FastAPI rag-service whenever a manager
- * or member creates / updates / deletes a piece of knowledge that Smart AI
- * should be able to retrieve later (announcements, materials, tasks,
- * submission summaries, validation outcomes, …).
+ * Generates embeddings and stores document chunks directly into the
+ * `rag_documents` pgvector table, eliminating the need for the external
+ * Python rag-service.
  *
  * Design rules:
  *
@@ -19,20 +19,135 @@ import "server-only"
  *      but the recommended usage is `void indexDocument({...})` so the user
  *      sees an immediate redirect / revalidation.
  *
- *   3. If `RAG_SERVICE_URL` / `RAG_SERVICE_TOKEN` are not configured (e.g.
- *      during the first day of the Railway rollout), the helpers no-op
+ *   3. If database or embedding credentials are missing, the helpers no-op
  *      silently. Smart AI just falls back to its conservative no-RAG mode.
- *
- *   4. The shape on the wire matches `IndexRequest` in
- *      `rag-service/main.py`. Keep them in sync.
  */
 
-const RAG_URL = (process.env.RAG_SERVICE_URL ?? "").replace(/\/$/, "")
-const RAG_TOKEN = process.env.RAG_SERVICE_TOKEN ?? ""
+import { Pool } from "pg"
 
-function isConfigured(): boolean {
-  return Boolean(RAG_URL && RAG_TOKEN)
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+const DATABASE_URL = process.env.POSTGRES_URL ?? process.env.DATABASE_URL ?? ""
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "text-embedding-3-small"
+const EMBEDDING_DIM = 1536
+
+// Chunking
+const CHUNK_SIZE = 800
+const CHUNK_OVERLAP = 200
+
+// ---------------------------------------------------------------------------
+// Singleton connection pool
+// ---------------------------------------------------------------------------
+
+let _pool: Pool | null = null
+
+function getPool(): Pool | null {
+  if (!DATABASE_URL) return null
+  if (!_pool) {
+    _pool = new Pool({
+      connectionString: DATABASE_URL,
+      max: 3,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
+    })
+  }
+  return _pool
 }
+
+// ---------------------------------------------------------------------------
+// Text chunking (pure JS, no external dependency needed)
+// ---------------------------------------------------------------------------
+
+function chunkText(text: string): string[] {
+  if (!text || text.trim().length < 20) return text?.trim() ? [text.trim()] : []
+
+  const trimmed = text.trim()
+  if (trimmed.length <= CHUNK_SIZE) return [trimmed]
+
+  const chunks: string[] = []
+  const separators = ["\n\n", "\n", ". ", " "]
+
+  function splitRecursive(content: string, sepIdx: number): string[] {
+    if (content.length <= CHUNK_SIZE) return [content]
+    if (sepIdx >= separators.length) {
+      // Hard split at chunk_size
+      const parts: string[] = []
+      for (let i = 0; i < content.length; i += CHUNK_SIZE - CHUNK_OVERLAP) {
+        parts.push(content.slice(i, i + CHUNK_SIZE))
+      }
+      return parts
+    }
+
+    const sep = separators[sepIdx]
+    const segments = content.split(sep)
+    const result: string[] = []
+    let current = ""
+
+    for (const seg of segments) {
+      const candidate = current ? current + sep + seg : seg
+      if (candidate.length > CHUNK_SIZE && current) {
+        result.push(current)
+        // Overlap: grab the tail of the last chunk
+        const overlapStart = Math.max(0, current.length - CHUNK_OVERLAP)
+        current = current.slice(overlapStart) + sep + seg
+        if (current.length > CHUNK_SIZE) {
+          // Still too big — recurse with next separator
+          result.push(...splitRecursive(current, sepIdx + 1))
+          current = ""
+        }
+      } else {
+        current = candidate
+      }
+    }
+    if (current.trim()) result.push(current)
+    return result
+  }
+
+  chunks.push(...splitRecursive(trimmed, 0))
+
+  // Filter trivially short chunks
+  return chunks.filter((c) => c.trim().length >= 20)
+}
+
+// ---------------------------------------------------------------------------
+// Embedding via OpenRouter (OpenAI-compatible API)
+// ---------------------------------------------------------------------------
+
+async function embedTexts(texts: string[]): Promise<number[][]> {
+  if (!texts.length) return []
+  if (!OPENROUTER_API_KEY) throw new Error("No embedding API key configured")
+
+  const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${OPENROUTER_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: EMBEDDING_MODEL,
+      input: texts,
+    }),
+    signal: AbortSignal.timeout(30_000),
+  })
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new Error(`Embedding API failed (${res.status}): ${body.slice(0, 200)}`)
+  }
+
+  const json = await res.json()
+  // OpenAI-compatible response: { data: [{ embedding: [...] }] }
+  return (json.data as { embedding: number[] }[])
+    .sort((a: any, b: any) => a.index - b.index)
+    .map((d: { embedding: number[] }) => d.embedding)
+}
+
+// ---------------------------------------------------------------------------
+// Public API — Types
+// ---------------------------------------------------------------------------
 
 /** Sources we currently index. Add new kinds here as the surface grows. */
 export type IndexSourceType =
@@ -59,15 +174,26 @@ export interface IndexDocumentInput {
   metadata?: Record<string, unknown>
 }
 
+// ---------------------------------------------------------------------------
+// Public API — indexDocument
+// ---------------------------------------------------------------------------
+
 /**
- * Push a single document into pgvector via the rag-service. Idempotent —
- * the rag-service upserts on (source_type, source_id), so calling this on
- * every create *and* every update is the correct pattern.
+ * Push a single document into pgvector. Idempotent — deletes existing
+ * chunks for the same (source_type, source_id), then inserts new ones.
  */
-export async function indexDocument(input: IndexDocumentInput): Promise<{ ok: boolean; reason?: string }> {
-  if (!isConfigured()) {
-    console.log("[rag] indexing skipped: RAG service not configured");
-    return { ok: false, reason: "disabled" };
+export async function indexDocument(
+  input: IndexDocumentInput,
+): Promise<{ ok: boolean; reason?: string }> {
+  const pool = getPool()
+  if (!pool) {
+    console.log("[rag] indexing skipped: database not configured")
+    return { ok: false, reason: "disabled" }
+  }
+
+  if (!OPENROUTER_API_KEY) {
+    console.log("[rag] indexing skipped: no embedding API key")
+    return { ok: false, reason: "disabled" }
   }
 
   // Optional kill-switch — set RAG_INDEX_DISABLED_TYPES="task,submission" in
@@ -78,50 +204,111 @@ export async function indexDocument(input: IndexDocumentInput): Promise<{ ok: bo
     .map((s) => s.trim())
     .filter(Boolean)
   if (disabled.includes(input.source_type)) {
-    console.log(`[rag] indexing skipped: ${input.source_type} is disabled via env`);
-    return { ok: false, reason: "disabled" };
+    console.log(`[rag] indexing skipped: ${input.source_type} is disabled via env`)
+    return { ok: false, reason: "disabled" }
   }
 
-  // Empty / whitespace-only content provides no retrieval value and would
-  // waste an embedding call. Bumped from 4 → 16 so a single-word title
-  // doesn't slip in as a useless "document".
+  // Empty / whitespace-only content provides no retrieval value.
   if (!input.content || input.content.trim().length < 16) {
-    return { ok: false, reason: "skipped: content too short" };
+    return { ok: false, reason: "skipped: content too short" }
   }
 
+  let client
   try {
-    const res = await fetch(`${RAG_URL}/v1/index`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${RAG_TOKEN}`,
-      },
-      body: JSON.stringify({
-        source_type: input.source_type,
-        source_id: input.source_id,
-        team_id: input.team_id ?? null,
-        owner_id: input.owner_id ?? null,
-        title: input.title ?? null,
-        content: input.content,
-        metadata: input.metadata ?? {},
-      }),
-      cache: "no-store",
-      // Hard cap so a hung rag-service can't pin a Railway function.
-      signal: AbortSignal.timeout(8_000),
-    })
-    if (!res.ok) {
-      const body = await res.text().catch(() => "")
-      console.warn(
-        `[rag] index ${input.source_type}:${input.source_id} failed (${res.status}): ${body.slice(0, 200)}`,
+    // 1. Chunk the text
+    const chunks = chunkText(input.content)
+    if (!chunks.length) return { ok: false, reason: "no chunks produced" }
+
+    console.log(`[rag] indexing ${input.source_type}:${input.source_id} → ${chunks.length} chunks`)
+
+    // 2. Generate embeddings for all chunks in one API call
+    const vectors = await embedTexts(chunks)
+
+    // 3. Insert into pgvector
+    client = await pool.connect()
+
+    // Ensure table + extensions exist
+    await client.query("CREATE EXTENSION IF NOT EXISTS vector")
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rag_documents (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        source_type TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        chunk_index INT NOT NULL DEFAULT 0,
+        team_id TEXT,
+        owner_id TEXT,
+        title TEXT,
+        content TEXT NOT NULL,
+        embedding vector(${EMBEDDING_DIM}),
+        metadata JSONB DEFAULT '{}'::jsonb,
+        tsv tsvector,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-      return { ok: false, reason: `failed (${res.status})` };
+    `)
+
+    // Ensure HNSW index exists
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS rag_documents_embedding_hnsw_idx
+      ON rag_documents USING hnsw (embedding vector_cosine_ops)
+      WITH (m = 16, ef_construction = 64)
+    `)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS rag_documents_source_idx
+      ON rag_documents (source_type, source_id)
+    `)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS rag_documents_owner_idx
+      ON rag_documents (owner_id)
+    `)
+
+    // Delete existing chunks for this source (re-index)
+    await client.query(
+      "DELETE FROM rag_documents WHERE source_type = $1 AND source_id = $2",
+      [input.source_type, input.source_id],
+    )
+
+    // Insert all chunks
+    for (let i = 0; i < chunks.length; i++) {
+      const vectorStr = `[${vectors[i].join(",")}]`
+      const meta = JSON.stringify({
+        ...(input.metadata ?? {}),
+        chunk_index: i,
+        total_chunks: chunks.length,
+      })
+
+      await client.query(
+        `INSERT INTO rag_documents
+          (source_type, source_id, chunk_index, team_id, owner_id, title, content, embedding, metadata, tsv)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9::jsonb,
+                 to_tsvector('english', COALESCE($6, '') || ' ' || $7))`,
+        [
+          input.source_type,
+          input.source_id,
+          i,
+          input.team_id ?? null,
+          input.owner_id ?? null,
+          input.title ?? null,
+          chunks[i],
+          vectorStr,
+          meta,
+        ],
+      )
     }
-    return { ok: true };
+
+    console.log(`[rag] indexed ${input.source_type}:${input.source_id} ✓ (${chunks.length} chunks)`)
+    return { ok: true }
   } catch (err: any) {
-    console.warn(`[rag] index ${input.source_type}:${input.source_id} threw`, err)
-    return { ok: false, reason: err.message ?? "network error" };
+    console.error(`[rag] index ${input.source_type}:${input.source_id} failed:`, err.message)
+    return { ok: false, reason: err.message ?? "indexing error" }
+  } finally {
+    if (client) client.release()
   }
 }
+
+// ---------------------------------------------------------------------------
+// Public API — deleteIndexed
+// ---------------------------------------------------------------------------
 
 /**
  * Remove a document from the index. Called from the matching delete actions.
@@ -131,24 +318,22 @@ export async function deleteIndexed(args: {
   source_type: IndexSourceType
   source_id: string
 }): Promise<void> {
-  if (!isConfigured()) return
+  const pool = getPool()
+  if (!pool) return
+
   try {
-    const url = new URL(`${RAG_URL}/v1/index`)
-    url.searchParams.set("source_type", args.source_type)
-    url.searchParams.set("source_id", args.source_id)
-    const res = await fetch(url, {
-      method: "DELETE",
-      headers: { authorization: `Bearer ${RAG_TOKEN}` },
-      cache: "no-store",
-      signal: AbortSignal.timeout(5_000),
-    })
-    if (!res.ok && res.status !== 404) {
-      console.warn(`[rag] delete ${args.source_type}:${args.source_id} failed (${res.status})`)
-    }
+    await pool.query(
+      "DELETE FROM rag_documents WHERE source_type = $1 AND source_id = $2",
+      [args.source_type, args.source_id],
+    )
   } catch (err) {
     console.warn(`[rag] delete ${args.source_type}:${args.source_id} threw`, err)
   }
 }
+
+// ---------------------------------------------------------------------------
+// Public API — joinContent
+// ---------------------------------------------------------------------------
 
 /**
  * Convenience: build the `content` string from typical fields. Keeps call

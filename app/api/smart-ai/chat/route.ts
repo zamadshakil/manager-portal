@@ -1,26 +1,20 @@
 import { NextResponse } from "next/server"
 import { streamText, convertToModelMessages, stepCountIs, tool, type UIMessage } from "ai"
-import { openai, createOpenAI } from "@ai-sdk/openai"
+import { createOpenAI, openai } from "@ai-sdk/openai"
 import { z } from "zod"
 import { requireProfile } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
-import {
-  scopeForProfile,
-  streamChatFromMcp,
-  type ChatMessage,
-} from "@/lib/smart-ai/client"
+import { scopeForProfile } from "@/lib/smart-ai/client"
+import { retrieveChunks } from "@/lib/smart-ai/retriever"
 import { applySlidingWindow, type SimpleMessage } from "@/lib/smart-ai/sliding-window"
 import { chatLimiter } from "@/lib/redis"
 
 // ---------------------------------------------------------------------------
 // Provider resolution
 //
-// Priority for the LLM that powers the FALLBACK path (when the MCP service
-// is unreachable):
-//
+// Priority for the LLM:
 //   1. OpenRouter   (if OPENROUTER_API_KEY is set) — recommended for prod.
-//   2. AI Gateway   (if AI_GATEWAY_API_KEY is set).
-//   3. Bare OpenAI  key (legacy).
+//   2. Bare OpenAI  key (legacy).
 // ---------------------------------------------------------------------------
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
@@ -49,7 +43,6 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 // The portal-side metadata shape the chat panel attaches to user turns.
-// MUST stay in sync with the panel + the mcp-service.
 interface PortalUIMessageMetadata {
   attachments?: Array<{ id: string; filename: string }>
 }
@@ -59,18 +52,14 @@ interface Body {
   threadId?: string
 }
 
-/**
- * Smart AI chat endpoint.
- *
- * Path 1 (production): forwards the role-scoped request to the Node.js MCP
- *   service on Railway, which orchestrates retrieval through the FastAPI
- *   RAG service and streams tokens back via the AI SDK UI Message Stream
- *   protocol.
- *
- * Path 2 (fallback): if the MCP service is not reachable, we use the AI
- *   SDK directly with tool-based Supabase queries so the model can still
- *   read live data through the user's RLS-scoped session.
- */
+// ---------------------------------------------------------------------------
+// POST /api/smart-ai/chat
+//
+// Single-path architecture: all AI orchestration, tool use, and RAG
+// retrieval happens natively in this Next.js route. No external MCP or
+// RAG services needed.
+// ---------------------------------------------------------------------------
+
 export async function POST(req: Request) {
   const profile = await requireProfile()
 
@@ -98,9 +87,8 @@ export async function POST(req: Request) {
 
   const scope = scopeForProfile(profile)
 
-  // Flatten UIMessage[] → simple {role, content, metadata} the MCP service
-  // expects. Anything that isn't user/assistant/system is dropped.
-  const flat: ChatMessage[] = []
+  // Flatten UIMessage[] → simple {role, content} for processing
+  const flat: { role: string; content: string; metadata?: Record<string, any> }[] = []
   for (let i = 0; i < body.messages.length; i++) {
     const m = body.messages[i]
     const role = m.role
@@ -123,67 +111,18 @@ export async function POST(req: Request) {
     }
 
     if (!content && !hasMeta) continue
-    const flatMsg: ChatMessage = { role, content }
+    const flatMsg: { role: string; content: string; metadata?: Record<string, any> } = { role, content }
     if (hasMeta) flatMsg.metadata = metadata as Record<string, unknown>
     flat.push(flatMsg)
   }
 
   const supabase = await createClient()
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  const accessToken = session?.access_token ?? null
-
-  // ---- Path 1: MCP service (preferred) ----
-  let mcp: Response | null = null
-  let fallbackReason = "mcp-unreachable"
-
-  try {
-    mcp = await streamChatFromMcp({
-      scope,
-      accessToken,
-      threadId: body.threadId,
-      messages: flat,
-      signal: req.signal,
-    })
-  } catch (err: any) {
-    console.error("[smart-ai] mcp fetch threw:", err.message)
-    fallbackReason = "mcp-fetch-error"
-  }
-
-  if (mcp && mcp.ok && mcp.body) {
-    // Pass the AI SDK UI Message Stream straight through to <useChat>.
-    const headers = new Headers({
-      "content-type": mcp.headers.get("content-type") ?? "text/event-stream; charset=utf-8",
-      "cache-control": "no-store",
-      "x-smart-ai-source": "mcp",
-    })
-    const threadHeader = mcp.headers.get("x-mcp-thread-id")
-    if (threadHeader) headers.set("x-mcp-thread-id", threadHeader)
-
-    return new Response(mcp.body, { status: 200, headers })
-  }
-
-  // ---- Path 2: Fallback with direct Supabase tools ----
-  if (mcp && !mcp.ok) {
-    const text = await mcp.text().catch(() => "")
-    console.warn(`[smart-ai] mcp returned error (${mcp.status}): ${text.slice(0, 200)}`)
-    fallbackReason = `mcp-status-${mcp.status}`
-  }
-
-  if (!process.env.MCP_SERVICE_URL || !process.env.MCP_SERVICE_TOKEN) {
-    fallbackReason = "mcp-not-configured"
-  }
-  console.warn(`[smart-ai] using fallback with tools: ${fallbackReason}`)
 
   // ---- Persistence: ensure thread exists in DB ----
-  // The client sends a threadId (UUID from localStorage). We upsert a
-  // matching row so the thread drawer and history loading work correctly.
   const threadId = body.threadId ?? crypto.randomUUID()
   const lastUserMsg = flat[flat.length - 1]
   const isNewThread = !body.threadId
 
-  // Generate a descriptive title from the user's first message
   function generateTitle(msg: string): string {
     if (!msg || msg.trim().length === 0) return "New conversation"
     let t = msg.trim().replace(/[#*_`~\[\]]/g, "").replace(/\[Attached documents[^\]]*\]/g, "").trim()
@@ -196,9 +135,6 @@ export async function POST(req: Request) {
   const threadTitle = generateTitle(lastUserMsg?.content ?? "")
 
   // Use service-role client for persistence so RLS doesn't block the insert
-  // when the thread is brand-new (user_id must match auth.uid() under anon,
-  // but upsert with service-role bypasses RLS). Fall back to the user's
-  // RLS-scoped client if service-role key is unavailable.
   const { createClient: createSBClient } = await import("@supabase/supabase-js")
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? ""
@@ -228,8 +164,6 @@ export async function POST(req: Request) {
 
   // ---- Persistence: save user message ----
   if (lastUserMsg?.role === "user") {
-    // Build the insert payload — only include metadata if non-empty, for
-    // resilience against schemas missing the metadata column.
     const msgPayload: Record<string, unknown> = {
       thread_id: threadId,
       role: "user",
@@ -249,12 +183,7 @@ export async function POST(req: Request) {
   }
 
 
-  // Build RLS-scoped tools so the model can query live data even without MCP.
-  // The user's JWT is used, so RLS enforces team/role scoping automatically.
-  //
-  // IMPORTANT: This table list MUST stay in sync with READABLE_TABLES in
-  // mcp-service/supabase-tools.ts to avoid behavioral differences between
-  // the primary (MCP) and fallback paths.
+  // Build RLS-scoped tools so the model can query live data.
   const ALLOWED_TABLES = [
     "tasks",
     "task_assignments",
@@ -271,7 +200,7 @@ export async function POST(req: Request) {
   ]
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fallbackTools: Record<string, any> = {
+  const tools: Record<string, any> = {
     queryDatabase: tool({
       description:
         "Read rows from a permitted database table. RLS automatically restricts results " +
@@ -322,16 +251,12 @@ export async function POST(req: Request) {
         return { data: data ?? [], count: Array.isArray(data) ? data.length : 0 }
       },
     }),
-  }
 
-  // Add searchDocument tool if RAG service is configured — this ensures
-  // document retrieval works even when the MCP service is down.
-  const ragUrl = (process.env.RAG_SERVICE_URL ?? "").replace(/\/$/, "")
-  const ragToken = process.env.RAG_SERVICE_TOKEN ?? ""
-  if (ragUrl && ragToken) {
-    fallbackTools.searchDocument = tool({
+    // ---- Native RAG search tool ----
+    searchDocument: tool({
       description:
-        "Search inside a specific user-uploaded document, material, or other indexed source by ID, or across the user's entire RAG corpus.",
+        "Search inside a specific user-uploaded document, material, or other indexed source by ID, or across the user's entire RAG corpus. " +
+        "Use this when the user asks about the content of an uploaded file or attached document.",
       inputSchema: z.object({
         documentId: z
           .string()
@@ -356,29 +281,20 @@ export async function POST(req: Request) {
       }),
       execute: async ({ documentId, sourceType, query }) => {
         try {
-          const res = await fetch(`${ragUrl}/v1/retrieve`, {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-              authorization: `Bearer ${ragToken}`,
-            },
-            body: JSON.stringify({
-              scope,
-              document_id: documentId ?? null,
-              source_type: sourceType ?? null,
-              query,
-              top_k: 6,
-            }),
-            signal: AbortSignal.timeout(8_000),
+          const chunks = await retrieveChunks({
+            scope,
+            query,
+            documentId: documentId ?? null,
+            sourceType: sourceType ?? null,
+            topK: 6,
           })
-          if (!res.ok) return { results: [], count: 0 }
-          const chunks = await res.json()
-          return { results: chunks, count: Array.isArray(chunks) ? chunks.length : 0 }
-        } catch {
+          return { results: chunks, count: chunks.length }
+        } catch (err: any) {
+          console.error("[smart-ai] searchDocument error:", err.message)
           return { results: [], count: 0 }
         }
       },
-    })
+    }),
   }
 
   const roleLabel = profile.role.replace("_", " ")
@@ -438,7 +354,7 @@ export async function POST(req: Request) {
       model: resolveModel(),
       system: systemPrompt,
       messages: await convertToModelMessages(trimmedUIMessages as any),
-      tools: fallbackTools,
+      tools,
       stopWhen: stepCountIs(5),
       onFinish: async ({ text }) => {
         // ---- Persistence: save assistant reply ----
@@ -466,13 +382,12 @@ export async function POST(req: Request) {
     })
 
     const res = result.toUIMessageStreamResponse()
-    res.headers.set("x-smart-ai-source", "fallback")
-    res.headers.set("x-smart-ai-fallback-reason", fallbackReason)
+    res.headers.set("x-smart-ai-source", "native")
     return res
   } catch (fallbackError: any) {
-    console.error("[smart-ai] fallback streamText failed:", fallbackError.message)
+    console.error("[smart-ai] streamText failed:", fallbackError.message)
     return new Response(
-      `Smart AI is currently unavailable (Fallback error: ${fallbackError.message}). Please try again later or check API key configurations.`,
+      `Smart AI is currently unavailable (Error: ${fallbackError.message}). Please try again later or check API key configurations.`,
       { status: 503, headers: { "Content-Type": "text/plain" } }
     )
   }
