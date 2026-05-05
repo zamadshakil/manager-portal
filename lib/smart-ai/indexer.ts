@@ -35,7 +35,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 // ---------------------------------------------------------------------------
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
-const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "text-embedding-3-small"
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "openai/text-embedding-3-small"
 
 // Chunking
 const CHUNK_SIZE = 800

@@ -25,7 +25,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 // ---------------------------------------------------------------------------
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
-const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "text-embedding-3-small"
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "openai/text-embedding-3-small"
 
 // Score threshold for vector search — bypassed when a specific document is targeted
 const SCORE_THRESHOLD = 0.25
