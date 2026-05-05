@@ -1,12 +1,13 @@
 import "server-only"
 
 /**
- * RAG Indexing – Native Next.js Implementation
- * =============================================
+ * RAG Indexing – Native Supabase Implementation
+ * ==============================================
  *
  * Generates embeddings and stores document chunks directly into the
- * `rag_documents` pgvector table, eliminating the need for the external
- * Python rag-service.
+ * `rag_documents` pgvector table via the Supabase service-role client,
+ * eliminating the need for raw `pg` connections or the external Python
+ * rag-service.
  *
  * Design rules:
  *
@@ -19,43 +20,26 @@ import "server-only"
  *      but the recommended usage is `void indexDocument({...})` so the user
  *      sees an immediate redirect / revalidation.
  *
- *   3. If database or embedding credentials are missing, the helpers no-op
+ *   3. If Supabase or embedding credentials are missing, the helpers no-op
  *      silently. Smart AI just falls back to its conservative no-RAG mode.
+ *
+ *   4. The `rag_documents` table, pgvector extension, and tsv trigger are
+ *      managed by the SQL migration `supabase/migrations/20260505_rag_documents.sql`.
+ *      No dynamic DDL is executed at runtime.
  */
 
-import { Pool } from "pg"
+import { createAdminClient } from "@/lib/supabase/admin"
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-const DATABASE_URL = process.env.POSTGRES_URL ?? process.env.DATABASE_URL ?? ""
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "text-embedding-3-small"
-const EMBEDDING_DIM = 1536
 
 // Chunking
 const CHUNK_SIZE = 800
 const CHUNK_OVERLAP = 200
-
-// ---------------------------------------------------------------------------
-// Singleton connection pool
-// ---------------------------------------------------------------------------
-
-let _pool: Pool | null = null
-
-function getPool(): Pool | null {
-  if (!DATABASE_URL) return null
-  if (!_pool) {
-    _pool = new Pool({
-      connectionString: DATABASE_URL,
-      max: 3,
-      idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 5_000,
-    })
-  }
-  return _pool
-}
 
 // ---------------------------------------------------------------------------
 // Text chunking (pure JS, no external dependency needed)
@@ -175,6 +159,19 @@ export interface IndexDocumentInput {
 }
 
 // ---------------------------------------------------------------------------
+// Supabase availability check
+// ---------------------------------------------------------------------------
+
+function isSupabaseConfigured(): boolean {
+  try {
+    createAdminClient()
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API — indexDocument
 // ---------------------------------------------------------------------------
 
@@ -185,9 +182,8 @@ export interface IndexDocumentInput {
 export async function indexDocument(
   input: IndexDocumentInput,
 ): Promise<{ ok: boolean; reason?: string }> {
-  const pool = getPool()
-  if (!pool) {
-    console.log("[rag] indexing skipped: database not configured")
+  if (!isSupabaseConfigured()) {
+    console.log("[rag] indexing skipped: Supabase not configured")
     return { ok: false, reason: "disabled" }
   }
 
@@ -213,8 +209,9 @@ export async function indexDocument(
     return { ok: false, reason: "skipped: content too short" }
   }
 
-  let client
   try {
+    const supabase = createAdminClient()
+
     // 1. Chunk the text
     const chunks = chunkText(input.content)
     if (!chunks.length) return { ok: false, reason: "no chunks produced" }
@@ -224,81 +221,43 @@ export async function indexDocument(
     // 2. Generate embeddings for all chunks in one API call
     const vectors = await embedTexts(chunks)
 
-    // 3. Insert into pgvector
-    client = await pool.connect()
+    // 3. Delete existing chunks for this source (re-index / idempotent)
+    const { error: deleteError } = await supabase
+      .from("rag_documents")
+      .delete()
+      .eq("source_type", input.source_type)
+      .eq("source_id", input.source_id)
 
-    // Ensure table + extensions exist (best-effort, might fail if role lacks permissions
-    // but the table usually already exists).
-    try {
-      await client.query("CREATE EXTENSION IF NOT EXISTS vector")
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS rag_documents (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          source_type TEXT NOT NULL,
-          source_id TEXT NOT NULL,
-          chunk_index INT NOT NULL DEFAULT 0,
-          team_id TEXT,
-          owner_id TEXT,
-          title TEXT,
-          content TEXT NOT NULL,
-          embedding vector(${EMBEDDING_DIM}),
-          metadata JSONB DEFAULT '{}'::jsonb,
-          tsv tsvector,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `)
-
-      // Ensure HNSW index exists
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS rag_documents_embedding_hnsw_idx
-        ON rag_documents USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 64)
-      `)
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS rag_documents_source_idx
-        ON rag_documents (source_type, source_id)
-      `)
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS rag_documents_owner_idx
-        ON rag_documents (owner_id)
-      `)
-    } catch (ddlError: any) {
-      console.warn("[rag] DDL init warning (can be ignored if table exists):", ddlError.message)
+    if (deleteError) {
+      console.warn("[rag] delete old chunks warning:", deleteError.message)
+      // Non-fatal — table might be empty or row might not exist
     }
 
-    // Delete existing chunks for this source (re-index)
-    await client.query(
-      "DELETE FROM rag_documents WHERE source_type = $1 AND source_id = $2",
-      [input.source_type, input.source_id],
-    )
-
-    // Insert all chunks
-    for (let i = 0; i < chunks.length; i++) {
-      const vectorStr = `[${vectors[i].join(",")}]`
-      const meta = JSON.stringify({
+    // 4. Build all rows and insert via Supabase
+    const rows = chunks.map((chunk, i) => ({
+      source_type: input.source_type,
+      source_id: input.source_id,
+      chunk_index: i,
+      team_id: input.team_id ?? null,
+      owner_id: input.owner_id ?? null,
+      title: input.title ?? null,
+      content: chunk,
+      // Supabase pgvector accepts the array string format for vector columns
+      embedding: `[${vectors[i].join(",")}]`,
+      metadata: {
         ...(input.metadata ?? {}),
         chunk_index: i,
         total_chunks: chunks.length,
-      })
+      },
+      // `tsv` is auto-populated by the database trigger
+    }))
 
-      await client.query(
-        `INSERT INTO rag_documents
-          (source_type, source_id, chunk_index, team_id, owner_id, title, content, embedding, metadata, tsv)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9::jsonb,
-                 to_tsvector('english', COALESCE($6, '') || ' ' || $7))`,
-        [
-          input.source_type,
-          input.source_id,
-          i,
-          input.team_id ?? null,
-          input.owner_id ?? null,
-          input.title ?? null,
-          chunks[i],
-          vectorStr,
-          meta,
-        ],
-      )
+    const { error: insertError } = await supabase
+      .from("rag_documents")
+      .insert(rows)
+
+    if (insertError) {
+      throw new Error(`Insert failed: ${insertError.message}`)
     }
 
     console.log(`[rag] indexed ${input.source_type}:${input.source_id} ✓ (${chunks.length} chunks)`)
@@ -306,8 +265,6 @@ export async function indexDocument(
   } catch (err: any) {
     console.error(`[rag] index ${input.source_type}:${input.source_id} failed:`, err.message)
     return { ok: false, reason: err.message ?? "indexing error" }
-  } finally {
-    if (client) client.release()
   }
 }
 
@@ -323,14 +280,15 @@ export async function deleteIndexed(args: {
   source_type: IndexSourceType
   source_id: string
 }): Promise<void> {
-  const pool = getPool()
-  if (!pool) return
+  if (!isSupabaseConfigured()) return
 
   try {
-    await pool.query(
-      "DELETE FROM rag_documents WHERE source_type = $1 AND source_id = $2",
-      [args.source_type, args.source_id],
-    )
+    const supabase = createAdminClient()
+    await supabase
+      .from("rag_documents")
+      .delete()
+      .eq("source_type", args.source_type)
+      .eq("source_id", args.source_id)
   } catch (err) {
     console.warn(`[rag] delete ${args.source_type}:${args.source_id} threw`, err)
   }

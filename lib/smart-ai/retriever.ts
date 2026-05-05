@@ -1,26 +1,29 @@
 import "server-only"
 
 /**
- * RAG Retrieval – Native Next.js Implementation
+ * RAG Retrieval – Native Supabase Implementation
  * ==============================================
  *
- * Performs vector similarity search directly against the `rag_documents`
- * pgvector table, eliminating the need for the external Python rag-service.
+ * Performs vector similarity search against the `rag_documents` pgvector
+ * table via Supabase RPC functions, eliminating the need for raw `pg`
+ * connections or the external Python rag-service.
  *
  * Two retrieval strategies are combined via Reciprocal Rank Fusion (RRF):
  *   1. **Vector search** — cosine similarity against the query embedding
  *   2. **BM25 full-text** — tsvector/tsquery for keyword matching
  *
  * Results are then reranked by keyword overlap for precision.
+ *
+ * The search RPCs (`search_rag_vector`, `search_rag_bm25`) are defined in
+ * `supabase/migrations/20260505_rag_documents.sql`.
  */
 
-import { Pool } from "pg"
+import { createAdminClient } from "@/lib/supabase/admin"
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-const DATABASE_URL = process.env.POSTGRES_URL ?? process.env.DATABASE_URL ?? ""
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "text-embedding-3-small"
 
@@ -28,22 +31,16 @@ const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "text-embedding-3-small"
 const SCORE_THRESHOLD = 0.25
 
 // ---------------------------------------------------------------------------
-// Singleton pool (shared with indexer if both modules are loaded)
+// Supabase availability check
 // ---------------------------------------------------------------------------
 
-let _pool: Pool | null = null
-
-function getPool(): Pool | null {
-  if (!DATABASE_URL) return null
-  if (!_pool) {
-    _pool = new Pool({
-      connectionString: DATABASE_URL,
-      max: 3,
-      idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 5_000,
-    })
+function isSupabaseConfigured(): boolean {
+  try {
+    createAdminClient()
+    return true
+  } catch {
+    return false
   }
-  return _pool
 }
 
 // ---------------------------------------------------------------------------
@@ -163,15 +160,30 @@ function rerankByKeywords(
 }
 
 // ---------------------------------------------------------------------------
+// Row parser helper
+// ---------------------------------------------------------------------------
+
+function parseRow(r: any): RetrievedChunk {
+  return {
+    id: String(r.id),
+    source_type: r.source_type,
+    source_id: r.source_id,
+    title: r.title,
+    snippet: r.snippet,
+    score: parseFloat(r.score),
+    metadata: r.metadata ?? {},
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main retrieve function
 // ---------------------------------------------------------------------------
 
 export async function retrieveChunks(
   opts: RetrieveOptions,
 ): Promise<RetrievedChunk[]> {
-  const pool = getPool()
-  if (!pool) {
-    console.warn("[rag] retrieval skipped: database not configured")
+  if (!isSupabaseConfigured()) {
+    console.warn("[rag] retrieval skipped: Supabase not configured")
     return []
   }
 
@@ -182,140 +194,81 @@ export async function retrieveChunks(
 
   const topK = opts.topK ?? 6
   const isTargeted = !!opts.documentId
+  const limitCount = topK * 3 // Fetch extra for RRF fusion headroom
 
-  let client
   try {
+    const supabase = createAdminClient()
+
     // 1. Embed the query
     const vector = await embedQuery(opts.query)
     const vectorStr = `[${vector.join(",")}]`
 
-    client = await pool.connect()
-
-    // 2. Build scoped WHERE clause
-    const whereClauses: string[] = []
-    const params: unknown[] = []
-    let paramIdx = 1
-
-    const isChatAttachment = opts.sourceType === "chat_attachment"
-
-    if (isChatAttachment) {
-      whereClauses.push(`owner_id = $${paramIdx}`)
-      params.push(opts.scope.user_id)
-      paramIdx++
-    } else if (opts.scope.role === "member") {
-      whereClauses.push(`owner_id = $${paramIdx}`)
-      params.push(opts.scope.user_id)
-      paramIdx++
-    } else if (opts.scope.role === "manager" && opts.scope.team_id) {
-      whereClauses.push(`(team_id = $${paramIdx} OR owner_id = $${paramIdx + 1})`)
-      params.push(opts.scope.team_id, opts.scope.user_id)
-      paramIdx += 2
+    // 2. Build RPC params
+    const rpcParams = {
+      query_embedding: vectorStr,
+      match_limit: limitCount,
+      filter_owner_id: opts.scope.user_id,
+      filter_team_id: opts.scope.team_id ?? null,
+      filter_role: opts.scope.role,
+      filter_source_type: opts.sourceType ?? null,
+      filter_source_id: opts.documentId ?? null,
     }
 
-    if (opts.sourceType) {
-      whereClauses.push(`source_type = $${paramIdx}`)
-      params.push(opts.sourceType)
-      paramIdx++
+    // 3. Vector similarity search via RPC
+    const { data: vecData, error: vecError } = await supabase.rpc(
+      "search_rag_vector",
+      rpcParams,
+    )
+
+    if (vecError) {
+      console.error("[rag] vector search RPC failed:", vecError.message)
+      return []
     }
 
-    if (opts.documentId) {
-      whereClauses.push(`source_id = $${paramIdx}`)
-      params.push(opts.documentId)
-      paramIdx++
-    }
-
-    const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : ""
-    const limitCount = topK * 3 // Fetch extra for RRF fusion headroom
-
-    // 3. Vector similarity search
-    const vecParamIdx = paramIdx
-    const vecLimitIdx = paramIdx + 1
-
-    const vectorSql = `
-      SELECT id, source_type, source_id, title,
-             LEFT(content, 800) AS snippet,
-             metadata,
-             1 - (embedding <=> $${vecParamIdx}::vector) AS score
-      FROM rag_documents
-      ${whereSql}
-      ORDER BY embedding <=> $${vecParamIdx}::vector
-      LIMIT $${vecLimitIdx}
-    `
-
-    const vectorRows = await client.query(vectorSql, [
-      ...params,
-      vectorStr,
-      limitCount,
-    ])
-
-    // 4. BM25 full-text search (best effort)
-    let bm25Results: RetrievedChunk[] = []
-    try {
-      const tsParamIdx = paramIdx
-      const tsLimitIdx = paramIdx + 1
-      let bm25Where = whereSql
-      if (bm25Where) {
-        bm25Where += ` AND tsv @@ plainto_tsquery('english', $${tsParamIdx})`
-      } else {
-        bm25Where = `WHERE tsv @@ plainto_tsquery('english', $${tsParamIdx})`
-      }
-
-      const bm25Sql = `
-        SELECT id, source_type, source_id, title,
-               LEFT(content, 800) AS snippet,
-               metadata,
-               ts_rank_cd(tsv, plainto_tsquery('english', $${tsParamIdx})) AS score
-        FROM rag_documents
-        ${bm25Where}
-        ORDER BY score DESC
-        LIMIT $${tsLimitIdx}
-      `
-
-      const bm25Rows = await client.query(bm25Sql, [
-        ...params,
-        opts.query,
-        limitCount,
-      ])
-
-      bm25Results = bm25Rows.rows.map((r: any) => ({
-        id: String(r.id),
-        source_type: r.source_type,
-        source_id: r.source_id,
-        title: r.title,
-        snippet: r.snippet,
-        score: parseFloat(r.score),
-        metadata: r.metadata ?? {},
-      }))
-    } catch (e) {
-      // BM25 is best-effort
-      console.warn("[rag] BM25 search failed (non-fatal):", e)
-    }
-
-    // 5. Parse vector results
-    let vectorResults: RetrievedChunk[] = vectorRows.rows.map((r: any) => ({
-      id: String(r.id),
-      source_type: r.source_type,
-      source_id: r.source_id,
-      title: r.title,
-      snippet: r.snippet,
-      score: parseFloat(r.score),
-      metadata: r.metadata ?? {},
-    }))
+    let vectorResults: RetrievedChunk[] = (vecData ?? []).map(parseRow)
 
     // Bypass threshold for targeted document searches
     if (!isTargeted) {
       vectorResults = vectorResults.filter((c) => c.score >= SCORE_THRESHOLD)
     }
 
-    // 6. Reciprocal Rank Fusion
+    // 4. BM25 full-text search (best effort) via RPC
+    let bm25Results: RetrievedChunk[] = []
+    try {
+      const bm25Params = {
+        query_text: opts.query,
+        match_limit: limitCount,
+        filter_owner_id: opts.scope.user_id,
+        filter_team_id: opts.scope.team_id ?? null,
+        filter_role: opts.scope.role,
+        filter_source_type: opts.sourceType ?? null,
+        filter_source_id: opts.documentId ?? null,
+      }
+
+      const { data: bm25Data, error: bm25Error } = await supabase.rpc(
+        "search_rag_bm25",
+        bm25Params,
+      )
+
+      if (bm25Error) {
+        console.warn("[rag] BM25 search RPC failed (non-fatal):", bm25Error.message)
+      } else {
+        bm25Results = (bm25Data ?? []).map(parseRow)
+      }
+    } catch (e) {
+      // BM25 is best-effort
+      console.warn("[rag] BM25 search failed (non-fatal):", e)
+    }
+
+    // 5. Reciprocal Rank Fusion
     let fused = bm25Results.length
       ? reciprocalRankFusion(vectorResults, bm25Results)
       : vectorResults
 
-    // 7. Keyword reranking
+    // 6. Keyword reranking
     fused = rerankByKeywords(opts.query, fused)
 
-    // 8. Deduplication — skip for targeted doc searches (we want multiple chunks)
+    // 7. Deduplication — skip for targeted doc searches (we want multiple chunks)
     const seen = new Set<string>()
     const deduplicated: RetrievedChunk[] = []
     for (const chunk of fused) {
@@ -336,7 +289,5 @@ export async function retrieveChunks(
   } catch (err: any) {
     console.error("[rag] retrieve failed:", err.message)
     return []
-  } finally {
-    if (client) client.release()
   }
 }
