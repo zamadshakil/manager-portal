@@ -330,7 +330,7 @@ export function ChatPanel({
               id: data.id,
               filename: data.file_name,
               status: data.rag_status === "failed" ? "error" : data.rag_status === "skipped" ? "skipped" : "ready",
-              url: data.file_url,
+              url: `/api/download/${data.id}?type=chat_attachment`,
             }
             : a,
         ),

@@ -40,6 +40,16 @@ export async function GET(
     blobUrl = data.blob_url as string
     fileName = (data.blob_pathname as string | null)?.split("/").pop() ?? (data.title as string)
     mimeType = (data.file_type as string | null) ?? "application/octet-stream"
+  } else if (type === "chat_attachment") {
+    const { data } = await supabase
+      .from("chat_documents")
+      .select("file_url, file_type, file_name")
+      .eq("id", id)
+      .maybeSingle()
+    if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 })
+    blobUrl = data.file_url as string
+    fileName = data.file_name as string
+    mimeType = (data.file_type as string | null) ?? "application/octet-stream"
   } else {
     const { data } = await supabase
       .from("submissions")

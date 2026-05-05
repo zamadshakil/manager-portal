@@ -64,8 +64,11 @@ export interface IndexDocumentInput {
  * the rag-service upserts on (source_type, source_id), so calling this on
  * every create *and* every update is the correct pattern.
  */
-export async function indexDocument(input: IndexDocumentInput): Promise<void> {
-  if (!isConfigured()) return
+export async function indexDocument(input: IndexDocumentInput): Promise<{ ok: boolean; reason?: string }> {
+  if (!isConfigured()) {
+    console.log("[rag] indexing skipped: RAG service not configured");
+    return { ok: false, reason: "disabled" };
+  }
 
   // Optional kill-switch — set RAG_INDEX_DISABLED_TYPES="task,submission" in
   // the env to skip specific source kinds during incident triage without
@@ -74,12 +77,17 @@ export async function indexDocument(input: IndexDocumentInput): Promise<void> {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
-  if (disabled.includes(input.source_type)) return
+  if (disabled.includes(input.source_type)) {
+    console.log(`[rag] indexing skipped: ${input.source_type} is disabled via env`);
+    return { ok: false, reason: "disabled" };
+  }
 
   // Empty / whitespace-only content provides no retrieval value and would
   // waste an embedding call. Bumped from 4 → 16 so a single-word title
   // doesn't slip in as a useless "document".
-  if (!input.content || input.content.trim().length < 16) return
+  if (!input.content || input.content.trim().length < 16) {
+    return { ok: false, reason: "skipped: content too short" };
+  }
 
   try {
     const res = await fetch(`${RAG_URL}/v1/index`, {
@@ -106,9 +114,12 @@ export async function indexDocument(input: IndexDocumentInput): Promise<void> {
       console.warn(
         `[rag] index ${input.source_type}:${input.source_id} failed (${res.status}): ${body.slice(0, 200)}`,
       )
+      return { ok: false, reason: `failed (${res.status})` };
     }
-  } catch (err) {
+    return { ok: true };
+  } catch (err: any) {
     console.warn(`[rag] index ${input.source_type}:${input.source_id} threw`, err)
+    return { ok: false, reason: err.message ?? "network error" };
   }
 }
 

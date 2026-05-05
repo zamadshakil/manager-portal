@@ -10,6 +10,7 @@ import {
   type ChatMessage,
 } from "@/lib/smart-ai/client"
 import { applySlidingWindow, type SimpleMessage } from "@/lib/smart-ai/sliding-window"
+import { chatLimiter } from "@/lib/redis"
 
 // ---------------------------------------------------------------------------
 // Provider resolution
@@ -73,6 +74,14 @@ interface Body {
 export async function POST(req: Request) {
   const profile = await requireProfile()
 
+  const { success } = await chatLimiter().limit(profile.id)
+  if (!success) {
+    return NextResponse.json(
+      { error: "You're sending messages too quickly. Please wait a moment." },
+      { status: 429 },
+    )
+  }
+
   let body: Body
   try {
     body = (await req.json()) as Body
@@ -92,10 +101,11 @@ export async function POST(req: Request) {
   // Flatten UIMessage[] → simple {role, content, metadata} the MCP service
   // expects. Anything that isn't user/assistant/system is dropped.
   const flat: ChatMessage[] = []
-  for (const m of body.messages) {
+  for (let i = 0; i < body.messages.length; i++) {
+    const m = body.messages[i]
     const role = m.role
     if (role !== "user" && role !== "assistant" && role !== "system") continue
-    const content = (m.parts ?? [])
+    let content = (m.parts ?? [])
       .filter(
         (p): p is { type: "text"; text: string } =>
           p.type === "text" && typeof (p as any).text === "string",
@@ -105,6 +115,13 @@ export async function POST(req: Request) {
       .trim()
     const metadata = m.metadata as PortalUIMessageMetadata | undefined
     const hasMeta = metadata && Object.keys(metadata).length > 0
+    
+    // Inject attachment context directly into the text so the LLM knows they exist
+    if (role === "user" && metadata?.attachments?.length) {
+      const lines = metadata.attachments.map(a => `- ${a.filename} (id: ${a.id})`).join("\n")
+      content = `${content}\n\n[Attached documents]\n${lines}`.trim()
+    }
+
     if (!content && !hasMeta) continue
     const flatMsg: ChatMessage = { role, content }
     if (hasMeta) flatMsg.metadata = metadata as Record<string, unknown>

@@ -64,6 +64,7 @@ function pLimit(concurrency: number) {
 export async function clearPipelineLock(submissionId: string) {
   try {
     const redis = getRedis()
+    if (!redis) return
     await redis.del(`pipeline:lock:${submissionId}`)
   } catch {
     // Redis unavailable — lock will expire via TTL.
@@ -90,13 +91,7 @@ export async function clearPipelineLock(submissionId: string) {
  * never lingers in "validating".
  */
 export async function processSubmission(submissionId: string) {
-  const redis = (() => {
-    try {
-      return getRedis()
-    } catch {
-      return null
-    }
-  })()
+  const redis = getRedis()
 
   // Idempotency lock — first writer wins for 10 minutes.
   if (redis) {

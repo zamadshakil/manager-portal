@@ -5,6 +5,7 @@ import { put } from "@/lib/r2"
 import { extractText } from "@/lib/parse"
 import { indexDocument } from "@/lib/smart-ai/indexer"
 import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
+import { uploadLimiter } from "@/lib/redis"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -35,6 +36,11 @@ export async function POST(req: Request) {
     profile = await requireProfile()
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const { success } = await uploadLimiter().limit(profile.id)
+  if (!success) {
+    return NextResponse.json({ error: "Too many uploads. Please try again later." }, { status: 429 })
   }
 
   let formData: FormData
@@ -84,6 +90,7 @@ export async function POST(req: Request) {
     let parsedPages: number | undefined
     let parsedTruncated = false
     let parseWarning: string | undefined
+    let parseFailed = false
     try {
       const buffer = Buffer.from(await file.arrayBuffer())
       const parseResult = await extractText(buffer, file.type)
@@ -94,6 +101,7 @@ export async function POST(req: Request) {
     } catch (parseErr) {
       console.error("[upload] parse failed", parseErr)
       parseWarning = "Text extraction failed; the document was uploaded but is not searchable yet."
+      parseFailed = true
     }
 
     // ---- 5. DB row ----------------------------------------------------
@@ -116,9 +124,9 @@ export async function POST(req: Request) {
         user_id: profile.id,
         thread_id: threadId,
         file_name: file.name.replace(/\0/g, ""),
-        file_url: uploadResult.url,
+        file_url: uploadResult.pathname,
         file_type: file.type,
-        rag_status: parsedText.trim().length >= 16 ? "processing" : "skipped",
+        rag_status: parseFailed ? "failed" : (parsedText.trim().length >= 16 ? "processing" : "skipped"),
         text_excerpt: parsedText ? parsedText.slice(0, 4_000) : null,
       })
       .select()
@@ -138,25 +146,27 @@ export async function POST(req: Request) {
     // tradeoff is worth the clearer UX.
     let ragStatus: "completed" | "failed" | "skipped" = "skipped"
     if (parsedText.trim().length >= 16) {
-      try {
-        await indexDocument({
-          source_type: "chat_attachment",
-          source_id: doc.id,
-          owner_id: profile.id,
-          team_id: profile.team_id,
-          title: file.name,
-          content: parsedText,
-          metadata: {
-            file_url: uploadResult.url,
-            file_type: file.type,
-            pages: parsedPages,
-            truncated: parsedTruncated,
-            thread_id: threadId,
-          },
-        })
+      const indexResult = await indexDocument({
+        source_type: "chat_attachment",
+        source_id: doc.id,
+        owner_id: profile.id,
+        team_id: profile.team_id,
+        title: file.name,
+        content: parsedText,
+        metadata: {
+          file_url: uploadResult.pathname,
+          file_type: file.type,
+          pages: parsedPages,
+          truncated: parsedTruncated,
+          thread_id: threadId,
+        },
+      })
+      if (indexResult.ok) {
         ragStatus = "completed"
-      } catch (err) {
-        console.error("[upload] RAG indexing failed", err)
+      } else if (indexResult.reason === "disabled" || indexResult.reason?.startsWith("skipped")) {
+        ragStatus = "skipped"
+      } else {
+        console.error("[upload] RAG indexing failed", indexResult.reason)
         ragStatus = "failed"
       }
     }

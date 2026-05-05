@@ -25,6 +25,10 @@ export async function recordTaskExecution(
   let redis: ReturnType<typeof getRedis>
   try {
     redis = getRedis()
+    if (!redis) {
+      console.warn(`[Upstash] redis not configured, skipping ${taskName} record`)
+      return
+    }
   } catch (err) {
     console.warn(`[Upstash] redis not configured, skipping ${taskName} record`, err)
     return

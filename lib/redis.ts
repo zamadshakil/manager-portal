@@ -3,19 +3,39 @@ import { Redis } from "@upstash/redis"
 import { Ratelimit } from "@upstash/ratelimit"
 
 let _redis: Redis | null = null
-export function getRedis() {
+export function getRedis(): Redis | null {
   if (_redis) return _redis
-  _redis = Redis.fromEnv()
-  return _redis
+  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+    return null
+  }
+  try {
+    _redis = Redis.fromEnv()
+    return _redis
+  } catch (err) {
+    console.warn("[redis] failed to init from env", err)
+    return null
+  }
+}
+
+// A dummy limiter that always allows requests if Redis is unconfigured
+const mockLimiter = {
+  limit: async (identifier: string) => ({
+    success: true,
+    limit: 100,
+    remaining: 99,
+    reset: Date.now() + 60000,
+  }),
 }
 
 let _uploadLimiter: Ratelimit | null = null
 export function uploadLimiter() {
+  const r = getRedis()
+  if (!r) return mockLimiter
   if (_uploadLimiter) return _uploadLimiter
   _uploadLimiter = new Ratelimit({
-    redis: getRedis(),
-    // 20 uploads per user per 10 minutes — generous but stops accidental loops.
-    limiter: Ratelimit.slidingWindow(20, "10 m"),
+    redis: r,
+    // 20 uploads per user per minute
+    limiter: Ratelimit.slidingWindow(20, "1 m"),
     analytics: true,
     prefix: "rl:upload",
   })
@@ -24,13 +44,45 @@ export function uploadLimiter() {
 
 let _llmLimiter: Ratelimit | null = null
 export function llmLimiter() {
+  const r = getRedis()
+  if (!r) return mockLimiter
   if (_llmLimiter) return _llmLimiter
   _llmLimiter = new Ratelimit({
-    redis: getRedis(),
+    redis: r,
     // 60 LLM validations per team per minute.
     limiter: Ratelimit.slidingWindow(60, "1 m"),
     analytics: true,
     prefix: "rl:llm",
   })
   return _llmLimiter
+}
+
+let _chatLimiter: Ratelimit | null = null
+export function chatLimiter() {
+  const r = getRedis()
+  if (!r) return mockLimiter
+  if (_chatLimiter) return _chatLimiter
+  _chatLimiter = new Ratelimit({
+    redis: r,
+    // 30 chat messages per user per minute
+    limiter: Ratelimit.slidingWindow(30, "1 m"),
+    analytics: true,
+    prefix: "rl:chat",
+  })
+  return _chatLimiter
+}
+
+let _authLimiter: Ratelimit | null = null
+export function authLimiter() {
+  const r = getRedis()
+  if (!r) return mockLimiter
+  if (_authLimiter) return _authLimiter
+  _authLimiter = new Ratelimit({
+    redis: r,
+    // 10 auth actions per IP per 10 minutes
+    limiter: Ratelimit.slidingWindow(10, "10 m"),
+    analytics: true,
+    prefix: "rl:auth",
+  })
+  return _authLimiter
 }

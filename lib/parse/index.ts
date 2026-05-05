@@ -1,4 +1,5 @@
 import "server-only"
+import { describeImage } from "@/lib/llm/validate"
 
 /**
  * Native per-format extractors. Each returns plain text so the LLM stage works
@@ -47,37 +48,36 @@ async function parsePdf(buf: Buffer): Promise<ParseResult> {
   if (fullText.trim().length < 16) {
     fromOcr = true
     try {
-      const { createWorker } = await import("tesseract.js")
-      const worker = await createWorker("eng")
       const maxPagesToOcr = Math.min(pageCount ?? 1, 3)
       
       let ocrText = ""
-      let totalConfidence = 0
 
       for (let i = 1; i <= maxPagesToOcr; i++) {
         const imgBuffer = await renderPageAsImage(doc, i, {
           canvasImport: () => import("@napi-rs/canvas") as any,
           scale: 2 // Higher scale for better OCR accuracy
         })
-        const { data } = await worker.recognize(Buffer.from(imgBuffer))
-        ocrText += (data.text || "") + "\n\n"
-        totalConfidence += (typeof data.confidence === "number" ? data.confidence : 0)
+        const imgDesc = await describeImage(new Uint8Array(imgBuffer), "image/png")
+        ocrText += (imgDesc.text || "") + "\n\n"
       }
 
-      await worker.terminate()
       fullText = ocrText
-      ocrConfidence = maxPagesToOcr > 0 ? totalConfidence / maxPagesToOcr : 0
+      ocrConfidence = undefined
 
       if (fullText.trim().length < 16) {
         warning = "Document contains no extractable text even after OCR. It has been uploaded but will not be searchable."
+        throw new Error(warning)
       } else if ((pageCount ?? 1) > maxPagesToOcr) {
         warning = `Only the first ${maxPagesToOcr} pages were OCR'd due to performance limits.`
       }
     } catch (err: any) {
-      console.warn("[parsePdf] OCR fallback failed", err)
+      console.warn(`[parsePdf] OCR fallback failed: ${err.message}`)
       warning = "PDF text extraction failed and OCR fallback encountered an error. Document will not be searchable."
+      throw err
     }
   }
+
+  console.log(`[parsePdf] bytes=${buf.length}, pages=${pageCount}, native_text=${result.text?.length || 0}, ocr=${fromOcr}, result_text=${fullText.length}`)
 
   const clamped = clamp(fullText)
   return { 
