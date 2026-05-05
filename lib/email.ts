@@ -181,3 +181,139 @@ export async function sendWelcomeEmail({ email, fullName, role, password }: Welc
     return false
   }
 }
+
+export async function sendPasswordResetEmail(email: string, resetLink: string) {
+  const apiKey = process.env.BREVO_API_KEY
+  const senderEmail = process.env.BREVO_SENDER_EMAIL
+  const senderName = process.env.BREVO_SENDER_NAME || "AI Manager Portal"
+
+  if (!apiKey || !senderEmail) {
+    console.warn("[email] BREVO_API_KEY or BREVO_SENDER_EMAIL is missing. Skipping email dispatch.")
+    return false
+  }
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f3f4f6;
+            margin: 0;
+            padding: 40px 20px;
+            color: #1f2937;
+          }
+          .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            overflow: hidden;
+          }
+          .header {
+            background-color: #111827;
+            padding: 30px;
+            text-align: center;
+          }
+          .header h1 {
+            color: #ffffff;
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+          }
+          .content {
+            padding: 40px 30px;
+          }
+          .content h2 {
+            margin-top: 0;
+            font-size: 20px;
+            color: #111827;
+          }
+          .content p {
+            line-height: 1.6;
+            margin-bottom: 20px;
+            color: #4b5563;
+          }
+          .button-container {
+            text-align: center;
+            margin-top: 40px;
+            margin-bottom: 20px;
+          }
+          .button {
+            display: inline-block;
+            background-color: #2563eb;
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 14px 28px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 16px;
+            transition: background-color 0.2s;
+          }
+          .button:hover {
+            background-color: #1d4ed8;
+          }
+          .footer {
+            background-color: #f9fafb;
+            padding: 20px;
+            text-align: center;
+            font-size: 13px;
+            color: #6b7280;
+            border-top: 1px solid #e5e7eb;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>${senderName}</h1>
+          </div>
+          <div class="content">
+            <h2>Password Reset Request</h2>
+            <p>We received a request to reset your password. Click the button below to choose a new password.</p>
+            
+            <div class="button-container">
+              <a href="${resetLink}" class="button">Reset Password</a>
+            </div>
+            
+            <p style="font-size: 14px; margin-top: 30px;">If you didn't request a password reset, you can safely ignore this email. The link will expire in 1 hour.</p>
+          </div>
+          <div class="footer">
+            &copy; ${new Date().getFullYear()} ${senderName}. All rights reserved.
+          </div>
+        </div>
+      </body>
+    </html>
+  `
+
+  try {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "api-key": apiKey,
+        "content-type": "application/json",
+        "accept": "application/json"
+      },
+      body: JSON.stringify({
+        sender: { email: senderEmail, name: senderName },
+        to: [{ email }],
+        subject: `Password Reset Request - ${senderName}`,
+        htmlContent
+      })
+    })
+
+    if (!res.ok) {
+      const errorData = await res.text()
+      console.error("[email] Failed to send password reset email via Brevo:", errorData)
+      return false
+    }
+
+    return true
+  } catch (err) {
+    console.error("[email] Exception sending password reset email:", err)
+    return false
+  }
+}

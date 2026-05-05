@@ -244,7 +244,7 @@ async function insertViaDirectPg(rows: IndexedRow[]): Promise<void> {
     let p = 1
     for (const r of batch) {
       valuesSql.push(
-        `($${p++}, $${p++}, $${p++}, $${p++}::uuid, $${p++}::uuid, $${p++}, $${p++}, $${p++}::vector, $${p++}::jsonb)`,
+        `($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}::vector, $${p++}::jsonb)`,
       )
       params.push(
         r.source_type,

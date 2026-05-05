@@ -6,7 +6,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, Mail } from "lucide-reac
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { createClient } from "@/lib/supabase/client"
+import { requestPasswordReset } from "@/app/actions/auth"
 
 export default function ForgotPasswordForm() {
   const [email, setEmail] = useState("")
@@ -25,13 +25,10 @@ export default function ForgotPasswordForm() {
     setError(null)
     setLoading(true)
     try {
-      const supabase = createClient()
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/update-password`,
-      })
+      const res = await requestPasswordReset(email)
 
-      if (error) {
-        setError(error.message)
+      if (!res.success) {
+        setError(res.error || "Failed to send reset link. Please try again.")
         setLoading(false)
         return
       }
