@@ -83,50 +83,39 @@ export async function POST(req: Request) {
   // the period window before reading the usage counter.
   let creditRow: Record<string, any> | null = null
   try {
-    const { createClient: createSBClientEarly } = await import("@supabase/supabase-js")
-    const _srKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
-    const _srUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? ""
-    if (_srKey && _srUrl) {
-      const srClient = createSBClientEarly(_srUrl, _srKey, {
-        auth: { persistSession: false, autoRefreshToken: false },
-      })
-      // Auto-advance period if expired
-      await srClient.rpc("maybe_reset_period", { p_user_id: profile.id }).maybeSingle()
+    const { createAdminClient } = await import("@/lib/supabase/admin")
+    const srClient = createAdminClient()
+    
+    // Auto-advance period if expired
+    await srClient.rpc("maybe_reset_period", { p_user_id: profile.id }).maybeSingle()
 
-      // Fetch credit row
-      const { data: cr, error: fetchErr } = await srClient
+    // Fetch credit row
+    const { data: cr, error: fetchErr } = await srClient
+      .from("ai_credit_limits")
+      .select("*")
+      .eq("user_id", profile.id)
+      .maybeSingle()
+
+    if (!cr && !fetchErr) {
+      // Initialize default row if missing
+      const { data: newRow, error: insErr } = await srClient
         .from("ai_credit_limits")
-        .select("*")
-        .eq("user_id", profile.id)
+        .insert({
+          user_id: profile.id,
+          monthly_limit: 100,
+          used_this_period: 0,
+          period_type: "monthly",
+          is_unlimited: profile.role === "main_admin"
+        })
+        .select()
         .maybeSingle()
-
-      if (!cr && !fetchErr) {
-        // Initialize default row if missing
-        const now = new Date()
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
-        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10)
-        
-        const { data: newRow, error: insErr } = await srClient
-          .from("ai_credit_limits")
-          .insert({
-            user_id: profile.id,
-            monthly_limit: 100,
-            used_this_period: 0,
-            period_type: "monthly",
-            period_start: monthStart,
-            period_end: monthEnd,
-            is_unlimited: profile.role === "main_admin"
-          })
-          .select()
-          .maybeSingle()
-        
-        if (insErr) {
-          console.warn("[smart-ai] could not auto-provision credit row:", insErr.message)
-        }
-        creditRow = newRow as Record<string, any> | null
-      } else {
-        creditRow = cr as Record<string, any> | null
+      
+      if (insErr) {
+        console.warn("[smart-ai] could not auto-provision credit row:", insErr.message)
       }
+      creditRow = newRow as Record<string, any> | null
+    } else {
+      creditRow = cr as Record<string, any> | null
     }
   } catch (creditErr: any) {
     console.warn("[smart-ai] credit check failed (non-blocking):", creditErr.message)
@@ -264,15 +253,8 @@ export async function POST(req: Request) {
   const threadTitle = generateTitle(lastUserMsg?.content ?? "")
 
   // Use service-role client for persistence so RLS doesn't block the insert
-  const { createClient: createSBClient } = await import("@supabase/supabase-js")
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? ""
-  const persistClient =
-    serviceRoleKey && supabaseUrl
-      ? createSBClient(supabaseUrl, serviceRoleKey, {
-          auth: { persistSession: false, autoRefreshToken: false },
-        })
-      : supabase
+  const { createAdminClient } = await import("@/lib/supabase/admin")
+  const persistClient = createAdminClient()
 
   // Check if thread exists; create if not.
   const { data: existingThread } = await persistClient
@@ -569,7 +551,7 @@ export async function POST(req: Request) {
           }
 
           // Always log usage (even for unlimited users — for track record)
-          await persistClient.from("ai_usage_log").insert({
+          const { error: logErr } = await persistClient.from("ai_usage_log").insert({
             user_id: profile.id,
             thread_id: threadId,
             model: SMART_AI_MODEL,
@@ -577,8 +559,17 @@ export async function POST(req: Request) {
             tokens_out: usage?.outputTokens ?? null,
             period_type: creditRow?.period_type ?? "monthly",
           })
+
+          if (logErr) {
+            console.error("[smart-ai] usage log insert failed:", logErr.message)
+          }
+
+          // Trigger instant refresh of the dashboard
+          const { revalidatePath } = await import("next/cache")
+          revalidatePath("/dashboard/ai-usage")
+          revalidatePath("/dashboard/admin/users")
         } catch (acctErr: any) {
-          console.warn("[smart-ai] credit accounting failed (non-blocking):", acctErr.message)
+          console.error("[smart-ai] credit accounting failed:", acctErr.message)
         }
       },
     })
