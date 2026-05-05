@@ -230,7 +230,7 @@ export async function retrieveChunks(
 
     // pgvector RPC params accept the text-literal vector form for safety.
     const rpcParams = {
-      query_embedding: vectorToPg(vector),
+      query_embedding: `[${vector.join(",")}]`,
       match_limit: limitCount,
       filter_owner_id: opts.scope.user_id,
       filter_team_id: opts.scope.team_id ?? null,
