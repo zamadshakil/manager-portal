@@ -110,25 +110,28 @@ async function parseOfficeFile(buf: Buffer): Promise<ParseResult> {
 }
 
 async function parseImage(buf: Buffer, mimeType: string): Promise<ParseResult> {
-  const { createWorker } = await import("tesseract.js")
-  const worker = await createWorker("eng")
   try {
-    const { data } = await worker.recognize(buf)
-    const raw = data.text || ""
+    const result = await describeImage(new Uint8Array(buf), mimeType)
+    const raw = result.text || ""
     const clamped = clamp(raw)
-    const confidence = typeof data.confidence === "number" ? data.confidence : 0
     return {
       text: clamped.text,
       truncated: clamped.truncated,
       fromOcr: true,
-      ocrConfidence: confidence,
+      ocrConfidence: undefined,
       warning:
         raw.trim().length < 20
-          ? `OCR extracted little text from ${mimeType}; confidence ${confidence.toFixed(0)}.`
+          ? `Vision OCR extracted little text from ${mimeType}.`
           : undefined,
     }
-  } finally {
-    await worker.terminate()
+  } catch (err: any) {
+    console.error(`[parseImage] Vision OCR failed for ${mimeType}:`, err.message)
+    return {
+      text: "",
+      truncated: false,
+      fromOcr: true,
+      warning: `Image text extraction failed: ${err.message}`,
+    }
   }
 }
 

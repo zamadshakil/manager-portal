@@ -22,19 +22,13 @@ export async function recordTaskExecution(
   taskName: string,
   metadata: Record<string, unknown>,
 ) {
-  let redis: ReturnType<typeof getRedis>
   try {
-    redis = getRedis()
+    const redis = getRedis()
     if (!redis) {
       console.warn(`[Upstash] redis not configured, skipping ${taskName} record`)
       return
     }
-  } catch (err) {
-    console.warn(`[Upstash] redis not configured, skipping ${taskName} record`, err)
-    return
-  }
 
-  try {
     const key = `cron:${taskName}:executions`
     const entry = {
       timestamp: new Date().toISOString(),

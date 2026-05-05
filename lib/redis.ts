@@ -19,7 +19,7 @@ export function getRedis(): Redis | null {
 
 // A dummy limiter that always allows requests if Redis is unconfigured
 const mockLimiter = {
-  limit: async (identifier: string) => ({
+  limit: async (_identifier: string) => ({
     success: true,
     limit: 100,
     remaining: 99,
