@@ -129,7 +129,33 @@ export async function POST(req: Request) {
 
   const scope = scopeForProfile(profile)
 
-  // Flatten UIMessage[] → simple {role, content} for processing
+  // ---------------------------------------------------------------------
+  // Flatten UIMessage[] → simple {role, content}
+  //
+  // Two transformations happen here that are critical for RAG to work:
+  //
+  //  (a) Text is read from `parts[]` (AI SDK v5+ shape), NOT `.content`.
+  //      Reading `.content` returns undefined and the model sees an
+  //      empty user turn.
+  //
+  //  (b) Attachments are *propagated across the whole thread*. The chat
+  //      panel only attaches `metadata.attachments` to the turn where
+  //      the user actually drops the file. Every follow-up question
+  //      ("tell me about rag in that document") arrives with empty
+  //      metadata, so the LLM had no `documentId` to scope its search
+  //      to and `searchDocument` ran against the entire corpus —
+  //      resulting in "no mentions of rag in the document" even when
+  //      the chunks were sitting right there in pgvector.
+  //
+  //      Fix: collect every attachment ever mentioned in the thread and
+  //      surface them on the *latest* user turn so the LLM always knows
+  //      which documents are in scope for the current question.
+  // ---------------------------------------------------------------------
+
+  type Attachment = { id: string; filename: string }
+  const threadAttachments: Attachment[] = []
+  const seenAttachmentIds = new Set<string>()
+
   const flat: { role: string; content: string; metadata?: Record<string, any> }[] = []
   for (let i = 0; i < body.messages.length; i++) {
     const m = body.messages[i]
@@ -145,8 +171,19 @@ export async function POST(req: Request) {
       .trim()
     const metadata = m.metadata as PortalUIMessageMetadata | undefined
     const hasMeta = metadata && Object.keys(metadata).length > 0
-    
-    // Inject attachment context directly into the text so the LLM knows they exist
+
+    // Track every attachment that has ever been mentioned in this thread.
+    if (metadata?.attachments?.length) {
+      for (const a of metadata.attachments) {
+        if (a?.id && !seenAttachmentIds.has(a.id)) {
+          seenAttachmentIds.add(a.id)
+          threadAttachments.push({ id: a.id, filename: a.filename })
+        }
+      }
+    }
+
+    // Inject this turn's attachments inline so the LLM sees the upload
+    // in context where it happened.
     if (role === "user" && metadata?.attachments?.length) {
       const lines = metadata.attachments.map(a => `- ${a.filename} (id: ${a.id})`).join("\n")
       content = `${content}\n\n[Attached documents]\n${lines}`.trim()
@@ -156,6 +193,28 @@ export async function POST(req: Request) {
     const flatMsg: { role: string; content: string; metadata?: Record<string, any> } = { role, content }
     if (hasMeta) flatMsg.metadata = metadata as Record<string, unknown>
     flat.push(flatMsg)
+  }
+
+  // If the most recent user turn has NO attachment metadata of its own
+  // but earlier turns did, re-surface the full list so the LLM still
+  // knows which documents are available. This is the single biggest
+  // RAG-relevance win because it guarantees the model has document IDs
+  // to pass to `searchDocument` on every follow-up.
+  if (threadAttachments.length > 0) {
+    const lastIdx = flat.length - 1
+    const lastUser = flat[lastIdx]
+    if (lastUser?.role === "user") {
+      const ownAttachments =
+        (lastUser.metadata as PortalUIMessageMetadata | undefined)?.attachments ?? []
+      const ownIds = new Set(ownAttachments.map((a) => a.id))
+      const carryover = threadAttachments.filter((a) => !ownIds.has(a.id))
+      if (carryover.length > 0) {
+        const lines = carryover
+          .map((a) => `- ${a.filename} (id: ${a.id})`)
+          .join("\n")
+        lastUser.content = `${lastUser.content}\n\n[Documents available in this conversation]\n${lines}`.trim()
+      }
+    }
   }
 
   const supabase = await createClient()
@@ -297,13 +356,29 @@ export async function POST(req: Request) {
     // ---- Native RAG search tool ----
     searchDocument: tool({
       description:
-        "Search inside a specific user-uploaded document, material, or other indexed source by ID, or across the user's entire RAG corpus. " +
-        "Use this when the user asks about the content of an uploaded file or attached document.",
+        "Semantic + keyword search inside indexed documents (uploaded files, " +
+        "materials, announcements, etc). ALWAYS pass `documentId` when the " +
+        "user is asking about a specific document — including follow-up " +
+        "questions that refer to a document mentioned earlier in the " +
+        "conversation. Document IDs appear in `[Attached documents]` and " +
+        "`[Documents available in this conversation]` blocks in the " +
+        "conversation history. When the user uploaded a chat attachment, " +
+        "also pass `sourceType: 'chat_attachment'` for tighter scoping. " +
+        "Pass a focused, content-rich `query` (the user's question, NOT " +
+        "the words 'the document'). " +
+        "If the first call returns 0 results for a targeted document, " +
+        "retry once with a broader `query` (e.g. main topic, key terms) " +
+        "before telling the user nothing was found.",
       inputSchema: z.object({
         documentId: z
           .string()
           .optional()
-          .describe("UUID of a specific document. Omit to search the user's full corpus."),
+          .describe(
+            "UUID of a specific document. REQUIRED whenever the user refers " +
+              "to a particular file (including 'this document', 'that PDF', " +
+              "'the file I uploaded'). Omit only for searches across the " +
+              "user's entire corpus.",
+          ),
         sourceType: z
           .enum([
             "chat_attachment",
@@ -315,11 +390,17 @@ export async function POST(req: Request) {
             "rule",
           ])
           .optional()
-          .describe("Restrict search to a single source kind."),
+          .describe(
+            "Restrict to a source kind. Use 'chat_attachment' when the user " +
+              "uploaded the document in this chat thread.",
+          ),
         query: z
           .string()
           .min(1)
-          .describe("Natural-language question or keyword to search for."),
+          .describe(
+            "Natural-language question or keyword to search for. Use the " +
+              "user's actual topic, not pronouns like 'this' or 'that'.",
+          ),
       }),
       execute: async ({ documentId, sourceType, query }) => {
         try {
@@ -328,7 +409,7 @@ export async function POST(req: Request) {
             query,
             documentId: documentId ?? null,
             sourceType: sourceType ?? null,
-            topK: 6,
+            topK: 8,
           })
           return { results: chunks, count: chunks.length }
         } catch (err: any) {
@@ -344,13 +425,13 @@ export async function POST(req: Request) {
     "You are Smart AI, the agentic assistant inside the Hierarchia manager portal.",
     `The current user's role is "${roleLabel}". You have access to database tools that run queries on their behalf.`,
     "These tools respect the user's Row Level Security (RLS) policies, so the data you see is the data they're allowed to see.",
-    "If the user asks about a specific document (PDF, log, image, transcript), call the 'searchDocument' tool with the document's id to retrieve grounded snippets.",
+    "DOCUMENT QUESTIONS: When the user asks about the content of any file (PDF, log, image, transcript, attached document), you MUST call 'searchDocument' before answering. Pass the document's UUID as `documentId` and `sourceType: 'chat_attachment'` whenever the document was uploaded in this chat. Document IDs are listed in '[Attached documents]' and '[Documents available in this conversation]' blocks — these blocks REMAIN VALID across the entire conversation, not just the turn they appeared in. If the user says 'this document', 'that PDF', or 'the file I uploaded' on a follow-up turn, use the most recent document ID from those blocks.",
+    "EMPTY RAG RESULTS: If 'searchDocument' returns 0 results for a targeted documentId, retry ONCE with a broader query (the document's main topic, or a few key keywords). Only after the retry returns 0 should you tell the user nothing relevant was found — and even then, summarize what you do know about the document from its filename.",
     "If the user asks about their tasks, submissions, team performance, or announcements, call 'queryDatabase' to look up the real data instead of guessing.",
     "CRITICAL TABLE MAPPINGS: 'Team' or 'Departments' -> 'teams', 'Validation Rules' -> 'validation_rules', 'Submission' -> 'submissions'.",
     "CRITICAL TOOL INSTRUCTION: Once you receive tool results, you MUST answer the user immediately in the next step. Do NOT loop or make multiple consecutive tool calls unless absolutely necessary.",
     "Prefer concrete, cited answers over speculation. If a tool returns no rows, say so plainly.",
-    "Never invent IDs, scores, or submission text. If retrieval comes back empty, ask a clarifying question.",
-    "If the most recent user message includes attachment metadata (filename + id), those are documents the user has just uploaded; use 'searchDocument' with those IDs and source_type='chat_attachment' before answering.",
+    "Never invent IDs, scores, or submission text. Always ground document answers in the snippets returned by 'searchDocument'.",
     "",
     "Key tables and their important columns:",
     "- submissions: id, title, status (queued/passed/failed/needs_review), score, summary, uploader_id, team_id, created_at",
