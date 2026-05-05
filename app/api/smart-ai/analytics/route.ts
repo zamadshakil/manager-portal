@@ -94,9 +94,9 @@ async function loadIndexStats(admin: Admin, profile: Profile): Promise<RagAnalyt
     profile,
   ).limit(10_000)
   const { data: docRows } = await docsQuery
-  const uniqueDocs = new Set((docRows ?? []).map((r) => `${r.source_type}:${r.source_id}`)).size
+  const uniqueDocs = new Set((docRows ?? []).map((r: any) => `${r.source_type}:${r.source_id}`)).size
   const lastIndexed = (docRows ?? [])
-    .map((r) => r.created_at)
+    .map((r: any) => r.created_at)
     .sort()
     .pop() ?? null
 
