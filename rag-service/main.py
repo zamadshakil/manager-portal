@@ -418,16 +418,23 @@ def rerank_by_keywords(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if DATABASE_URL:
+        import pgvector.asyncpg
+
+        async def init_connection(conn):
+            # The vector extension must exist before registering the type
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            await pgvector.asyncpg.register_vector(conn)
+
         app.state.pool = await asyncpg.create_pool(
             DATABASE_URL,
             min_size=1,
             max_size=10,
             command_timeout=15,
+            init=init_connection,
         )
         # Best-effort schema bootstrap. In production this should be done via
         # versioned migrations (e.g. dbmate, sqitch, or your existing scripts/).
         async with app.state.pool.acquire() as conn:
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
             await conn.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS rag_documents (
