@@ -1,3 +1,5 @@
+"use client"
+import { useState, useEffect } from "react"
 import { 
   History, 
   FileText, 
@@ -10,10 +12,14 @@ import {
   UserPlus,
   CheckCircle2,
   AlertCircle,
-  ListTodo
+  ListTodo,
+  BrainCircuit,
+  MessageSquare,
+  CreditCard
 } from "lucide-react"
 import { formatRelative } from "@/lib/format"
 import type { ActivityLogEntry } from "@/lib/types"
+import { createClient } from "@/lib/supabase/client"
 
 interface ActivityLogProps {
   rows: (ActivityLogEntry & { actor_email?: string | null; actor_name?: string | null })[]
@@ -36,6 +42,10 @@ function getActionDetails(action: string) {
     "user.provisioned": { label: "provisioned a user", icon: UserPlus, colorClass: "text-purple-600 bg-purple-100 dark:bg-purple-500/20 dark:text-purple-400" },
     "task.created": { label: "created a new task", icon: ListTodo, colorClass: "text-emerald-600 bg-emerald-100 dark:bg-emerald-500/20 dark:text-emerald-400" },
     "task.deleted": { label: "deleted a task", icon: Trash2, colorClass: "text-red-600 bg-red-100 dark:bg-red-500/20 dark:text-red-400" },
+    "smart_ai.query": { label: "asked Smart AI a question", icon: MessageSquare, colorClass: "text-violet-600 bg-violet-100 dark:bg-violet-500/20 dark:text-violet-400" },
+    "ai_credits.updated": { label: "updated AI credit limits", icon: CreditCard, colorClass: "text-indigo-600 bg-indigo-100 dark:bg-indigo-500/20 dark:text-indigo-400" },
+    "ai_credits.reset": { label: "reset user AI credits", icon: BrainCircuit, colorClass: "text-sky-600 bg-sky-100 dark:bg-sky-500/20 dark:text-sky-400" },
+    "ai_credits.bulk_set": { label: "applied bulk AI credit defaults", icon: CreditCard, colorClass: "text-indigo-600 bg-indigo-100 dark:bg-indigo-500/20 dark:text-indigo-400" },
   }
   
   return map[action] ?? { 
@@ -45,8 +55,59 @@ function getActionDetails(action: string) {
   }
 }
 
-export function ActivityLog({ rows, expanded = false }: ActivityLogProps) {
+export function ActivityLog({ rows: initialRows, expanded = false }: ActivityLogProps) {
+  const [rows, setRows] = useState(initialRows)
   void expanded
+
+  useEffect(() => {
+    setRows(initialRows)
+  }, [initialRows])
+
+  useEffect(() => {
+    const supabase = createClient()
+    
+    // Subscribe to new activity log entries
+    const channel = supabase
+      .channel("activity-realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "activity_log" },
+        async (payload) => {
+          const newEntry = payload.new as ActivityLogEntry
+          
+          // Try to fetch profile info for the actor to make the UI nice
+          let actor_name = null
+          let actor_email = null
+          
+          if (newEntry.actor_id) {
+            const { data: prof } = await supabase
+              .from("profiles")
+              .select("full_name, email")
+              .eq("id", newEntry.actor_id)
+              .maybeSingle()
+            
+            if (prof) {
+              actor_name = prof.full_name
+              actor_email = prof.email
+            }
+          }
+
+          const entryWithActor = {
+            ...newEntry,
+            actor_name,
+            actor_email,
+          }
+
+          setRows((prev) => [entryWithActor, ...prev].slice(0, 100))
+        }
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [])
+
   return (
     <section
       aria-labelledby="activity-heading"

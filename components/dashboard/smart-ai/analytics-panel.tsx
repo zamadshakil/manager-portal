@@ -10,6 +10,7 @@ import {
   TrendingUp,
   History,
 } from "lucide-react"
+import { useState, useEffect } from "react"
 import {
   Bar,
   BarChart,
@@ -24,6 +25,7 @@ import {
 import { cn } from "@/lib/utils"
 import { formatRelative } from "@/lib/format"
 import type { RagAnalytics } from "@/lib/smart-ai/client"
+import { createClient } from "@/lib/supabase/client"
 
 interface AnalyticsResponse {
   source: "native" | "fallback"
@@ -38,11 +40,33 @@ const fetcher = async (url: string): Promise<AnalyticsResponse> => {
 }
 
 export function AnalyticsPanel() {
-  const { data, error, isLoading } = useSWR<AnalyticsResponse>(
+  const { data, error, isLoading, mutate } = useSWR<AnalyticsResponse>(
     "/api/smart-ai/analytics",
     fetcher,
-    { refreshInterval: 30_000, revalidateOnFocus: true },
+    { refreshInterval: 10_000, revalidateOnFocus: true },
   )
+
+  useEffect(() => {
+    const supabase = createClient()
+    
+    // Listen for new chat messages to refresh analytics instantly
+    const channel = supabase
+      .channel("analytics-realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "chat_messages", filter: "role=eq.user" },
+        () => {
+          // Instead of manually managing complex state, we just trigger a revalidation
+          // which is "within a sec" on a fast connection.
+          void mutate()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [mutate])
 
   if (isLoading) return <AnalyticsSkeleton />
   if (error) return <AnalyticsError message={error.message} />

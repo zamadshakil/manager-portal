@@ -1,9 +1,10 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { TrendingUp, Users, Zap, AlertTriangle } from "lucide-react"
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts"
 import type { AiCreditLimit } from "@/lib/types"
+import { createClient } from "@/lib/supabase/client"
 
 interface Props {
   creditLimits: AiCreditLimit[]
@@ -39,7 +40,67 @@ function StatCard({
   )
 }
 
-export function UsageOverviewPanel({ creditLimits, usageTrend }: Props) {
+export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTrend: initialUsageTrend }: Props) {
+  const [creditLimits, setCreditLimits] = useState(initialCreditLimits)
+  const [usageTrend, setUsageTrend] = useState(initialUsageTrend)
+
+  useEffect(() => {
+    setCreditLimits(initialCreditLimits)
+    setUsageTrend(initialUsageTrend)
+  }, [initialCreditLimits, initialUsageTrend])
+
+  useEffect(() => {
+    const supabase = createClient()
+    
+    // Listen for credit limit changes (usage per user)
+    const creditsChannel = supabase
+      .channel("overview-credits-realtime")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "ai_credit_limits" },
+        (payload) => {
+          const updated = payload.new as any
+          setCreditLimits((prev) => {
+            const index = prev.findIndex((r) => r.user_id === updated.user_id)
+            if (index === -1) return prev
+            const next = [...prev]
+            next[index] = { ...next[index], ...updated }
+            return next
+          })
+        }
+      )
+      .subscribe()
+
+    // Listen for new usage logs (overall trend)
+    const logsChannel = supabase
+      .channel("overview-logs-realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "ai_usage_log" },
+        (payload) => {
+          const newLog = payload.new as any
+          const today = new Date().toISOString().slice(0, 10)
+          
+          setUsageTrend((prev) => {
+            const index = prev.findIndex((d) => d.day === today)
+            if (index === -1) {
+              // New day starts
+              return [...prev, { day: today, count: 1 }].slice(-30)
+            }
+            const next = [...prev]
+            next[index] = { ...next[index], count: next[index].count + 1 }
+            return next
+          })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(creditsChannel)
+      void supabase.removeChannel(logsChannel)
+    }
+  }, [])
+
   const stats = useMemo(() => {
     const totalMessages = usageTrend.reduce((s, d) => s + d.count, 0)
     const activeUsers = creditLimits.filter((u) => u.used_this_period > 0).length

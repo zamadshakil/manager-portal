@@ -8,6 +8,7 @@ import { scopeForProfile } from "@/lib/smart-ai/client"
 import { retrieveChunks } from "@/lib/smart-ai/retriever"
 import { applySlidingWindow, type SimpleMessage } from "@/lib/smart-ai/sliding-window"
 import { chatLimiter } from "@/lib/redis"
+import { logActivity } from "@/lib/activity"
 
 // ---------------------------------------------------------------------------
 // Provider resolution
@@ -568,6 +569,22 @@ export async function POST(req: Request) {
           const { revalidatePath } = await import("next/cache")
           revalidatePath("/dashboard/ai-usage")
           revalidatePath("/dashboard/admin/users")
+          revalidatePath("/dashboard/activity")
+
+          // Log to activity_log for the main dashboard audit trail
+          await logActivity({
+            actorId: profile.id,
+            teamId: profile.team_id,
+            action: "smart_ai.query",
+            entityType: "chat_thread",
+            entityId: threadId,
+            metadata: {
+              prompt: lastUserMsg.content.slice(0, 100) + (lastUserMsg.content.length > 100 ? "..." : ""),
+              model: SMART_AI_MODEL,
+              tokens_in: usage?.inputTokens,
+              tokens_out: usage?.outputTokens,
+            },
+          })
         } catch (acctErr: any) {
           console.error("[smart-ai] credit accounting failed:", acctErr.message)
         }

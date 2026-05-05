@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition, useMemo } from "react"
+import { useState, useTransition, useMemo, useEffect } from "react"
 import { Search, RotateCcw, Edit2, History, Check, X } from "lucide-react"
 import { toast } from "sonner"
 import { Input } from "@/components/ui/input"
@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import type { AiCreditLimit, AiCreditPeriod } from "@/lib/types"
 import { resetUserCredits, bulkSetDefaultLimit } from "@/app/actions/ai-credits"
 import { CreditEditDialog } from "./credit-edit-dialog"
+import { createClient } from "@/lib/supabase/client"
 
 interface Props {
   creditLimits: AiCreditLimit[]
@@ -20,7 +21,7 @@ const PERIOD_COLORS: Record<AiCreditPeriod, string> = {
   monthly: "bg-indigo-500/10 text-indigo-600 border-indigo-500/20",
 }
 
-export function CreditManagementPanel({ creditLimits }: Props) {
+export function CreditManagementPanel({ creditLimits: initialCreditLimits }: Props) {
   const [search, setSearch] = useState("")
   const [filterPeriod, setFilterPeriod] = useState<AiCreditPeriod | "all">("all")
   const [editTarget, setEditTarget] = useState<AiCreditLimit | null>(null)
@@ -32,9 +33,54 @@ export function CreditManagementPanel({ creditLimits }: Props) {
   const [bulkPeriod, setBulkPeriod] = useState<AiCreditPeriod>("monthly")
   const [bulkPending, startBulkTransition] = useTransition()
 
+  // Real-time synchronization
+  const [rows, setRows] = useState(initialCreditLimits)
+
+  useEffect(() => {
+    setRows(initialCreditLimits)
+  }, [initialCreditLimits])
+
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel("credits-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "ai_credit_limits" },
+        async (payload) => {
+          const updated = payload.new as any
+          if (!updated?.user_id) return
+
+          setRows((prev) => {
+            const index = prev.findIndex((r) => r.user_id === updated.user_id)
+            if (index === -1) {
+              // This is a new user row, but we lack the profile join info.
+              // In this case, we could either fetch the profile or just wait for a refresh.
+              // For robustness, let's fetch the profile if it's a new row.
+              // But usually rows exist before usage. 
+              // Let's just update the usage if the row exists.
+              return prev
+            }
+
+            const next = [...prev]
+            next[index] = {
+              ...next[index],
+              ...updated,
+            }
+            return next
+          })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [])
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
-    return creditLimits.filter((u) => {
+    return rows.filter((u) => {
       const matchSearch =
         !q ||
         (u.user_full_name ?? "").toLowerCase().includes(q) ||
@@ -43,7 +89,7 @@ export function CreditManagementPanel({ creditLimits }: Props) {
       const matchPeriod = filterPeriod === "all" || u.period_type === filterPeriod
       return matchSearch && matchPeriod
     })
-  }, [creditLimits, search, filterPeriod])
+  }, [initialCreditLimits, search, filterPeriod, rows])
 
   function handleReset(user: AiCreditLimit) {
     setResetingId(user.user_id)
@@ -290,7 +336,7 @@ export function CreditManagementPanel({ creditLimits }: Props) {
 
         {filtered.length > 0 && (
           <div className="px-4 py-2 border-t border-border text-xs text-muted-foreground">
-            Showing {filtered.length} of {creditLimits.length} users
+            Showing {filtered.length} of {rows.length} users
           </div>
         )}
       </div>
