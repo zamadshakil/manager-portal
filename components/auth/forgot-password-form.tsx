@@ -5,9 +5,8 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { createClient } from "@/lib/supabase/client"
-import { Mail, ArrowLeft, CheckCircle2, Lock } from "lucide-react"
+import { ArrowLeft, CheckCircle2 } from "lucide-react"
 
 export default function ForgotPasswordForm() {
   const [email, setEmail] = useState("")
@@ -33,6 +32,7 @@ export default function ForgotPasswordForm() {
       
       if (error) {
         setError(error.message)
+        setLoading(false)
         return
       }
       
@@ -46,43 +46,40 @@ export default function ForgotPasswordForm() {
 
   if (success) {
     return (
-      <Card className="border-white/20 dark:border-white/10 shadow-2xl bg-white/70 dark:bg-black/60 backdrop-blur-xl rounded-3xl overflow-hidden p-2 sm:p-4 text-center">
-        <CardContent className="pt-8 pb-4 flex flex-col items-center gap-4">
-          <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-2">
-            <CheckCircle2 className="w-8 h-8 text-green-600 dark:text-green-400" />
+      <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-500 text-center">
+        <div className="flex flex-col items-center justify-center gap-4 py-8">
+          <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mb-2 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+            <CheckCircle2 className="w-8 h-8 text-emerald-500" />
           </div>
-          <h3 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">Check your email</h3>
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm max-w-[280px]">
-            We've sent a password reset link to <strong>{email}</strong>.
+          <h3 className="text-2xl font-bold tracking-tight text-white">Check your email</h3>
+          <p className="text-slate-400 text-sm max-w-[280px]">
+            We've sent a password reset link to <strong className="text-emerald-400">{email}</strong>.
           </p>
-        </CardContent>
-        <CardFooter className="flex justify-center pb-6">
-          <Link 
-            href="/auth/login"
-            className="text-sm font-medium text-zinc-900 dark:text-white hover:underline flex items-center gap-2"
-          >
-            <ArrowLeft className="w-4 h-4" /> Back to sign in
-          </Link>
-        </CardFooter>
-      </Card>
+        </div>
+        
+        <Link 
+          href="/auth/login"
+          className="text-sm font-medium text-slate-400 hover:text-emerald-400 transition-colors flex items-center justify-center gap-2"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back to sign in
+        </Link>
+      </div>
     )
   }
 
   return (
-    <Card className="border-white/20 dark:border-white/10 shadow-2xl bg-white/70 dark:bg-black/60 backdrop-blur-xl rounded-3xl overflow-hidden p-2 sm:p-4">
-      <CardHeader className="space-y-2 text-center pb-6">
-        <div className="mx-auto w-12 h-12 bg-white dark:bg-zinc-900 rounded-xl shadow-sm flex items-center justify-center mb-2 border border-zinc-200 dark:border-zinc-800">
-          <Lock className="w-6 h-6 text-zinc-800 dark:text-zinc-200" />
-        </div>
-        <CardTitle className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">Reset password</CardTitle>
-        <CardDescription className="text-zinc-500 dark:text-zinc-400">
+    <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-500">
+      <div className="space-y-2">
+        <h1 className="text-4xl font-bold tracking-tight text-white">Reset Password</h1>
+        <p className="text-sm text-slate-400 leading-relaxed">
           Enter your email address and we'll send you a link to reset your password.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <div className="relative group">
-            <Mail className="absolute left-3 top-3 h-5 w-5 text-zinc-400 group-focus-within:text-zinc-600 dark:group-focus-within:text-zinc-300 transition-colors" />
+        </p>
+      </div>
+
+      <div className="space-y-6">
+        <form onSubmit={onSubmit} className="space-y-5">
+          <div className="space-y-2">
+            <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-slate-400">Email</Label>
             <Input
               id="email"
               type="email"
@@ -91,33 +88,42 @@ export default function ForgotPasswordForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={loading}
-              placeholder="Email address"
-              className="pl-10 bg-zinc-100/50 dark:bg-zinc-900/50 border-transparent focus:border-zinc-300 dark:focus:border-zinc-700 h-11 rounded-xl transition-all"
+              placeholder="mail@example.com"
+              className="h-11 bg-[#0a1118]/50 border-slate-800 text-white placeholder:text-slate-600 focus:border-emerald-500/50 focus:ring-emerald-500/20 transition-all"
             />
           </div>
 
           {error ? (
-            <p role="alert" className="text-sm text-destructive text-center font-medium bg-destructive/10 text-destructive py-2 rounded-lg">
-              {error}
-            </p>
+            <div className="p-3 rounded-md bg-rose-500/10 border border-rose-500/20">
+              <p role="alert" className="text-xs font-medium text-rose-500">
+                {error}
+              </p>
+            </div>
           ) : null}
+
           <Button 
             type="submit" 
             disabled={loading} 
-            className="w-full h-11 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 shadow-md transition-all font-medium text-base mt-2"
+            className="w-full h-11 bg-emerald-500 hover:bg-emerald-400 text-[#0d161f] font-bold text-sm shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all active:scale-[0.98] mt-2"
           >
-            {loading ? "Sending link..." : "Send reset link"}
+            {loading ? (
+              <div className="flex items-center justify-center gap-2">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#0d161f] border-t-transparent" />
+                <span>SENDING LINK...</span>
+              </div>
+            ) : "SEND RESET LINK"}
           </Button>
         </form>
-      </CardContent>
-      <CardFooter className="flex justify-center pt-2 pb-4">
-        <Link 
-          href="/auth/login" 
-          className="text-sm font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200 transition-colors flex items-center gap-2"
-        >
-          <ArrowLeft className="w-4 h-4" /> Back to sign in
-        </Link>
-      </CardFooter>
-    </Card>
+        
+        <div className="flex justify-center mt-6">
+          <Link 
+            href="/auth/login" 
+            className="text-xs font-medium text-slate-400 hover:text-emerald-400 transition-colors flex items-center gap-2"
+          >
+            <ArrowLeft className="w-4 h-4" /> Back to login
+          </Link>
+        </div>
+      </div>
+    </div>
   )
 }

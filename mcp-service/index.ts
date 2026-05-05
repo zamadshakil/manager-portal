@@ -25,6 +25,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
+import { randomUUID } from "node:crypto"
 import { streamText, stepCountIs, tool, type ModelMessage } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
 import { z } from "zod"
@@ -151,6 +152,7 @@ async function searchDocument(args: {
   sourceType?: string
   query: string
   signal?: AbortSignal
+  requestId?: string
 }): Promise<RetrievedChunk[]> {
   if (!RAG_SERVICE_URL) return []
 
@@ -160,6 +162,7 @@ async function searchDocument(args: {
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${RAG_SERVICE_TOKEN}`,
+        ...(args.requestId ? { "x-request-id": args.requestId } : {}),
       },
       body: JSON.stringify({
         scope: args.scope,
@@ -214,7 +217,19 @@ function buildSystemPrompt(scope: Scope): string {
     "If the user asks about a specific document (PDF, log, image, transcript), call the 'searchDocument' tool with the document's id to retrieve grounded snippets.",
     "If the user asks about their tasks, submissions, team performance, or announcements, call 'queryDatabase' to look up the real data instead of guessing.",
     "CRITICAL TABLE MAPPINGS: 'Team' or 'Departments' -> 'teams', 'Validation Rules' -> 'validation_rules', 'Submission' -> 'submissions'.",
-    "CRITICAL TOOL INSTRUCTION: Once you receive tool results, you MUST answer the user immediately in the next step. Do NOT loop or make multiple consecutive tool calls unless absolutely necessary.",
+    "",
+    "QUERY DECOMPOSITION STRATEGY:",
+    "For complex questions that involve multiple data sources (e.g. 'Compare submission scores across teams and show me which tasks had the most failures'), you MUST:",
+    "  1. Break the question into independent sub-queries (e.g. query submissions table, then query tasks table).",
+    "  2. Execute each sub-query as a separate tool call in consecutive steps.",
+    "  3. Once you have ALL the data from sub-queries, synthesize a comprehensive answer.",
+    "  4. Use at most 3-4 tool calls per question — avoid redundant lookups.",
+    "",
+    "TOOL USAGE RULES:",
+    "- After receiving tool results, answer immediately if you have enough data.",
+    "- If you need data from multiple tables, make the calls in consecutive steps.",
+    "- Never loop on the same query. If a tool returns no rows, say so plainly.",
+    "",
     "Prefer concrete, cited answers over speculation. If a tool returns no rows, say so plainly.",
     "Never invent IDs, scores, or submission text. If retrieval comes back empty, ask a clarifying question.",
     "If the most recent user message includes attachment metadata (filename + id), those are documents the user has just uploaded; use 'searchDocument' with those IDs and source_type='chat_attachment' before answering.",
@@ -238,6 +253,16 @@ async function handleChat(req: IncomingMessage, res: ServerResponse) {
   if (!body.scope || !Array.isArray(body.messages) || body.messages.length === 0) {
     return badRequest(res, "scope + non-empty messages required")
   }
+
+  // ---- Request tracing ----
+  // Generate a unique request ID for end-to-end trace correlation.
+  // The same ID is forwarded to the RAG service via x-request-id header.
+  const requestId = (req.headers["x-request-id"] as string) || randomUUID()
+  const log = (level: string, msg: string, data?: Record<string, unknown>) =>
+    console[level as "log" | "warn" | "error"](
+      `[mcp] [${requestId.slice(0, 8)}] ${msg}`,
+      data ? JSON.stringify(data) : "",
+    )
 
   // Hook up the client disconnect to a per-request AbortController so a
   // closed browser tab cancels in-flight LLM and tool work instead of
@@ -346,14 +371,17 @@ async function handleChat(req: IncomingMessage, res: ServerResponse) {
               .describe("Natural-language question or keyword to search for."),
           }),
           execute: async ({ documentId, sourceType, query }) => {
+            log("log", `searchDocument called`, { documentId, sourceType, queryLen: query.length })
             const chunks = await searchDocument({
               scope: body.scope,
               documentId,
               sourceType,
               query,
               signal: controller.signal,
+              requestId,
             })
             sourcesUsed += chunks.length
+            log("log", `searchDocument returned ${chunks.length} chunks`)
             return { results: chunks, count: chunks.length }
           },
         }),
@@ -364,6 +392,14 @@ async function handleChat(req: IncomingMessage, res: ServerResponse) {
           content: text ?? "",
           metadata: { thread_id: threadId },
         })
+
+        // Auto-title: if this is the first message (no prior threadId from
+        // client), generate a descriptive title from the user's message.
+        const isNewThread = !body.threadId
+        if (isNewThread && lastUserMessage?.content) {
+          const title = ChatPersistence.generateTitle(lastUserMessage.content)
+          await persistence.updateThreadTitle(threadId, title)
+        }
 
         await logQuery({
           scope: body.scope,

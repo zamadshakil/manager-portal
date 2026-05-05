@@ -2,15 +2,12 @@
 
 import { useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
-
-
-import { FullPageLoader } from "@/components/ui/loader"
 
 export default function LoginForm() {
   const router = useRouter()
@@ -53,8 +50,6 @@ export default function LoginForm() {
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-500">
-      {loading && <FullPageLoader text="Authenticating..." />}
-      
       <div className="space-y-2">
         <h1 className="text-4xl font-bold tracking-tight text-white">Login</h1>
         <p className="text-sm text-slate-400 leading-relaxed">
@@ -104,9 +99,9 @@ export default function LoginForm() {
               />
               <Label htmlFor="remember" className="text-xs font-medium text-slate-400 cursor-pointer">Remember me?</Label>
             </div>
-            <button type="button" className="text-xs font-medium text-emerald-500 hover:text-emerald-400 transition-colors">
+            <Link href="/auth/forgot-password" className="text-xs font-medium text-emerald-500 hover:text-emerald-400 transition-colors">
               Forgot password?
-            </button>
+            </Link>
           </div>
 
           {error ? (
@@ -122,13 +117,17 @@ export default function LoginForm() {
             disabled={loading} 
             className="w-full h-11 bg-emerald-500 hover:bg-emerald-400 text-[#0d161f] font-bold text-sm shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all active:scale-[0.98]"
           >
-            {loading ? "AUTHENTICATING..." : "LOGIN"}
+            {loading ? (
+              <div className="flex items-center justify-center gap-2">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#0d161f] border-t-transparent" />
+                <span>AUTHENTICATING...</span>
+              </div>
+            ) : "LOGIN"}
           </Button>
         </form>
       </div>
     </div>
   )
 }
-
 
 

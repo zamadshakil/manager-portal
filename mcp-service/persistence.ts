@@ -170,4 +170,54 @@ export class ChatPersistence {
     }
     return data.id
   }
+
+  /**
+   * Update the title of a thread. Used after the first exchange to
+   * auto-generate a descriptive title from the user's first message.
+   */
+  async updateThreadTitle(threadId: string, title: string): Promise<void> {
+    const { error } = await this.supabase
+      .from("chat_threads")
+      .update({ title, updated_at: new Date().toISOString() })
+      .eq("id", threadId)
+
+    if (error) {
+      console.error("[persistence] updateThreadTitle failed:", error.message)
+    }
+  }
+
+  /**
+   * Generate a short, descriptive title from the user's first message.
+   * This is a rule-based approach (no LLM call) to keep it fast and free.
+   * Extracts the core intent from the first 100 chars and cleans it up.
+   */
+  static generateTitle(firstUserMessage: string): string {
+    if (!firstUserMessage || firstUserMessage.trim().length === 0) {
+      return "New conversation"
+    }
+
+    let title = firstUserMessage.trim()
+
+    // Remove markdown formatting
+    title = title.replace(/[#*_`~\[\]]/g, "")
+
+    // Remove attachment metadata blocks
+    title = title.replace(/\[Attached documents.*?\]/gs, "").trim()
+
+    // Take first sentence or first 60 chars, whichever is shorter
+    const firstSentence = title.match(/^[^.!?\n]+[.!?]?/)
+    if (firstSentence) {
+      title = firstSentence[0].trim()
+    }
+
+    // Cap at 60 chars, break at word boundary
+    if (title.length > 60) {
+      title = title.substring(0, 60).replace(/\s+\S*$/, "") + "…"
+    }
+
+    // Capitalize first letter
+    title = title.charAt(0).toUpperCase() + title.slice(1)
+
+    return title || "New conversation"
+  }
 }

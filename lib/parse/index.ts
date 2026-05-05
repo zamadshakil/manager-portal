@@ -10,9 +10,11 @@ import "server-only"
 const MAX_TEXT_CHARS = 60_000
 
 function clamp(text: string): { text: string; truncated: boolean } {
-  if (text.length <= MAX_TEXT_CHARS) return { text, truncated: false }
+  // Postgres cannot store null bytes (\x00). Sanitize early to prevent database errors.
+  const sanitizedText = text.replace(/\0/g, "")
+  if (sanitizedText.length <= MAX_TEXT_CHARS) return { text: sanitizedText, truncated: false }
   return {
-    text: text.slice(0, MAX_TEXT_CHARS) + "\n\n[...truncated...]",
+    text: sanitizedText.slice(0, MAX_TEXT_CHARS) + "\n\n[...truncated...]",
     truncated: true,
   }
 }

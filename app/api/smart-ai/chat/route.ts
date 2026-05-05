@@ -163,8 +163,19 @@ export async function POST(req: Request) {
   // matching row so the thread drawer and history loading work correctly.
   const threadId = body.threadId ?? crypto.randomUUID()
   const lastUserMsg = flat[flat.length - 1]
-  const threadTitle =
-    lastUserMsg?.content?.slice(0, 60)?.replace(/\n/g, " ")?.trim() || "New conversation"
+  const isNewThread = !body.threadId
+
+  // Generate a descriptive title from the user's first message
+  function generateTitle(msg: string): string {
+    if (!msg || msg.trim().length === 0) return "New conversation"
+    let t = msg.trim().replace(/[#*_`~\[\]]/g, "").replace(/\[Attached documents[^\]]*\]/g, "").trim()
+    const first = t.match(/^[^.!?\n]+[.!?]?/)
+    if (first) t = first[0].trim()
+    if (t.length > 60) t = t.substring(0, 60).replace(/\s+\S*$/, "") + "…"
+    t = t.charAt(0).toUpperCase() + t.slice(1)
+    return t || "New conversation"
+  }
+  const threadTitle = generateTitle(lastUserMsg?.content ?? "")
 
   // Use service-role client for persistence so RLS doesn't block the insert
   // when the thread is brand-new (user_id must match auth.uid() under anon,
@@ -378,6 +389,11 @@ export async function POST(req: Request) {
     "- report_snapshots: id, team_id, period, data, created_at",
     "- chat_documents: id, user_id, file_name, file_url, rag_status, created_at",
     "",
+    "QUERY DECOMPOSITION: For complex questions spanning multiple tables,",
+    "break them into sub-queries and make tool calls in consecutive steps.",
+    "Once you have ALL data, synthesize a comprehensive answer.",
+    "Use at most 3-4 tool calls per question.",
+    "",
     "Be concise, format data in tables when useful, and cite specific IDs and scores.",
     "Never invent or fabricate data — only report what the tools return.",
   ].join("\n")
@@ -419,11 +435,11 @@ export async function POST(req: Request) {
           console.error("[smart-ai] assistant message save failed:", assistErr.message)
         }
 
-        // Update thread title to first user message if this is the first exchange
-        if (lastUserMsg?.content && threadTitle !== "New conversation") {
+        // Auto-title: only update on new threads to avoid overwriting user edits
+        if (isNewThread && threadTitle !== "New conversation") {
           await persistClient
             .from("chat_threads")
-            .update({ title: threadTitle })
+            .update({ title: threadTitle, updated_at: new Date().toISOString() })
             .eq("id", threadId)
         }
       }

@@ -57,6 +57,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
@@ -318,6 +319,48 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
 
 
 # ---------------------------------------------------------------------------
+# Reciprocal Rank Fusion (RRF)
+#
+# Combines results from multiple retrieval strategies (vector + BM25) into
+# a single ranked list. RRF is parameter-free and outperforms simple score
+# averaging for heterogeneous scoring systems.
+# ---------------------------------------------------------------------------
+
+RRF_K = 60  # Standard RRF constant from the original paper
+
+
+def reciprocal_rank_fusion(
+    *result_lists: list[dict[str, Any]],
+    k: int = RRF_K,
+) -> list[dict[str, Any]]:
+    """
+    Merge multiple ranked lists using RRF.
+    Each item's fused score = sum(1 / (k + rank_in_list_i)) across all lists.
+    Items are identified by their 'id' field.
+    """
+    fused_scores: dict[str, float] = {}
+    item_map: dict[str, dict[str, Any]] = {}
+
+    for result_list in result_lists:
+        for rank, item in enumerate(result_list):
+            item_id = item["id"]
+            fused_scores[item_id] = fused_scores.get(item_id, 0.0) + 1.0 / (k + rank + 1)
+            if item_id not in item_map:
+                item_map[item_id] = item
+
+    # Sort by fused score descending
+    sorted_ids = sorted(fused_scores.keys(), key=lambda x: fused_scores[x], reverse=True)
+
+    results = []
+    for item_id in sorted_ids:
+        item = item_map[item_id].copy()
+        item["score"] = fused_scores[item_id]  # Replace with fused score
+        results.append(item)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Keyword Reranker
 # ---------------------------------------------------------------------------
 
@@ -398,11 +441,19 @@ async def lifespan(app: FastAPI):
                     content TEXT NOT NULL,
                     embedding vector({EMBEDDING_DIM}),
                     metadata JSONB DEFAULT '{{}}'::jsonb,
+                    tsv tsvector,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
             )
+            # Add tsv column for full-text search if it doesn't exist.
+            try:
+                await conn.execute(
+                    "ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS tsv tsvector"
+                )
+            except Exception:
+                pass
             # Unique constraint on (source_type, source_id, chunk_index) so
             # re-indexing replaces stale chunks cleanly.
             await conn.execute(
@@ -440,6 +491,10 @@ async def lifespan(app: FastAPI):
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS rag_documents_source_idx ON rag_documents (source_type, source_id)"
             )
+            # GIN index for full-text search — enables fast BM25 queries.
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS rag_documents_tsv_idx ON rag_documents USING gin (tsv)"
+            )
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS rag_query_log (
@@ -474,9 +529,51 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Hierarchia RAG Service",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
+
+
+# ---------------------------------------------------------------------------
+# Request tracing middleware
+#
+# Propagates x-request-id from the MCP service (or generates one) and
+# logs request/response timing for every endpoint. This enables end-to-end
+# trace correlation across the Next.js portal → MCP → RAG pipeline.
+# ---------------------------------------------------------------------------
+
+import uuid
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+
+class RequestTracingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+        start = time.monotonic()
+
+        # Make request_id available to route handlers
+        request.state.request_id = request_id
+
+        response: Response = await call_next(request)
+
+        elapsed_ms = round((time.monotonic() - start) * 1000, 1)
+        response.headers["x-request-id"] = request_id
+        response.headers["x-response-time-ms"] = str(elapsed_ms)
+
+        # Log for observability (skip health checks to reduce noise)
+        if request.url.path != "/health":
+            print(
+                f"[rag] [{request_id[:8]}] {request.method} {request.url.path} "
+                f"→ {response.status_code} ({elapsed_ms}ms)"
+            )
+
+        return response
+
+
+app.add_middleware(RequestTracingMiddleware)
 
 
 # ---------------------------------------------------------------------------
@@ -647,8 +744,9 @@ async def index_document(req: IndexRequest) -> dict[str, Any]:
                 """
                 INSERT INTO rag_documents
                     (source_type, source_id, chunk_index, team_id, owner_id,
-                     title, content, embedding, metadata)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                     title, content, embedding, metadata, tsv)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb,
+                        to_tsvector('english', COALESCE($6, '') || ' ' || $7))
                 RETURNING id
                 """,
                 req.source_type,
@@ -696,8 +794,6 @@ async def retrieve(req: RetrieveRequest) -> list[RetrievedChunk]:
     vector = await embed(req.query)
 
     # --- Semantic cache check ---
-    # If a semantically similar query was recently made with the same scope,
-    # return cached results without hitting pgvector.
     cached = _semantic_cache.get(
         query_vector=vector,
         user_id=req.scope.user_id,
@@ -711,77 +807,116 @@ async def retrieve(req: RetrieveRequest) -> list[RetrievedChunk]:
             RetrievedChunk(**c) for c in cached
         ]
 
-    # Role-scoped row filtering — mirrors the Supabase RLS philosophy used in
-    # the Next.js app: members see only their own docs, managers their team's,
-    # admins everything.
-    #
-    # Special case: chat_attachment rows always belong to a single uploader,
-    # so we ALWAYS scope them to owner_id regardless of role. That prevents
-    # a manager from accidentally retrieving a member's private chat upload.
-    where_clauses = []
-    params: list[Any] = [vector, req.top_k * 2]  # Fetch 2x top_k for reranking headroom
-    idx = 3
+    # ---- Build scoped WHERE clause (shared by both retrieval paths) ----
+    where_clauses: list[str] = []
+    scope_params: list[Any] = []
+    scope_idx = 1
 
     is_chat_attachment = req.source_type == "chat_attachment"
 
     if is_chat_attachment:
-        where_clauses.append(f"owner_id = ${idx}")
-        params.append(req.scope.user_id)
-        idx += 1
+        where_clauses.append(f"owner_id = ${scope_idx}")
+        scope_params.append(req.scope.user_id)
+        scope_idx += 1
     elif req.scope.role == "member":
-        where_clauses.append(f"owner_id = ${idx}")
-        params.append(req.scope.user_id)
-        idx += 1
+        where_clauses.append(f"owner_id = ${scope_idx}")
+        scope_params.append(req.scope.user_id)
+        scope_idx += 1
     elif req.scope.role == "manager" and req.scope.team_id:
-        where_clauses.append(f"(team_id = ${idx} OR owner_id = ${idx + 1})")
-        params.append(req.scope.team_id)
-        params.append(req.scope.user_id)
-        idx += 2
+        where_clauses.append(f"(team_id = ${scope_idx} OR owner_id = ${scope_idx + 1})")
+        scope_params.append(req.scope.team_id)
+        scope_params.append(req.scope.user_id)
+        scope_idx += 2
 
     if req.source_type:
-        where_clauses.append(f"source_type = ${idx}")
-        params.append(req.source_type)
-        idx += 1
+        where_clauses.append(f"source_type = ${scope_idx}")
+        scope_params.append(req.source_type)
+        scope_idx += 1
 
     if req.document_id:
-        where_clauses.append(f"source_id = ${idx}")
-        params.append(req.document_id)
-        idx += 1
+        where_clauses.append(f"source_id = ${scope_idx}")
+        scope_params.append(req.document_id)
+        scope_idx += 1
 
-    where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-    sql = f"""
-        SELECT id, source_type, source_id, title,
-               LEFT(content, 800) AS snippet,
-               metadata,
-               1 - (embedding <=> $1) AS score
-        FROM rag_documents
-        {where}
-        ORDER BY embedding <=> $1
-        LIMIT $2
-    """
+    limit_count = req.top_k * 3  # Fetch extra for RRF fusion headroom
+
     async with app.state.pool.acquire() as conn:
-        rows = await conn.fetch(sql, *params)
+        # ---- Path 1: Vector similarity search (cosine) ----
+        vec_idx = scope_idx
+        vec_limit_idx = scope_idx + 1
+        vec_sql = f"""
+            SELECT id, source_type, source_id, title,
+                   LEFT(content, 800) AS snippet,
+                   metadata,
+                   1 - (embedding <=> ${vec_idx}) AS score
+            FROM rag_documents
+            {where_sql}
+            ORDER BY embedding <=> ${vec_idx}
+            LIMIT ${vec_limit_idx}
+        """
+        vector_rows = await conn.fetch(vec_sql, *scope_params, vector, limit_count)
 
-    # Stage 1: Score threshold — filter out low-relevance noise
-    raw_chunks = [
-        {
-            "id": str(r["id"]),
-            "source_type": r["source_type"],
-            "source_id": r["source_id"],
-            "title": r["title"],
-            "snippet": r["snippet"],
-            "score": float(r["score"]),
-            "metadata": r["metadata"] or {},
-        }
-        for r in rows
-        if float(r["score"]) >= SCORE_THRESHOLD
+        # ---- Path 2: Full-text BM25 search (tsvector/tsquery) ----
+        # Build a tsquery from the user's natural language query.
+        # plainto_tsquery handles arbitrary text safely.
+        bm25_rows = []
+        ts_idx = scope_idx
+        ts_limit_idx = scope_idx + 1
+        try:
+            bm25_where = where_sql
+            if bm25_where:
+                bm25_where += f" AND tsv @@ plainto_tsquery('english', ${ts_idx})"
+            else:
+                bm25_where = f"WHERE tsv @@ plainto_tsquery('english', ${ts_idx})"
+
+            bm25_sql = f"""
+                SELECT id, source_type, source_id, title,
+                       LEFT(content, 800) AS snippet,
+                       metadata,
+                       ts_rank_cd(tsv, plainto_tsquery('english', ${ts_idx})) AS score
+                FROM rag_documents
+                {bm25_where}
+                ORDER BY score DESC
+                LIMIT ${ts_limit_idx}
+            """
+            bm25_rows = await conn.fetch(bm25_sql, *scope_params, req.query, limit_count)
+        except Exception as e:
+            # BM25 is best-effort — if tsv column doesn't exist yet, skip
+            print(f"[rag] BM25 search failed (non-fatal): {e}")
+
+    # ---- Parse results ----
+    def _parse_rows(rows: list) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": str(r["id"]),
+                "source_type": r["source_type"],
+                "source_id": r["source_id"],
+                "title": r["title"],
+                "snippet": r["snippet"],
+                "score": float(r["score"]),
+                "metadata": r["metadata"] or {},
+            }
+            for r in rows
+        ]
+
+    vector_results = [
+        c for c in _parse_rows(vector_rows) if c["score"] >= SCORE_THRESHOLD
     ]
+    bm25_results = _parse_rows(bm25_rows)
 
-    # Stage 2: Keyword reranking — boost chunks with exact query term matches
-    reranked = rerank_by_keywords(req.query, raw_chunks)
+    # ---- Reciprocal Rank Fusion ----
+    # Combine vector + BM25 results into a single ranked list.
+    if bm25_results:
+        fused = reciprocal_rank_fusion(vector_results, bm25_results)
+    else:
+        fused = vector_results
 
-    # Stage 3: Deduplicate by source_id — if multiple chunks from the same
+    # Keyword reranking on the fused results
+    reranked = rerank_by_keywords(req.query, fused)
+
+    # Deduplicate by source_id — if multiple chunks from the same
     # document score highly, keep only the best one to give the LLM diverse
     # context. (A user asking about "submission X" shouldn't get 5 chunks
     # from the same submission crowding out other relevant results.)

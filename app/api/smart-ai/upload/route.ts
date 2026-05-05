@@ -115,7 +115,7 @@ export async function POST(req: Request) {
       .insert({
         user_id: profile.id,
         thread_id: threadId,
-        file_name: file.name,
+        file_name: file.name.replace(/\0/g, ""),
         file_url: uploadResult.url,
         file_type: file.type,
         rag_status: parsedText.trim().length >= 16 ? "processing" : "skipped",
