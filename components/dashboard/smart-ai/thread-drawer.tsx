@@ -104,7 +104,7 @@ export function ThreadDrawer({
 
   function handleSelect(threadId: string) {
     onSelectThread(threadId)
-    onClose()
+    onClose?.()
   }
 
   return (

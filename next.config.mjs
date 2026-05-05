@@ -29,7 +29,7 @@ const nextConfig = {
     // ------------------------------------------------------------------
     optimizePackageImports: ["lucide-react", "date-fns", "recharts"],
   },
-  serverExternalPackages: ["unpdf", "mammoth", "officeparser", "tesseract.js"],
+  serverExternalPackages: ["unpdf", "mammoth", "officeparser", "tesseract.js", "@napi-rs/canvas"],
 
   async headers() {
     const security = [
