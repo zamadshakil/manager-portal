@@ -24,12 +24,14 @@ export function TopBar({ name, email, role }: TopBarProps) {
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-background/85 backdrop-blur-md px-4 lg:px-8">
-      <div className="hidden md:block">
+      <div className="hidden md:block shrink-0">
         <p className="text-[13px] font-semibold tracking-tight">Hierarchia portal</p>
         <p className="text-[11px] text-muted-foreground">Real-time submissions and reporting</p>
       </div>
 
-      <div className="flex items-center gap-1.5 ml-auto">
+      <div id="topbar-portal-target" className="flex-1 flex items-center justify-center px-4" />
+
+      <div className="flex items-center gap-1.5 ml-auto shrink-0">
         {role === "member" ? (
           <Link
             href="/dashboard/tasks"

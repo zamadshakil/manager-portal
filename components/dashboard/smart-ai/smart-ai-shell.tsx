@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { createPortal } from "react-dom"
 import {
   Sparkles,
   MessageSquare,
@@ -57,60 +58,51 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
   const [active, setActive] = useState<TabId>("chat")
   const [seedPrompt, setSeedPrompt] = useState<string | null>(null)
 
+  const [portalTarget, setPortalTarget] = useState<Element | null>(null)
+
+  useEffect(() => {
+    setPortalTarget(document.getElementById("topbar-portal-target"))
+  }, [])
+
   function jumpToChat(prompt: string) {
     setSeedPrompt(prompt)
     setActive("chat")
   }
 
-  return (
-    <div className="flex flex-col h-full gap-4">
-      {/* Compact Header */}
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 pb-2">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 lg:gap-6">
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight">Smart AI</h1>
-            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-warm-white px-2.5 py-1 text-[11px] font-semibold text-muted-foreground ml-2">
-              <Sparkles className="h-3 w-3 text-primary" aria-hidden="true" />
-              {roleLabel(profile.role)} access
-            </span>
-          </div>
-
-          {/* Tab strip */}
-          <div
-            role="tablist"
-            aria-label="Smart AI sections"
-            className="flex items-center gap-1 rounded-xl border border-border bg-card p-1 shadow-sm overflow-x-auto scrollbar-thin"
+  const tabsContent = (
+    <div
+      role="tablist"
+      aria-label="Smart AI sections"
+      className="flex items-center gap-1 rounded-xl border border-border bg-card p-1 shadow-sm overflow-x-auto scrollbar-thin"
+    >
+      {TABS.map((tab) => {
+        const Icon = tab.icon
+        const isActive = active === tab.id
+        return (
+          <button
+            key={tab.id}
+            role="tab"
+            aria-selected={isActive}
+            aria-controls={`smartai-${tab.id}`}
+            onClick={() => setActive(tab.id)}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-semibold whitespace-nowrap transition-all",
+              isActive
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
           >
-            {TABS.map((tab) => {
-              const Icon = tab.icon
-              const isActive = active === tab.id
-              return (
-                <button
-                  key={tab.id}
-                  role="tab"
-                  aria-selected={isActive}
-                  aria-controls={`smartai-${tab.id}`}
-                  onClick={() => setActive(tab.id)}
-                  className={cn(
-                    "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-semibold whitespace-nowrap transition-all",
-                    isActive
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                  {tab.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
+            <Icon className="h-4 w-4" aria-hidden="true" />
+            {tab.label}
+          </button>
+        )
+      })}
+    </div>
+  )
 
-        <div className="flex items-center gap-2 shrink-0">
-          <ServiceBadge label="RAG" connected={services.rag} />
-          <ServiceBadge label="MCP" connected={services.mcp} />
-        </div>
-      </div>
+  return (
+    <div className="flex flex-col h-[calc(100vh-120px)] -mb-12">
+      {portalTarget ? createPortal(tabsContent, portalTarget) : tabsContent}
 
       {/* Panels */}
       <div

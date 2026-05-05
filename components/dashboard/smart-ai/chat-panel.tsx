@@ -420,7 +420,7 @@ export function ChatPanel({
   }
 
   return (
-    <div className="flex w-full h-[calc(100vh-190px)] min-h-[500px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative">
+    <div className="flex w-full h-full min-h-[500px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative">
       {/* History Sidebar (Desktop) */}
       <aside className="hidden lg:block w-[300px] shrink-0 bg-background/50 border-r border-border overflow-hidden">
         <ThreadDrawer
@@ -466,39 +466,7 @@ export function ChatPanel({
           />
         </div>
 
-        <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3.5 lg:px-5">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#f2f9ff] text-[#097fe8]">
-              <Sparkles className="h-4 w-4" aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <h2 className="text-[15px] font-semibold tracking-tight">
-                Smart AI Assistant
-              </h2>
-              <div className="flex items-center gap-1.5">
-                <p className="text-[12px] text-muted-foreground truncate">
-                  {services.mcp
-                    ? "Connected to MCP · grounded in your portal data"
-                    : "Direct mode · querying your portal data"}
-                </p>
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
-                    services.mcp
-                      ? "bg-[#e8f8eb] text-[#157a2a]"
-                      : "bg-[#f2f9ff] text-[#097fe8]",
-                  )}
-                >
-                  {services.mcp ? (
-                    <Zap className="h-2.5 w-2.5" />
-                  ) : (
-                    <Database className="h-2.5 w-2.5" />
-                  )}
-                  {services.mcp ? "RAG" : "SQL"}
-                </span>
-              </div>
-            </div>
-          </div>
+        <header className="flex items-center justify-end gap-3 border-b border-border px-4 py-2 lg:px-5 bg-muted/10">
           <div className="flex items-center gap-1">
             <button
               type="button"
