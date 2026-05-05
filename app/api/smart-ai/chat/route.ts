@@ -92,13 +92,41 @@ export async function POST(req: Request) {
       })
       // Auto-advance period if expired
       await srClient.rpc("maybe_reset_period", { p_user_id: profile.id }).maybeSingle()
+
       // Fetch credit row
-      const { data: cr } = await srClient
+      const { data: cr, error: fetchErr } = await srClient
         .from("ai_credit_limits")
         .select("*")
         .eq("user_id", profile.id)
         .maybeSingle()
-      creditRow = cr as Record<string, any> | null
+
+      if (!cr && !fetchErr) {
+        // Initialize default row if missing
+        const now = new Date()
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10)
+        
+        const { data: newRow, error: insErr } = await srClient
+          .from("ai_credit_limits")
+          .insert({
+            user_id: profile.id,
+            monthly_limit: 100,
+            used_this_period: 0,
+            period_type: "monthly",
+            period_start: monthStart,
+            period_end: monthEnd,
+            is_unlimited: profile.role === "main_admin"
+          })
+          .select()
+          .maybeSingle()
+        
+        if (insErr) {
+          console.warn("[smart-ai] could not auto-provision credit row:", insErr.message)
+        }
+        creditRow = newRow as Record<string, any> | null
+      } else {
+        creditRow = cr as Record<string, any> | null
+      }
     }
   } catch (creditErr: any) {
     console.warn("[smart-ai] credit check failed (non-blocking):", creditErr.message)
@@ -525,15 +553,21 @@ export async function POST(req: Request) {
 
         // ---- Credit accounting: increment usage + log entry ----
         try {
-          if (creditRow && !creditRow.is_unlimited) {
+          // Re-fetch or use existing creditRow to increment. 
+          // If creditRow was null at start but we inserted it, we use the new one.
+          const currentUsed = creditRow?.used_this_period ?? 0
+          const isUnlimited = creditRow?.is_unlimited ?? (profile.role === "main_admin")
+
+          if (!isUnlimited) {
             await persistClient
               .from("ai_credit_limits")
               .update({
-                used_this_period: (creditRow.used_this_period ?? 0) + 1,
+                used_this_period: currentUsed + 1,
                 updated_at: new Date().toISOString(),
               })
               .eq("user_id", profile.id)
           }
+
           // Always log usage (even for unlimited users — for track record)
           await persistClient.from("ai_usage_log").insert({
             user_id: profile.id,
