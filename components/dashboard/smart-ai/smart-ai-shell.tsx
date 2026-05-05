@@ -11,7 +11,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { roleLabel } from "@/lib/auth-shared"
-import { PageHeader } from "@/components/dashboard/page-header"
+import { roleLabel } from "@/lib/auth-shared"
 import { ChatPanel } from "@/components/dashboard/smart-ai/chat-panel"
 import { SubmissionsReviewPanel } from "@/components/dashboard/smart-ai/submissions-review-panel"
 import { AnalyticsPanel } from "@/components/dashboard/smart-ai/analytics-panel"
@@ -64,62 +64,54 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
   }
 
   return (
-    <>
-      <PageHeader
-        title="Smart AI"
-        description={
-          profile.role === "member"
-            ? "Your personal AI assistant — grounded in your tasks, submissions, and team materials."
-            : profile.role === "manager"
-              ? "Ask anything about your team's submissions, validation runs, and performance metrics."
-              : "Cross-team retrieval and analytics over every submission, rule, and audit event."
-        }
-        action={
+    <div className="flex flex-col h-full gap-4">
+      {/* Compact Header */}
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 pb-2">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 lg:gap-6">
           <div className="flex items-center gap-2">
-            <ServiceBadge label="RAG" connected={services.rag} />
-            <ServiceBadge label="MCP" connected={services.mcp} />
-            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-warm-white px-3 py-1.5 text-[12px] font-semibold text-muted-foreground">
-              <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+            <h1 className="text-2xl font-bold tracking-tight">Smart AI</h1>
+            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-warm-white px-2.5 py-1 text-[11px] font-semibold text-muted-foreground ml-2">
+              <Sparkles className="h-3 w-3 text-primary" aria-hidden="true" />
               {roleLabel(profile.role)} access
             </span>
           </div>
-        }
-      />
 
-      {/* Tab strip */}
-      <div
-        role="tablist"
-        aria-label="Smart AI sections"
-        className="flex items-center gap-1 rounded-xl border border-border bg-card p-1 shadow-card overflow-x-auto scrollbar-thin"
-      >
-        {TABS.map((tab) => {
-          const Icon = tab.icon
-          const isActive = active === tab.id
-          return (
-            <button
-              key={tab.id}
-              role="tab"
-              aria-selected={isActive}
-              aria-controls={`smartai-${tab.id}`}
-              onClick={() => setActive(tab.id)}
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-semibold whitespace-nowrap transition-all",
-                isActive
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
-              )}
-            >
-              <Icon className="h-4 w-4" aria-hidden="true" />
-              {tab.label}
-            </button>
-          )
-        })}
+          {/* Tab strip */}
+          <div
+            role="tablist"
+            aria-label="Smart AI sections"
+            className="flex items-center gap-1 rounded-xl border border-border bg-card p-1 shadow-sm overflow-x-auto scrollbar-thin"
+          >
+            {TABS.map((tab) => {
+              const Icon = tab.icon
+              const isActive = active === tab.id
+              return (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  aria-selected={isActive}
+                  aria-controls={`smartai-${tab.id}`}
+                  onClick={() => setActive(tab.id)}
+                  className={cn(
+                    "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-semibold whitespace-nowrap transition-all",
+                    isActive
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                  {tab.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <ServiceBadge label="RAG" connected={services.rag} />
+          <ServiceBadge label="MCP" connected={services.mcp} />
+        </div>
       </div>
-
-      {/* Subtitle / context line for the active tab */}
-      <p className="text-[13px] text-muted-foreground -mt-3">
-        {TABS.find((t) => t.id === active)?.description}
-      </p>
 
       {/* Panels */}
       <div
@@ -149,7 +141,7 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
         ) : null}
         {active === "analytics" ? <AnalyticsPanel /> : null}
       </div>
-    </>
+    </div>
   )
 }
 

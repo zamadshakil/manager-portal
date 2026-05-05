@@ -420,7 +420,7 @@ export function ChatPanel({
   }
 
   return (
-    <div className="flex w-full h-[calc(100vh-280px)] min-h-[500px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative">
+    <div className="flex w-full h-[calc(100vh-190px)] min-h-[500px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative">
       {/* History Sidebar (Desktop) */}
       <aside className="hidden lg:block w-[300px] shrink-0 bg-background/50 border-r border-border overflow-hidden">
         <ThreadDrawer
