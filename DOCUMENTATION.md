@@ -17,7 +17,7 @@ Start here if you're setting up the project for the first time:
 2. **[README.md](./README.md)** (10 min)
    - Project overview & tech stack
    - Railway infrastructure diagram
-   - Project structure (app/, lib/, mcp-service/, rag-service/)
+   - Project structure (app/, lib/, supabase/)
    - Key features & environment variables
 
 3. **[docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md)** (20 min)
@@ -100,12 +100,13 @@ If you're deploying or managing the production system:
 | [tailwind.config.ts](./tailwind.config.ts) | Design token configuration |
 | [package.json](./package.json) | Dependencies (Node ≥22, Next 16, AI SDK v6, Inngest, pgvector) |
 
-### Microservice Docs
-
-| File | Purpose |
-|------|---------|
-| [mcp-service/README.md](./mcp-service/README.md) | MCP service setup & API |
-| [rag-service/README.md](./rag-service/README.md) | RAG service setup & API |
+> **Decommissioned:** The `mcp-service/` and `rag-service/` directories
+> (and their corresponding Railway deployments) have been removed. All
+> Smart AI orchestration now runs natively inside `manager-portal` —
+> see [`lib/smart-ai/`](./lib/smart-ai/) and
+> [`app/api/smart-ai/`](./app/api/smart-ai/). The historical audit docs
+> in [`docs/`](./docs/) still reference those services as a record of
+> the previous architecture.
 
 ---
 

@@ -67,11 +67,9 @@ UPSTASH_REDIS_REST_TOKEN=...
 INNGEST_EVENT_KEY=local
 INNGEST_SIGNING_KEY=local
 
-# Smart AI services (optional in local dev — chat falls back to native path)
-MCP_SERVICE_URL=...
-MCP_SERVICE_TOKEN=...
-RAG_SERVICE_URL=...
-RAG_SERVICE_TOKEN=...
+# Smart AI embeddings (optional — falls back to OpenRouter if unset)
+OPENAI_API_KEY=sk-...
+EMBEDDING_MODEL=openai/text-embedding-3-small
 
 # Email (optional — skipped if missing)
 BREVO_API_KEY=...
@@ -130,7 +128,10 @@ curl -i http://localhost:3000/api/cron/mark-missed
 → Make sure `npx inngest-cli@latest dev` is running in a separate terminal
 
 **Smart AI chat returns 503**
-→ Check `OPENROUTER_API_KEY` is set. The chat falls back to native path if MCP/RAG services are not configured.
+→ Check `OPENROUTER_API_KEY` is set in `.env.local`. The chat is fully native — no external services required.
+
+**Smart AI upload returns `rag_status: "failed"`**
+→ Hit `GET /api/smart-ai/health` while signed in. It will report whether the embeddings provider is reachable and whether `rag_documents` is queryable. The most common causes are an invalid `OPENROUTER_API_KEY`, an embedding model name OpenRouter doesn't recognize, or the `20260505_rag_documents.sql` migration not having been applied.
 
 **Railway deployment fails**
 → Ensure `output: "standalone"` is in `next.config.mjs` and `railway.json` is present

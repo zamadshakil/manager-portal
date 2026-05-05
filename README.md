@@ -30,13 +30,13 @@ The Hierarchia Manager Portal enables organizations to:
 
 ## Railway Infrastructure
 
-The entire backend runs in a single Railway project:
+The entire backend runs in a single Railway project. Smart AI (chat
+orchestration, RAG indexing/retrieval, analytics) is **native** inside
+the Next.js app — there are no longer any sibling MCP or RAG services.
 
 ```
 Railway Project
-├── manager-portal        — Next.js 16 app (this repo)
-├── mcp-service           — Node.js MCP chat orchestration service
-├── FastAPI-8UVj          — Python RAG analytics service
+├── manager-portal        — Next.js 16 app (this repo, includes native Smart AI)
 └── Supabase (self-hosted)
     ├── Kong              — API gateway (public URL)
     ├── PostgREST          — REST API for Postgres
@@ -141,9 +141,6 @@ lib/
 ├── types.ts                 # TypeScript type definitions
 ├── activity.ts              # Audit trail logging
 └── upstash-scheduler.ts     # Cron execution tracking
-
-mcp-service/                 # MCP chat orchestration (Node.js, separate Railway service)
-rag-service/                 # RAG analytics (FastAPI/Python, separate Railway service)
 
 supabase/
 └── migrations/              # SQL migrations (including RAG pgvector schema)
@@ -252,9 +249,7 @@ See [`.env.local.example`](./.env.local.example) for the complete list with docu
 | Group | Variables | Purpose |
 |-------|-----------|---------|
 | **Supabase** | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Self-hosted Supabase via Kong on Railway |
-| **Smart AI — MCP** | `MCP_SERVICE_URL`, `MCP_SERVICE_TOKEN` | MCP chat orchestration service |
-| **Smart AI — RAG** | `RAG_SERVICE_URL`, `RAG_SERVICE_TOKEN` | RAG analytics service |
-| **LLM** | `OPENROUTER_API_KEY`, `SMART_AI_MODEL` | OpenRouter for chat + embeddings |
+| **LLM** | `OPENROUTER_API_KEY`, `OPENAI_API_KEY` (optional), `SMART_AI_MODEL`, `EMBEDDING_MODEL` | OpenRouter for chat completions; OpenAI direct for embeddings (preferred — falls back to OpenRouter) |
 | **Validation** | `DO_VALIDATION_MODEL`, `DO_SUMMARY_MODEL`, `DO_VISION_MODEL` | Model overrides (default: Gemini 2.0 Flash) |
 | **Storage** | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL` | Cloudflare R2 |
 | **Redis** | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Rate limiting + cron tracking |
@@ -267,15 +262,14 @@ See [`.env.local.example`](./.env.local.example) for the complete list with docu
 
 ### Deploy to Railway
 
-The application deploys as three services in a single Railway project:
+The application deploys as a single service in the Railway project:
 
 1. **manager-portal** — Next.js standalone build via Railpack
    - `railway.json` configures the builder and start command
    - `next.config.mjs` sets `output: "standalone"` for optimized container builds
-2. **mcp-service** — Node.js service (`mcp-service/` directory)
-3. **FastAPI-8UVj** — Python RAG analytics (`rag-service/` directory)
+   - All Smart AI logic (chat orchestration, RAG indexing/retrieval, analytics) runs inside this container — no extra hop, no extra service to manage.
 
-The self-hosted Supabase stack (Postgres, Kong, GoTrue, PostgREST, Storage, Realtime, Studio, Imgproxy, S3, Postgres Meta) runs alongside these services in the same Railway project.
+The self-hosted Supabase stack (Postgres, Kong, GoTrue, PostgREST, Storage, Realtime, Studio, Imgproxy, S3, Postgres Meta) runs alongside it in the same Railway project.
 
 ### Post-Deployment Checklist
 - [ ] Verify all environment variables are set on each Railway service
