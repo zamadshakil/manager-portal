@@ -294,12 +294,13 @@ export async function indexDocument(
       }
     }
 
-    // 3. Idempotent delete
-    const { error: deleteError } = await supabase
-      .from("rag_documents")
-      .delete()
-      .eq("source_type", input.source_type)
-      .eq("source_id", input.source_id)
+    // 3. Idempotent delete (via RPC — bypasses PostgREST's column-level
+    //    schema cache, which has been unreliable on the self-hosted
+    //    Kong+PostgREST setup on Railway).
+    const { error: deleteError } = await supabase.rpc("delete_rag_chunks", {
+      p_source_type: input.source_type,
+      p_source_id: input.source_id,
+    })
     if (deleteError) {
       console.warn(
         `[rag] delete prior chunks for ${input.source_type}:${input.source_id} non-fatal:`,
@@ -307,7 +308,10 @@ export async function indexDocument(
       )
     }
 
-    // 4. Insert
+    // 4. Insert via RPC. The embedding is sent as a pgvector text
+    //    literal `"[0.1,0.2,...]"` and cast to `vector` inside the
+    //    function — the only encoding that round-trips reliably
+    //    through PostgREST regardless of the column-cache state.
     const rows = chunks.map((chunk, i) => ({
       source_type: input.source_type,
       source_id: input.source_id,
@@ -316,8 +320,7 @@ export async function indexDocument(
       owner_id: input.owner_id ?? null,
       title: input.title ?? null,
       content: chunk,
-      // Supabase pgvector accepts the array string format for vector columns over PostgREST
-      embedding: `[${vectors[i].join(",")}]`,
+      embedding: vectorToPg(vectors[i]),
       metadata: {
         ...(input.metadata ?? {}),
         chunk_index: i,
@@ -325,7 +328,9 @@ export async function indexDocument(
       },
     }))
 
-    const { error: insertError } = await supabase.from("rag_documents").insert(rows)
+    const { error: insertError } = await supabase.rpc("insert_rag_chunks", {
+      rows,
+    })
     if (insertError) {
       console.error(
         `[rag] insert ${input.source_type}:${input.source_id} failed:`,
@@ -366,11 +371,10 @@ export async function deleteIndexed(args: {
 
   try {
     const supabase = createAdminClient()
-    await supabase
-      .from("rag_documents")
-      .delete()
-      .eq("source_type", args.source_type)
-      .eq("source_id", args.source_id)
+    await supabase.rpc("delete_rag_chunks", {
+      p_source_type: args.source_type,
+      p_source_id: args.source_id,
+    })
   } catch (err) {
     console.warn(`[rag] delete ${args.source_type}:${args.source_id} threw`, err)
   }
