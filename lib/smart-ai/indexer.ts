@@ -24,6 +24,7 @@ import "server-only"
 
 import { createAdminClient } from "@/lib/supabase/admin"
 import { isDirectPgConfigured, pgQuery } from "@/lib/smart-ai/pg-client"
+import { ensureRagSchema } from "@/lib/smart-ai/bootstrap"
 
 // ---------------------------------------------------------------------------
 // Config
@@ -439,13 +440,33 @@ export async function indexDocument(
       },
     }))
 
-    // 4. Insert via the most reliable path available. We try in order:
-    //    (a) Direct Postgres connection — sidesteps PostgREST entirely.
-    //    (b) Supabase RPC — bypasses the column-level schema cache.
-    //    (c) Plain PostgREST insert — last resort for dev envs.
+    // 4. Insert via the most reliable path available.
+    //
+    //    When `SUPABASE_DB_URL` (or another DB connection string) is set
+    //    we ALWAYS use direct Postgres. It's strictly more reliable than
+    //    going through PostgREST/Kong and it sidesteps every schema-
+    //    cache problem we've ever had on the self-hosted Supabase stack.
+    //    We also auto-bootstrap the RAG schema + RPCs the first time
+    //    through, so a fresh deploy "just works" without a manual
+    //    migration step.
+    //
+    //    When direct PG is NOT configured we fall back to the Supabase
+    //    RPC and finally a PostgREST insert. Both depend on the
+    //    PostgREST schema cache and the `insert_rag_chunks` migration
+    //    having been applied — if either is broken we surface the
+    //    actual reason so the operator knows what to fix.
     const errors: string[] = []
 
     if (isDirectPgConfigured()) {
+      // Self-heal the schema if needed (no-op after the first call).
+      const bootstrap = await ensureRagSchema()
+      if (!bootstrap.ok) {
+        console.warn(`[rag] bootstrap reported issue: ${bootstrap.reason}`)
+        // Don't bail — direct-pg might still work for an already-correct
+        // database, and the bootstrap may have failed only on the
+        // optional NOTIFY step.
+      }
+
       try {
         await insertViaDirectPg(rows)
         console.log(
@@ -454,11 +475,18 @@ export async function indexDocument(
         return { ok: true, chunks: chunks.length }
       } catch (err: any) {
         const msg = err?.message ?? String(err)
-        console.warn(`[rag] direct-pg insert failed, falling back to RPC: ${msg}`)
-        errors.push(`direct-pg: ${msg}`)
+        console.error(`[rag] direct-pg insert failed: ${msg}`)
+        return {
+          ok: false,
+          reason: `direct-pg insert failed: ${msg}${
+            bootstrap.ok ? "" : ` (bootstrap: ${bootstrap.reason})`
+          }`,
+        }
       }
     }
 
+    // No direct PG — try RPC, then PostgREST. These are best-effort and
+    // both depend on PostgREST being healthy + migrations being applied.
     try {
       await insertViaRpc(supabase, rows)
       console.log(
@@ -488,7 +516,10 @@ export async function indexDocument(
     )
     return {
       ok: false,
-      reason: `insert failed (all paths): ${errors.join(" | ")}`,
+      reason:
+        `insert failed: ${errors.join(" | ")}. ` +
+        `Fix: set SUPABASE_DB_URL on manager-portal to enable the bulletproof direct-pg path, ` +
+        `or apply supabase/migrations/20260506_rag_rpc.sql to your Postgres.`,
     }
   } catch (err: any) {
     console.error(
