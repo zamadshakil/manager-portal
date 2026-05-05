@@ -66,6 +66,30 @@ export async function listAiCreditLimits(): Promise<AiCreditLimit[]> {
     .from("ai_credit_limits")
     .select("*")
 
+  // Auto-advance expired periods so the dashboard shows current-period data.
+  // Without this, users who haven't chatted yet still display stale counters
+  // from the previous period.
+  const today = new Date().toISOString().slice(0, 10)
+  const expiredUserIds = (credits ?? [])
+    .filter((c: any) => c.period_end && c.period_end < today)
+    .map((c: any) => c.user_id)
+
+  if (expiredUserIds.length > 0) {
+    // Reset each expired user's period in parallel (RPC is SECURITY DEFINER)
+    await Promise.allSettled(
+      expiredUserIds.map((uid: string) =>
+        admin.rpc("maybe_reset_period", { p_user_id: uid })
+      )
+    )
+    // Re-fetch credit rows after resets so the data we return is fresh
+    const { data: refreshed } = await admin
+      .from("ai_credit_limits")
+      .select("*")
+    if (refreshed) {
+      credits?.splice(0, credits.length, ...refreshed)
+    }
+  }
+
   // Fetch teams for name lookup
   const { data: teams } = await admin
     .from("teams")

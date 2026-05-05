@@ -258,19 +258,24 @@ export async function POST(req: Request) {
   const persistClient = createAdminClient()
 
   // Check if thread exists; create if not.
+  let threadPersisted = false
   const { data: existingThread } = await persistClient
     .from("chat_threads")
     .select("id")
     .eq("id", threadId)
     .maybeSingle()
 
-  if (!existingThread) {
+  if (existingThread) {
+    threadPersisted = true
+  } else {
     const { error: threadErr } = await persistClient
       .from("chat_threads")
       .insert({ id: threadId, user_id: profile.id, title: threadTitle })
 
     if (threadErr) {
       console.error("[smart-ai] thread insert failed:", threadErr.message, threadErr.code)
+    } else {
+      threadPersisted = true
     }
   }
 
@@ -415,12 +420,14 @@ export async function POST(req: Request) {
       }),
       execute: async ({ documentId, sourceType, query }) => {
         try {
+          // Use higher topK for targeted doc searches to get full context.
+          const effectiveTopK = documentId ? 20 : 12
           const chunks = await retrieveChunks({
             scope,
             query,
             documentId: documentId ?? null,
             sourceType: sourceType ?? null,
-            topK: 8,
+            topK: effectiveTopK,
           })
           return { results: chunks, count: chunks.length }
         } catch (err: any) {
@@ -464,6 +471,10 @@ export async function POST(req: Request) {
     "",
     "Be concise, format data in tables when useful, and cite specific IDs and scores.",
     "Never invent or fabricate data — only report what the tools return.",
+    "",
+    "DOCUMENT ANSWERS: When answering questions about a specific document, use ALL retrieved snippets — not just the top-scoring ones. Scan every snippet for the requested information before saying it's not available.",
+    "",
+    "LINKS: NEVER generate links to internal portal pages (e.g. /dashboard/..., /documents/...). These will 404. Instead, reference documents by their filename and ID so the user can find them in the portal. If you want to help the user locate something, describe where to find it in the portal navigation (e.g. 'Go to Dashboard > Materials').",
   ].join("\n")
 
   // --- Sliding window: trim old messages to save tokens on long chats ---
@@ -511,9 +522,9 @@ export async function POST(req: Request) {
       messages: await convertToModelMessages(trimmedUIMessages as any),
       tools,
       stopWhen: stepCountIs(5),
-      onFinish: async ({ text, usage }) => {
+      onFinish: async ({ text, totalUsage }) => {
         // ---- Persistence: save assistant reply ----
-        if (text) {
+        if (text && threadPersisted) {
           const { error: assistErr } = await persistClient
             .from("chat_messages")
             .insert({
@@ -536,28 +547,36 @@ export async function POST(req: Request) {
 
         // ---- Credit accounting: increment usage + log entry ----
         try {
-          // Re-fetch or use existing creditRow to increment. 
-          // If creditRow was null at start but we inserted it, we use the new one.
-          const currentUsed = creditRow?.used_this_period ?? 0
+          // Determine if this user is unlimited (avoid stale closure reads)
           const isUnlimited = creditRow?.is_unlimited ?? (profile.role === "main_admin")
 
+          // Atomic increment — avoids race conditions from concurrent requests
+          // that would all read the same stale `used_this_period` from the closure.
           if (!isUnlimited) {
-            await persistClient
-              .from("ai_credit_limits")
-              .update({
-                used_this_period: currentUsed + 1,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("user_id", profile.id)
+            const { error: incErr } = await persistClient.rpc("increment_ai_usage", {
+              p_user_id: profile.id,
+            })
+            if (incErr) {
+              // Fallback: direct update if RPC doesn't exist yet
+              console.warn("[smart-ai] atomic increment RPC failed, using fallback:", incErr.message)
+              await persistClient
+                .from("ai_credit_limits")
+                .update({
+                  used_this_period: (creditRow?.used_this_period ?? 0) + 1,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("user_id", profile.id)
+            }
           }
 
           // Always log usage (even for unlimited users — for track record)
+          // Use threadPersisted guard to avoid FK violation on thread_id
           const { error: logErr } = await persistClient.from("ai_usage_log").insert({
             user_id: profile.id,
-            thread_id: threadId,
+            thread_id: threadPersisted ? threadId : null,
             model: SMART_AI_MODEL,
-            tokens_in: usage?.inputTokens ?? null,
-            tokens_out: usage?.outputTokens ?? null,
+            tokens_in: totalUsage?.inputTokens ?? null,
+            tokens_out: totalUsage?.outputTokens ?? null,
             period_type: creditRow?.period_type ?? "monthly",
           })
 
@@ -581,8 +600,8 @@ export async function POST(req: Request) {
             metadata: {
               prompt: lastUserMsg.content.slice(0, 100) + (lastUserMsg.content.length > 100 ? "..." : ""),
               model: SMART_AI_MODEL,
-              tokens_in: usage?.inputTokens,
-              tokens_out: usage?.outputTokens,
+              tokens_in: totalUsage?.inputTokens,
+              tokens_out: totalUsage?.outputTokens,
             },
           })
         } catch (acctErr: any) {

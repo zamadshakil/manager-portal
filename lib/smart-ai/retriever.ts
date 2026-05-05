@@ -343,9 +343,11 @@ export async function retrieveChunks(
     return []
   }
 
-  const topK = opts.topK ?? 6
   const isTargeted = !!opts.documentId
-  const limitCount = topK * 3
+  // For targeted searches we want ALL chunks from the document so the LLM
+  // has full context. For corpus-wide searches we keep it tighter.
+  const topK = isTargeted ? Math.max(opts.topK ?? 20, 20) : (opts.topK ?? 8)
+  const limitCount = isTargeted ? 100 : topK * 3
 
   try {
     // 1. Embed query (works the same for both retrieval paths)
@@ -435,26 +437,36 @@ export async function retrieveChunks(
       : vectorResults
     fused = rerankByKeywords(opts.query, fused)
 
-    // 5. Dedup (skip for targeted document searches — every chunk in the
-    // doc is potentially the answer)
-    const seen = new Set<string>()
-    const deduplicated: RetrievedChunk[] = []
-    for (const chunk of fused) {
-      const key = `${chunk.source_type}:${chunk.source_id}`
-      if (isTargeted || !seen.has(key)) {
-        seen.add(key)
-        deduplicated.push(chunk)
+    // 5. Dedup — for targeted doc searches we keep EVERY chunk from the
+    //    document (they all share the same source_id). For corpus-wide
+    //    searches we dedup by source so the user sees variety.
+    let deduplicated: RetrievedChunk[]
+    if (isTargeted) {
+      // Keep all chunks, just cap at topK.
+      deduplicated = fused.slice(0, topK)
+    } else {
+      const seen = new Set<string>()
+      deduplicated = []
+      for (const chunk of fused) {
+        const key = `${chunk.source_type}:${chunk.source_id}`
+        if (!seen.has(key)) {
+          seen.add(key)
+          deduplicated.push(chunk)
+        }
+        if (deduplicated.length >= topK) break
       }
-      if (deduplicated.length >= topK) break
     }
 
-    // 6. Last-resort fallback for targeted searches that came back empty.
-    //    If the user explicitly pointed us at a documentId and both
-    //    vector + BM25 returned nothing (e.g. tiny corpus of one chunk
-    //    with a query that is semantically far from the chunk), just
-    //    return the doc's chunks ordered by chunk_index. The LLM is
-    //    smart enough to summarise — far better UX than "no mentions
-    //    found" when the document IS sitting right there.
+    // 6. Contextual window: for each matched chunk, also fetch the
+    //    adjacent chunks (chunk_index ± 1) from the same document.
+    //    This reconstructs information that spans chunk boundaries.
+    if (useDirectPg && deduplicated.length > 0 && deduplicated.length <= 30) {
+      deduplicated = await expandContextWindow(deduplicated, topK)
+    }
+
+    // 7. Last-resort fallback for targeted searches that came back empty.
+    //    Return ALL chunks from the document ordered by chunk_index so the
+    //    LLM can summarise the whole thing.
     if (
       isTargeted &&
       deduplicated.length === 0 &&
@@ -464,7 +476,7 @@ export async function retrieveChunks(
       try {
         const fallback = await pgQuery<any>(
           `SELECT id::text AS id, source_type, source_id AS source_id,
-                  title, LEFT(content, 800) AS snippet, 0.0::float AS score, metadata
+                  title, content AS snippet, 0.0::float AS score, metadata
              FROM rag_documents
             WHERE source_id = $1
               AND ($2::text IS NULL OR source_type = $2)
@@ -494,5 +506,77 @@ export async function retrieveChunks(
   } catch (err: any) {
     console.error("[rag] retrieve failed:", err?.message ?? err)
     return []
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Contextual window expansion
+//
+// For each retrieved chunk, fetch the chunks immediately before and after it
+// (by chunk_index) from the same document. This reconstructs information
+// that the chunker split across boundaries — the #1 cause of "I can see the
+// document has a timeline section but the retriever didn't return it."
+// ---------------------------------------------------------------------------
+
+async function expandContextWindow(
+  chunks: RetrievedChunk[],
+  maxTotal: number,
+): Promise<RetrievedChunk[]> {
+  const needed = new Map<string, Set<number>>()
+  const existingIds = new Set(chunks.map((c) => c.id))
+
+  for (const c of chunks) {
+    const ci = typeof c.metadata?.chunk_index === "number" ? c.metadata.chunk_index : -1
+    if (ci < 0) continue
+    const key = c.source_id
+    if (!needed.has(key)) needed.set(key, new Set())
+    const set = needed.get(key)!
+    if (ci > 0) set.add(ci - 1)
+    set.add(ci)
+    set.add(ci + 1)
+  }
+
+  if (needed.size === 0) return chunks
+
+  const conditions: string[] = []
+  const params: unknown[] = []
+  let p = 1
+  for (const [sourceId, indexes] of needed) {
+    const idxArray = Array.from(indexes)
+    conditions.push(`(source_id = $${p++} AND chunk_index = ANY($${p++}::int[]))`)
+    params.push(sourceId, idxArray)
+  }
+
+  try {
+    const res = await pgQuery<any>(
+      `SELECT id::text AS id, source_type, source_id AS source_id,
+              title, content AS snippet, 0.0::float AS score, metadata
+         FROM rag_documents
+        WHERE ${conditions.join(" OR ")}
+        ORDER BY source_id, chunk_index ASC`,
+      params,
+    )
+
+    const merged = [...chunks]
+    for (const row of res.rows) {
+      const parsed = parseRow(row)
+      if (!existingIds.has(parsed.id)) {
+        existingIds.add(parsed.id)
+        merged.push(parsed)
+      }
+    }
+
+    // Sort by source_id then chunk_index so the LLM sees content in order.
+    merged.sort((a, b) => {
+      if (a.source_id !== b.source_id) return a.source_id.localeCompare(b.source_id)
+      const ai = typeof a.metadata?.chunk_index === "number" ? a.metadata.chunk_index : 999
+      const bi = typeof b.metadata?.chunk_index === "number" ? b.metadata.chunk_index : 999
+      return ai - bi
+    })
+
+    return merged.slice(0, maxTotal)
+  } catch (err: any) {
+    console.warn("[rag] context window expansion failed (non-fatal):", err?.message ?? err)
+    return chunks
   }
 }

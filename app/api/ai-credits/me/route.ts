@@ -8,6 +8,12 @@ export const dynamic = "force-dynamic"
 export async function GET() {
   try {
     const profile = await requireProfile()
+
+    // Auto-advance period if expired (uses admin client for SECURITY DEFINER RPC)
+    const { createAdminClient } = await import("@/lib/supabase/admin")
+    const adminClient = createAdminClient()
+    await adminClient.rpc("maybe_reset_period", { p_user_id: profile.id }).maybeSingle()
+
     const supabase = await createClient()
 
     const { data } = await supabase

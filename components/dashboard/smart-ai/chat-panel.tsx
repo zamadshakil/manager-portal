@@ -764,7 +764,36 @@ function Message({ message, userName }: { message: PortalUIMessage; userName: st
               isUser ? (
                 text
               ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    // All links open in a new tab. Hallucinated internal
+                    // URLs (e.g. /dashboard/documents/...) are rendered as
+                    // plain text so they don't 404 or navigate away.
+                    a: ({ href, children, ...props }) => {
+                      const isInternal = href?.startsWith("/") || href?.startsWith("#")
+                      if (isInternal) {
+                        // Don't render a clickable link — the route doesn't exist.
+                        return (
+                          <span className="font-medium text-foreground" {...props}>
+                            {children}
+                          </span>
+                        )
+                      }
+                      return (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary underline hover:text-primary/80 transition-colors"
+                          {...props}
+                        >
+                          {children}
+                        </a>
+                      )
+                    },
+                  }}
+                >{text}</ReactMarkdown>
               )
             ) : (
               <span className="inline-flex items-center gap-1.5 text-muted-foreground">

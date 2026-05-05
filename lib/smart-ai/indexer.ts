@@ -34,15 +34,18 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? ""
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "openai/text-embedding-3-small"
 
-// Chunking
-const CHUNK_SIZE = 800
-const CHUNK_OVERLAP = 200
+// Chunking — larger chunks preserve section context (headers + body stay
+// together). 1200 chars is well within the 8191-token limit of
+// text-embedding-3-small. The 400-char overlap ensures section boundaries
+// are duplicated across adjacent chunks.
+const CHUNK_SIZE = 1200
+const CHUNK_OVERLAP = 400
 
 // ---------------------------------------------------------------------------
 // Text chunking (pure JS, no external dependency needed)
 // ---------------------------------------------------------------------------
 
-function chunkText(text: string): string[] {
+function chunkText(text: string, titlePrefix?: string): string[] {
   if (!text || text.trim().length < 20) return text?.trim() ? [text.trim()] : []
 
   const trimmed = text.trim()
@@ -86,7 +89,13 @@ function chunkText(text: string): string[] {
 
   chunks.push(...splitRecursive(trimmed, 0))
 
-  return chunks.filter((c) => c.trim().length >= 20)
+  // Prepend the document title to every chunk as a semantic anchor.
+  // This dramatically improves retrieval for targeted searches because
+  // every chunk embeds with the document's topic, not just its fragment.
+  const prefix = titlePrefix?.trim() ? `[${titlePrefix.trim()}]\n\n` : ""
+  return chunks
+    .filter((c) => c.trim().length >= 20)
+    .map((c) => `${prefix}${c}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -396,8 +405,8 @@ export async function indexDocument(
   try {
     const supabase = createAdminClient()
 
-    // 1. Chunk
-    const chunks = chunkText(input.content)
+    // 1. Chunk — pass the title so each chunk embeds with document context.
+    const chunks = chunkText(input.content, input.title ?? undefined)
     if (!chunks.length) return { ok: false, reason: "skipped: no chunks produced" }
 
     console.log(
