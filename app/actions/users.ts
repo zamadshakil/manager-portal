@@ -63,6 +63,30 @@ export async function provisionUser(formData: FormData) {
       .eq("id", data.user.id)
   }
 
+  // Auto-provision a default AI credit row for the new user.
+  // main_admin accounts are always unlimited; others start at 100 msgs/month.
+  try {
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10)
+    await admin.from("ai_credit_limits").upsert(
+      {
+        user_id: data.user.id,
+        monthly_limit: 100,
+        used_this_period: 0,
+        period_type: "monthly",
+        period_start: monthStart,
+        period_end: monthEnd,
+        is_unlimited: parsed.data.role === "main_admin",
+        updated_by: actor.id,
+      },
+      { onConflict: "user_id" },
+    )
+  } catch (creditErr: any) {
+    // Non-blocking — credit row can be set later from the AI & Usage page
+    console.warn("[provisionUser] could not create credit row:", creditErr.message)
+  }
+
   await logActivity({
     actorId: actor.id,
     teamId: parsed.data.team_id || null,
