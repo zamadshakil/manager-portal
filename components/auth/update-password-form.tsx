@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
-import { Lock, Eye, EyeOff } from "lucide-react"
+import { ArrowLeft, CheckCircle2, Eye, EyeOff } from "lucide-react"
 
 export default function UpdatePasswordForm() {
   const router = useRouter()
@@ -16,13 +17,18 @@ export default function UpdatePasswordForm() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [success, setSuccess] = useState(false)
+  const [sessionValid, setSessionValid] = useState<boolean | null>(null)
 
   // Wait for Supabase session to initialize after redirect
   useEffect(() => {
     const supabase = createClient()
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
+        setSessionValid(false)
         setError("Your reset link is invalid or has expired.")
+      } else {
+        setSessionValid(true)
       }
     })
   }, [])
@@ -53,8 +59,12 @@ export default function UpdatePasswordForm() {
         return
       }
       
-      router.push("/dashboard")
-      router.refresh()
+      setSuccess(true)
+      // Redirect to dashboard after a brief success message
+      setTimeout(() => {
+        router.push("/dashboard")
+        router.refresh()
+      }, 2000)
     } catch {
       setError("Failed to update password. Please try again.")
     } finally {
@@ -62,69 +72,131 @@ export default function UpdatePasswordForm() {
     }
   }
 
-  return (
-    <Card className="border-white/20 dark:border-white/10 shadow-2xl bg-white/70 dark:bg-black/60 backdrop-blur-xl rounded-3xl overflow-hidden p-2 sm:p-4">
-      <CardHeader className="space-y-2 text-center pb-6">
-        <div className="mx-auto w-12 h-12 bg-white dark:bg-zinc-900 rounded-xl shadow-sm flex items-center justify-center mb-2 border border-zinc-200 dark:border-zinc-800">
-          <Lock className="w-6 h-6 text-zinc-800 dark:text-zinc-200" />
+  // Success state
+  if (success) {
+    return (
+      <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-500 text-center">
+        <div className="flex flex-col items-center justify-center gap-4 py-8">
+          <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mb-2 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+            <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+          </div>
+          <h3 className="text-2xl font-bold tracking-tight text-white">Password Updated</h3>
+          <p className="text-slate-400 text-sm max-w-[280px]">
+            Your password has been successfully updated. Redirecting to dashboard...
+          </p>
         </div>
-        <CardTitle className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">Update password</CardTitle>
-        <CardDescription className="text-zinc-500 dark:text-zinc-400">
-          Please enter your new password below.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <div className="relative group">
-            <Lock className="absolute left-3 top-3 h-5 w-5 text-zinc-400 group-focus-within:text-zinc-600 dark:group-focus-within:text-zinc-300 transition-colors" />
-            <Input
-              id="password"
-              type={showPassword ? "text" : "password"}
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={loading}
-              placeholder="New password"
-              className="pl-10 pr-10 bg-zinc-100/50 dark:bg-zinc-900/50 border-transparent focus:border-zinc-300 dark:focus:border-zinc-700 h-11 rounded-xl transition-all"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-3 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors focus:outline-none"
-              tabIndex={-1}
-            >
-              {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-            </button>
+      </div>
+    )
+  }
+
+  // Invalid session state
+  if (sessionValid === false) {
+    return (
+      <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-500 text-center">
+        <div className="flex flex-col items-center justify-center gap-4 py-8">
+          <div className="w-16 h-16 bg-rose-500/20 rounded-full flex items-center justify-center mb-2">
+            <svg className="w-8 h-8 text-rose-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="15" y1="9" x2="9" y2="15" />
+              <line x1="9" y1="9" x2="15" y2="15" />
+            </svg>
+          </div>
+          <h3 className="text-2xl font-bold tracking-tight text-white">Link Expired</h3>
+          <p className="text-slate-400 text-sm max-w-[280px]">
+            Your password reset link is invalid or has expired. Please request a new one.
+          </p>
+        </div>
+        
+        <Link 
+          href="/auth/forgot-password"
+          className="text-sm font-medium text-emerald-500 hover:text-emerald-400 transition-colors flex items-center justify-center gap-2"
+        >
+          Request new reset link
+        </Link>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-500">
+      <div className="space-y-2">
+        <h1 className="text-4xl font-bold tracking-tight text-white">New Password</h1>
+        <p className="text-sm text-slate-400 leading-relaxed">
+          Enter your new password below. Make sure it&apos;s at least 6 characters.
+        </p>
+      </div>
+
+      <div className="space-y-6">
+        <form onSubmit={onSubmit} className="space-y-5">
+          <div className="space-y-2">
+            <Label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-slate-400">New Password</Label>
+            <div className="relative">
+              <Input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading || sessionValid === null}
+                placeholder="••••••••"
+                className="h-11 pr-10 bg-[#0a1118]/50 border-slate-800 text-white placeholder:text-slate-600 focus:border-emerald-500/50 focus:ring-emerald-500/20 transition-all"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-3 text-slate-500 hover:text-emerald-400 transition-colors focus:outline-none"
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              </button>
+            </div>
           </div>
 
-          <div className="relative group">
-            <Lock className="absolute left-3 top-3 h-5 w-5 text-zinc-400 group-focus-within:text-zinc-600 dark:group-focus-within:text-zinc-300 transition-colors" />
+          <div className="space-y-2">
+            <Label htmlFor="confirmPassword" className="text-xs font-semibold uppercase tracking-wider text-slate-400">Confirm Password</Label>
             <Input
               id="confirmPassword"
               type={showPassword ? "text" : "password"}
               required
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              disabled={loading}
-              placeholder="Confirm new password"
-              className="pl-10 pr-10 bg-zinc-100/50 dark:bg-zinc-900/50 border-transparent focus:border-zinc-300 dark:focus:border-zinc-700 h-11 rounded-xl transition-all"
+              disabled={loading || sessionValid === null}
+              placeholder="••••••••"
+              className="h-11 bg-[#0a1118]/50 border-slate-800 text-white placeholder:text-slate-600 focus:border-emerald-500/50 focus:ring-emerald-500/20 transition-all"
             />
           </div>
 
           {error ? (
-            <p role="alert" className="text-sm text-destructive text-center font-medium bg-destructive/10 text-destructive py-2 rounded-lg">
-              {error}
-            </p>
+            <div className="p-3 rounded-md bg-rose-500/10 border border-rose-500/20">
+              <p role="alert" className="text-xs font-medium text-rose-500">
+                {error}
+              </p>
+            </div>
           ) : null}
+
           <Button 
             type="submit" 
-            disabled={loading} 
-            className="w-full h-11 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 shadow-md transition-all font-medium text-base mt-2"
+            disabled={loading || sessionValid === null} 
+            className="w-full h-11 bg-emerald-500 hover:bg-emerald-400 text-[#0d161f] font-bold text-sm shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all active:scale-[0.98] mt-2"
           >
-            {loading ? "Updating..." : "Update password"}
+            {loading ? (
+              <div className="flex items-center justify-center gap-2">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#0d161f] border-t-transparent" />
+                <span>UPDATING...</span>
+              </div>
+            ) : "UPDATE PASSWORD"}
           </Button>
         </form>
-      </CardContent>
-    </Card>
+        
+        <div className="flex justify-center mt-6">
+          <Link 
+            href="/auth/login" 
+            className="text-xs font-medium text-slate-400 hover:text-emerald-400 transition-colors flex items-center gap-2"
+          >
+            <ArrowLeft className="w-4 h-4" /> Back to login
+          </Link>
+        </div>
+      </div>
+    </div>
   )
 }

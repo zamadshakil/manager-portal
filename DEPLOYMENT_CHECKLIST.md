@@ -1,208 +1,206 @@
-# Task & Team Management System - Deployment Checklist
+# Hierarchia Manager Portal — Deployment Checklist
+
+**Platform:** Railway (all services in a single project)
+**Last Updated:** May 5, 2026
+
+---
+
+## Railway Services Overview
+
+| Service | Type | Purpose |
+|---------|------|---------|
+| **manager-portal** | Next.js 16 (Railpack) | Main application |
+| **mcp-service** | Node.js | MCP chat orchestration |
+| **FastAPI-8UVj** | Python/FastAPI | RAG analytics |
+| **Supabase** | Self-hosted stack | Database, Auth, Storage, Realtime |
+| **Kong** | API Gateway | Supabase public URL |
+| **Postgres** | PostgreSQL + pgvector | Primary database |
+| **GoTrue Auth** | Auth server | Supabase authentication |
+
+---
 
 ## Pre-Deployment Verification
 
 ### Code Quality
 
-- [x] All new TypeScript code passes type checking
+- [x] All TypeScript code passes type checking
 - [x] No unused imports or variables
 - [x] All server actions use `"use server"` directive
 - [x] All form inputs validated with Zod schemas
 - [x] Error messages are user-friendly (no database leakage)
-- [x] Console errors replaced with structured logging
+- [x] `server-only` imports on all sensitive modules
 
 ### Security
 
 - [x] All endpoints require role verification via `requireRole()`
 - [x] Team ownership verified via `canManageTeam()` where applicable
-- [x] listRules() filters by team_id for managers
-- [x] listTeamMembers() filters by team_id for managers
+- [x] `listRules()` filters by team_id for managers
+- [x] `listTeamMembers()` filters by team_id for managers
 - [x] No SQL injection vectors (using Supabase client)
-- [x] RLS policies configured on database
+- [x] RLS policies configured on all database tables
 - [x] Activity logging enabled for all modifications
+- [x] Security headers in `next.config.mjs` (HSTS, CSP, X-Frame-Options DENY)
+- [x] Chat thread RLS (per-user only)
+- [x] RAG document RLS (role-based scoping)
 
-### Database
+### Database (Railway Postgres)
 
-- [x] Schema includes team_id foreign keys
-- [x] tasks.rule_ids column exists (JSONB type)
-- [x] teams table has manager_id column
-- [x] All tables have proper constraints and indexes
-- [x] RLS policies active on: tasks, validation_rules, profiles, submissions
+- [x] All migrations applied (001–009 + RAG + chat schema)
+- [x] pgvector extension enabled
+- [x] `rag_documents` table with HNSW index
+- [x] `chat_threads`, `chat_messages`, `chat_documents` tables
+- [x] `ai_credit_limits`, `ai_usage_log` tables
+- [x] RLS enabled on all tables
+- [x] Triggers: `handle_new_user`, `touch_updated_at`, `bump_thread_updated_at`, `rag_documents_tsv_update`
 
 ### UI/UX
 
 - [x] All form fields have proper labels and help text
-- [x] Error messages display clearly
+- [x] Error messages display clearly (toast notifications via Sonner)
 - [x] Success messages confirm operations
 - [x] Buttons disabled during async operations (loading states)
-- [x] Mobile responsive design maintained
+- [x] Mobile responsive design with bottom nav
 - [x] Accessible markup with ARIA labels
+- [x] Smart AI chat with tool-call rendering
+- [x] Department management CRUD
 
 ---
 
-## Local Testing (Before Staging)
+## Environment Variables Checklist
 
-### Team Management
+### manager-portal (Railway)
 
-- [ ] Log in as main_admin
-- [ ] Navigate to `/dashboard/team`
-- [ ] Create a new team "Test Team"
-  - [ ] Form validates team name (required, 2-100 chars)
-  - [ ] Description is optional
-  - [ ] Manager dropdown populated with managers
-  - [ ] Success message appears
-- [ ] Edit team name
-  - [ ] Form populated with current values
-  - [ ] Changes saved immediately
-  - [ ] Cancel button clears edit state
-- [ ] Delete empty team
-  - [ ] Confirmation dialog shown
-  - [ ] Team removed from list
-  - [ ] Team removed from task composer dropdown
-- [ ] Attempt to delete team with tasks
-  - [ ] Error message shown: "Cannot delete team with active tasks"
-  - [ ] Team remains in list
+| Variable | Set? | Notes |
+|----------|------|-------|
+| `NEXT_PUBLIC_SUPABASE_URL` | [ ] | Kong public domain |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | [ ] | JWT signed by self-hosted GoTrue |
+| `SUPABASE_SERVICE_ROLE_KEY` | [ ] | Service-role JWT |
+| `OPENROUTER_API_KEY` | [ ] | Powers chat + embeddings + validation |
+| `R2_ACCOUNT_ID` | [ ] | Cloudflare R2 |
+| `R2_ACCESS_KEY_ID` | [ ] | Cloudflare R2 |
+| `R2_SECRET_ACCESS_KEY` | [ ] | Cloudflare R2 |
+| `R2_BUCKET_NAME` | [ ] | Cloudflare R2 |
+| `R2_PUBLIC_URL` | [ ] | Cloudflare R2 |
+| `UPSTASH_REDIS_REST_URL` | [ ] | Rate limiting + cron |
+| `UPSTASH_REDIS_REST_TOKEN` | [ ] | Rate limiting + cron |
+| `INNGEST_EVENT_KEY` | [ ] | From Inngest Cloud |
+| `INNGEST_SIGNING_KEY` | [ ] | From Inngest Cloud |
+| `MCP_SERVICE_URL` | [ ] | Private Railway URL |
+| `MCP_SERVICE_TOKEN` | [ ] | Shared secret |
+| `RAG_SERVICE_URL` | [ ] | Private Railway URL |
+| `RAG_SERVICE_TOKEN` | [ ] | Shared secret |
+| `BREVO_API_KEY` | [ ] | Transactional emails |
+| `BREVO_SENDER_EMAIL` | [ ] | Sender address |
+| `CRON_SECRET` | [ ] | Cron endpoint auth |
+| `NEXT_PUBLIC_SITE_URL` | [ ] | Public portal URL |
+| `NODE_ENV` | [ ] | `production` |
 
-### Task Creation
+### mcp-service (Railway)
 
-- [ ] Log in as manager
-- [ ] Navigate to `/dashboard/tasks`
-- [ ] Create task for own team
-  - [ ] Team selector shows only own team
-  - [ ] Member selector shows only own team members
-  - [ ] Rules selector shows only own team's rules
-  - [ ] All controls work correctly
-- [ ] Assign to all members
-  - [ ] Task created with all team members assigned
-  - [ ] Activity log shows correct assignment count
-- [ ] Assign to specific members
-  - [ ] Task created with selected members only
-  - [ ] Other team members not assigned
+| Variable | Set? | Notes |
+|----------|------|-------|
+| `SUPABASE_URL` | [ ] | Same as portal's SUPABASE_URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | [ ] | Required for persistence |
+| `MCP_SERVICE_TOKEN` | [ ] | Same shared secret |
+| `RAG_SERVICE_URL` | [ ] | For searchDocument tool |
+| `RAG_SERVICE_TOKEN` | [ ] | Same shared secret |
+| `OPENROUTER_API_KEY` | [ ] | LLM provider |
 
-### Rule Selection
+### FastAPI-8UVj (Railway)
 
-- [ ] Create task with all rules selected
-  - [ ] task.rule_ids stored with all IDs
-  - [ ] Member submission validated against all rules
-- [ ] Create task with specific rules selected
-  - [ ] task.rule_ids stored with only selected IDs
-  - [ ] Member submission validated against selected rules only
-- [ ] Create task with no rules selected
-  - [ ] task.rule_ids stored as empty array []
-  - [ ] Member submission skips all standing rules
-  - [ ] Warning shown: "No standing rules selected"
-
-### Authorization
-
-- [ ] Log in as manager of Team A
-  - [ ] Cannot see Team B's tasks (403)
-  - [ ] Cannot create task for Team B
-  - [ ] Cannot see Team B's rules in dropdown
-  - [ ] Cannot see Team B's members in dropdown
-- [ ] Log in as main_admin
-  - [ ] Can see all teams
-  - [ ] Can create tasks for any team
-  - [ ] Can see all rules/members in dropdowns
-- [ ] Log in as team member
-  - [ ] Cannot access `/dashboard/team` (redirect or 403)
-  - [ ] Cannot see task creation form
-  - [ ] Can see and submit only assigned tasks
+| Variable | Set? | Notes |
+|----------|------|-------|
+| `DATABASE_URL` | [ ] | Railway Postgres connection string |
+| `RAG_SERVICE_TOKEN` | [ ] | Auth token |
 
 ---
 
-## Staging Deployment
+## Deployment Steps
 
-### Pre-Deploy Steps
-
+### 1. Push to GitHub
 ```bash
-# 1. Create feature branch from main
-git checkout main
-git pull origin main
-git checkout -b feature/task-team-management
-
-# 2. Merge all changes
-git merge v0/zamadshakil-1740964f
-
-# 3. Run type check
-pnpm type-check
-
-# 4. Build project
-pnpm build
-
-# 5. Run linter
-pnpm lint
-
-# 6. Commit changes
 git add .
-git commit -m "feat: task & team management system
-
-- Implement team CRUD (create, read, update, delete)
-- Add per-task validation rule selection
-- Scope data layer queries by team_id
-- Strengthen permission checks in rules action
-- Add team management UI components
-- Comprehensive audit of logical flows"
-
-# 7. Push to GitHub
-git push origin feature/task-team-management
-
-# 8. Create pull request on GitHub
+git commit -m "feat: <description>"
+git push origin main
 ```
 
-### Staging Tests
+### 2. Railway Auto-Deploys
+Railway monitors the `main` branch and auto-deploys on push. Monitor the deploy logs in Railway dashboard.
 
-On staging environment:
+### 3. Run Migrations (if schema changed)
+1. Open Supabase Studio on Railway
+2. Navigate to SQL Editor
+3. Paste and execute any new migration files
+4. Verify with `\dt` or table browser
 
-- [ ] Fresh team creation works end-to-end
-- [ ] Task creation and assignment functions
-- [ ] Rule selection applies correctly to submissions
-- [ ] Permission boundaries respected between teams
-- [ ] Activity log entries created for all operations
-- [ ] No console errors or warnings
-- [ ] Database transactions complete successfully
-- [ ] Revalidation triggers and clears stale cache
+### 4. Verify Inngest Registration
+1. Check Inngest Cloud dashboard
+2. Verify the `/api/inngest` endpoint is registered
+3. Confirm functions are discovered:
+   - `process-submission`
+   - `handle-submission-failure`
+   - `mark-missed-cron`
 
 ---
 
-## Production Deployment
+## Post-Deployment Verification
 
-### Final Checklist
+### Core Functionality
 
-- [ ] All staging tests passed
-- [ ] Code review approved
-- [ ] Database backup taken
-- [ ] Team notified of deployment
-- [ ] Deployment window scheduled (off-peak recommended)
-- [ ] Rollback plan documented
+- [ ] Login works (email + password via GoTrue)
+- [ ] Forgot password flow works
+- [ ] First-login password reset gate works
+- [ ] Dashboard loads with correct role-based views
+- [ ] Navigation works (sidebar, mobile nav, tabs)
 
-### Deployment Steps
+### Task Management
 
-```bash
-# 1. Merge PR to main
-# (via GitHub UI or CLI)
+- [ ] Admin can create teams/departments
+- [ ] Manager can create tasks for own team
+- [ ] Manager can assign tasks to specific or all members
+- [ ] Member sees assigned tasks
+- [ ] Member can submit documents (PDF, DOCX, PPTX, images)
+- [ ] Submission triggers Inngest pipeline
+- [ ] Pipeline processes: parsing → validating → scored → passed/failed
+- [ ] Late submission flow works with reason
 
-# 2. Wait for CI/CD to complete
-# (Vercel should auto-deploy)
+### Smart AI
 
-# 3. Monitor deployment logs
-# (check for any errors)
+- [ ] Smart AI chat loads
+- [ ] Chat sends messages and receives streaming responses
+- [ ] Tool calls work (queryDatabase returns real data)
+- [ ] Document search tool works (searchDocument)
+- [ ] Chat threads persist and appear in history
+- [ ] File upload works (to R2 → indexed in pgvector)
+- [ ] AI credit limits are enforced
 
-# 4. Test on production
-# (create test team, verify scoping)
+### Department Management
 
-# 5. Notify team
-# (deployment complete, new features available)
-```
+- [ ] Admin can view all departments
+- [ ] Admin can create new departments
+- [ ] Admin can edit department details
+- [ ] Admin can assign/remove members
+- [ ] Admin can assign managers
+- [ ] Cannot delete departments with active tasks
 
-### Post-Deployment Verification
+### Background Jobs
 
-- [ ] main_admin can create teams
-- [ ] Managers can create tasks for own team
-- [ ] Rule selection works correctly
-- [ ] Cross-team access is blocked
-- [ ] Activity logs record all operations
-- [ ] No error messages in browser console
-- [ ] Performance acceptable (queries < 1s)
+- [ ] 15-minute cron fires via Inngest
+- [ ] Missed assignments are marked correctly
+- [ ] Stuck submissions are recovered
+- [ ] Expired announcements are deleted
+- [ ] Expired materials are deleted (+ R2 blobs + RAG index)
+
+### Other Features
+
+- [ ] Announcements CRUD (team-scoped + global)
+- [ ] Materials CRUD with file upload/download
+- [ ] Validation rules CRUD
+- [ ] Reports chart renders
+- [ ] Activity log shows operations
+- [ ] AI usage dashboard shows credit consumption
+- [ ] Authenticated download proxy works
+- [ ] Welcome email sends on user provisioning
 
 ---
 
@@ -210,94 +208,55 @@ On staging environment:
 
 ```bash
 # 1. Identify problematic commit
-git log --oneline main | head -20
+git log --oneline main -10
 
 # 2. Revert changes
 git revert <commit-hash>
 
-# 3. Push to main
+# 3. Push to main (Railway auto-redeploys)
 git push origin main
 
-# 4. Verify Vercel redeploys previous version
-
-# 5. Restore from database backup if needed
+# 4. If database migration caused issues:
+#    - Restore from Railway Postgres backup
+#    - Or apply a reverse migration SQL
 ```
 
 ---
 
-## Known Issues & Limitations
+## Monitoring
 
-### Current Limitations
+### Railway Dashboard
+- Check service status (all services should show "Online")
+- Monitor deploy logs for errors
+- Check memory/CPU usage
 
-1. **No bulk rule reassignment** — Must update task rule_ids manually or via bulk API
-2. **No team archiving** — Can only delete empty teams (consider adding soft-delete)
-3. **No manager transition workflow** — Changing managers doesn't notify them automatically
-4. **No rule templates** — Each team creates rules from scratch
+### Inngest Dashboard
+- Monitor function execution history
+- Check for failed runs (auto-retried up to 3 times)
+- Verify cron schedule fires every 15 minutes
 
-### Planned Improvements
+### Application Health
+```bash
+# Check Smart AI health
+curl https://<portal-url>/api/smart-ai/health
 
-- [ ] Implement team archiving (status: active/archived)
-- [ ] Add rule templates/library shared across teams
-- [ ] Build manager reassignment workflow
-- [ ] Add team-level notifications
-- [ ] Create audit log viewer UI
-
----
-
-## Support & Documentation
-
-### Files to Share with Team
-
-1. `docs/TASK_TEAM_MANAGEMENT_AUDIT.md` — Technical details and testing checklist
-2. `docs/IMPLEMENTATION_SUMMARY.md` — Quick reference guide
-3. `docs/ARCHITECTURE_DIAGRAM.md` — Visual system architecture
-4. `DEPLOYMENT_CHECKLIST.md` — This file
-
-### FAQ
-
-**Q: Can a manager see other teams' rules?**
-A: No, `listRules()` is team-scoped for managers.
-
-**Q: What happens if a manager is assigned to a new team?**
-A: Their `profile.team_id` is updated, and they immediately see the new team's rules/members.
-
-**Q: Can I change a task's rules after creation?**
-A: Currently no, but the API supports bulk updates if needed.
-
-**Q: What if I delete a team with active tasks?**
-A: The delete operation will fail with an error message; you must archive or complete tasks first.
-
-**Q: Are all operations logged?**
-A: Yes, all team/task/rule modifications are logged to the activity_log table.
+# Check cron endpoint
+curl -H "Authorization: Bearer $CRON_SECRET" \
+  https://<portal-url>/api/cron/mark-missed
+```
 
 ---
 
-## Success Criteria
+## Known Limitations
 
-Deployment is successful when:
-
-1. ✓ Admins can create and manage teams
-2. ✓ Managers can create tasks and select team-specific rules
-3. ✓ Members cannot see other teams' data
-4. ✓ All operations are logged
-5. ✓ No security vulnerabilities detected
-6. ✓ Performance is acceptable (< 1 second response times)
-7. ✓ Zero data loss or corruption
+1. **No bulk rule reassignment** — Must update task `rule_ids` manually
+2. **No team archiving** — Can only delete empty teams
+3. **No realtime submission status** — Members must refresh to see pipeline progress
+4. **No PDF report export** — CSV export available for some data
+5. **`database.types.ts` is a stub** — Using `Database = any` shim
 
 ---
 
-## Contact & Escalation
-
-If issues arise:
-
-1. Check logs in Vercel dashboard
-2. Review error messages in console
-3. Consult `TASK_TEAM_MANAGEMENT_AUDIT.md` for troubleshooting
-4. Rollback if necessary (see rollback plan above)
-5. Open GitHub issue with logs and reproduction steps
-
----
-
-**Deployment Date:** [TO BE FILLED]
 **Deployed By:** [TO BE FILLED]
-**Approved By:** [TO BE FILLED]
+**Deploy Date:** [TO BE FILLED]
+**Verified By:** [TO BE FILLED]

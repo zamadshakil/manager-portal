@@ -5,19 +5,22 @@
 > should be able to read just this file plus `README.md` and orient
 > themselves in under fifteen minutes.
 
-Last reviewed: 2026-04-29 (full end-to-end flow audit) 
+Last reviewed: 2026-05-05 (full architecture + documentation audit) 
 
 ---
 
 ## 0. TL;DR for new developers
 
 - **Framework:** Next.js 16 (App Router), React 19, Server Actions, RSC-first.
-- **Auth:** Supabase Auth (email/password). Provision-only — no public sign-up.
-- **Database:** Supabase Postgres with RLS on every table.
-- **Files:** Vercel Blob, fronted by an authenticated download proxy.
-- **AI:** DigitalOcean AI Inference (via Vercel AI SDK) for validation + summarisation (DeepSeek V3); Tesseract OCR with Nemotron VL fallback for images.
-- **Background work:** Inngest durable background jobs for the validation pipeline; Vercel Cron (daily) + Upstash Redis (15-minute intervals) for missed-deadline sweeps and stuck-submission recovery.
+- **Auth:** Supabase Auth via self-hosted GoTrue on Railway (email/password). Provision-only — no public sign-up.
+- **Database:** Self-hosted Supabase Postgres on Railway with RLS on every table + pgvector for RAG.
+- **Files:** Cloudflare R2 (S3-compatible), fronted by an authenticated download proxy.
+- **AI — Validation:** OpenRouter → Gemini 2.0 Flash (via Vercel AI SDK v6) for validation + summarisation + vision OCR.
+- **AI — Smart AI Chat:** OpenRouter → GPT-4o-mini (configurable) with native tool-calling + RAG retrieval (pgvector + BM25).
+- **Background work:** Inngest durable step functions for the validation pipeline + 15-minute cron for missed-deadline sweeps, stuck-submission recovery, and expiration cleanup.
 - **Rate limit / idempotency:** Upstash Redis.
+- **Email:** Brevo (transactional welcome emails on user provisioning).
+- **Deployment:** Railway (all services — portal, MCP, RAG, Supabase stack — in a single project).
 - **Roles:** `main_admin`, `manager`, `member`. Three different views of the same dashboard.
 
 If you only remember one thing: **every mutation is a Server Action that validates with Zod, re-checks the role with `requireRole`, writes to Supabase, then `revalidatePath`s the affected routes.** Anything that bypasses that pattern is a bug.
@@ -34,40 +37,47 @@ Hierarchia is a portal where managers assign document-style tasks (PDF, DOCX, PP
 | **Manager** | Owns one team. Configures validation rules, creates tasks (single or bulk-assigned), reviews submissions, posts team announcements/materials. |
 | **Member** | Sees their assigned tasks, uploads submissions, reads announcements, downloads materials, sees their own performance. |
 
-Authentication is **Supabase Auth** (email + password) with **provision-only onboarding**. There is no public sign-up. Data lives in **Supabase Postgres** behind RLS. Files live in **Vercel Blob** with download proxied through a server route that re-checks RLS. The AI pipeline runs on **DigitalOcean AI (DeepSeek)**, with **Tesseract.js + Nemotron VL** for OCR fallback. Per-user/per-team rate-limiting and per-submission idempotency live in **Upstash Redis**.
+Authentication is **Supabase Auth** (self-hosted GoTrue on Railway, email + password) with **provision-only onboarding**. There is no public sign-up. Data lives in **self-hosted Supabase Postgres** behind RLS. Files live in **Cloudflare R2** with download proxied through a server route that re-checks RLS. The AI validation pipeline runs on **OpenRouter (Gemini 2.0 Flash)** via Vercel AI SDK v6, with native Gemini Vision for OCR. The **Smart AI** conversational assistant uses OpenRouter with tool-calling and native pgvector RAG retrieval. Per-user/per-team rate-limiting and per-submission idempotency live in **Upstash Redis**. AI usage is tracked via a per-user **credit system** with configurable periods.
 
 ---
 
 ## 2. High-level architecture
 
 ```
-+---------------------+      +------------------------+      +----------------------+
-|  Browser            |      |  Next.js 16 on Vercel  |      |  Supabase            |
-|  RSC + Actions      |<---->|  (App Router)          |<---->|  Postgres + Auth     |
-|  Browser SSR client |      |                        |      |  + RLS               |
-+---------------------+      |  proxy.ts (middleware) |      +----------------------+
-                             |  Server Actions        |
-                             |  Route Handlers        |      +----------------------+
-                             |  after() jobs          +----->|  Vercel Blob         |
-                             |  Vercel Cron entry     |      |  (random-suffix URL) |
-                             |                        |      +----------------------+
-                             |                        |
-                             |                        |      +----------------------+
-                             |                        +----->|  Upstash Redis       |
-                             |                        |      |  rate limit + lock   |
-                             |                        |      +----------------------+
-                             |                        |
-                             |                        |      +----------------------+
-                             |                        +----->|  Groq via AI SDK     |
-                             |                        |      |  + Tesseract OCR     |
-                             +------------------------+      +----------------------+
++---------------------+      +---------------------------+      +--------------------------+
+|  Browser            |      |  Next.js 16 on Railway    |      |  Self-hosted Supabase    |
+|  RSC + Actions      |<---->|  (App Router, standalone) |<---->|  Postgres + pgvector    |
+|  Browser SSR client |      |                           |      |  + GoTrue Auth + RLS    |
++---------------------+      |  proxy.ts (middleware)    |      |  (via Kong gateway)     |
+                             |  Server Actions           |      +--------------------------+
+                             |  Route Handlers           |
+                             |  Inngest step functions   |      +--------------------------+
+                             |                           +----->|  Cloudflare R2          |
+                             |                           |      |  (S3-compatible files)  |
+                             |                           |      +--------------------------+
+                             |                           |
+                             |                           |      +--------------------------+
+                             |                           +----->|  Upstash Redis          |
+                             |                           |      |  rate limit + cron gate |
+                             |                           |      +--------------------------+
+                             |                           |
+                             |                           |      +--------------------------+
+                             |                           +----->|  OpenRouter → Gemini    |
+                             |                           |      |  via AI SDK v6          |
+                             +---------------------------+      +--------------------------+
+                                       ^           ^
+                                       |           |
+                            +----------+--+   +----+-----------+
+                            | mcp-service |   | FastAPI (RAG)  |
+                            | (Node.js)   |   | analytics      |
+                            +-------------+   +----------------+
                                        ^
                                        |
                             +--------------------+
-                            |  Vercel Cron       |
+                            |  Inngest Cron      |
                             |  every 15 minutes  |
-                            |  /api/cron/        |
-                            |  mark-missed       |
+                            |  mark-missed +     |
+                            |  expire + recover  |
                             +--------------------+
 ```
 
@@ -76,24 +86,36 @@ Authentication is **Supabase Auth** (email + password) with **provision-only onb
 | Folder | Purpose |
 |---|---|
 | `app/(dashboard)/dashboard/` | All authenticated routes. RSC-first; the route-group layout enforces session and renders top-bar/sidebar/mobile-nav. |
-| `app/auth/` | Login, OAuth callback, signout, error page. |
-| `app/actions/` | Server Actions: `submissions`, `tasks`, `materials`, `announcements`, `users`, `rules`, `profile`. Each validates with Zod, re-checks role with `requireRole`, writes to Supabase, then `revalidatePath`s. |
-| `app/api/` | Route handlers: `/api/download/[id]` (RLS-checked file streaming), `/api/cron/mark-missed` (scheduled job). |
-| `lib/supabase/` | `client.ts` (browser SSR), `server.ts` (RSC + actions), `admin.ts` (service-role; **`server-only`**), `proxy.ts` (middleware session refresh + must-reset gate), `database.types.ts` (loose stub today; see §10 known issues). |
-| `lib/llm/` | `pipeline.ts` (orchestrator), `validate.ts` (Zod-typed Groq calls + retry/backoff). |
-| `lib/parse/` | Format-specific parsers: PDF (`pdf-parse`), DOCX (`mammoth`), PPTX/.doc (`officeparser`), images (Tesseract → Groq Vision fallback). |
+| `app/auth/` | Login, forgot-password, update-password, OAuth callback, signout, error page. |
+| `app/actions/` | Server Actions: `submissions`, `tasks`, `materials`, `announcements`, `departments`, `users`, `rules`, `profile`, `ai-credits`. Each validates with Zod, re-checks role with `requireRole`, writes to Supabase, then `revalidatePath`s. |
+| `app/api/smart-ai/` | Smart AI endpoints: `chat` (streaming), `upload` (R2 + RAG indexing), `threads` (history), `analytics`, `health`. |
+| `app/api/inngest/` | Inngest webhook handler for background functions. |
+| `app/api/` | Route handlers: `/api/download/[id]` (RLS-checked file streaming), `/api/ai-credits/me`, `/api/vitals`. |
+| `lib/supabase/` | `client.ts` (browser SSR), `server.ts` (RSC + actions), `admin.ts` (service-role; **`server-only`**), `proxy.ts` (middleware session refresh + must-reset gate), `database.types.ts` (loose stub). |
+| `lib/llm/` | `pipeline.ts` (orchestrator), `validate.ts` (Zod-typed OpenRouter/Gemini calls + retry/backoff). |
+| `lib/parse/` | Format-specific parsers: PDF (`pdf-parse`), DOCX (`mammoth`), PPTX/.doc (`officeparser`), images (Tesseract → Gemini Vision fallback). |
+| `lib/smart-ai/` | `indexer.ts` (pgvector document indexing), `retriever.ts` (hybrid vector+BM25 retrieval via RPC), `client.ts` (MCP client), `sliding-window.ts` (token management). |
+| `lib/inngest/` | `client.ts` (Inngest instance), `functions.ts` (process-submission, mark-missed-cron, handle-failure). |
 | `lib/data.ts` | All **read** queries used by RSC pages — single source of truth for query shapes. |
 | `lib/auth.ts` | `requireProfile`, `requireRole`, `canManageTeam`, `getCurrentProfile`. |
 | `lib/auth-shared.ts` | `roleLabel` (safe to import from client components — no `server-only` deps). |
-| `lib/redis.ts` | Upstash client + `uploadLimiter()` + `llmLimiter()` (`server-only`). |
+| `lib/r2.ts` | Cloudflare R2 client (`put`, `del`, `head`, `get`) via `@aws-sdk/client-s3`. |
+| `lib/redis.ts` | Upstash client + `uploadLimiter()` + `llmLimiter()` + `chatLimiter()` (`server-only`). |
+| `lib/email.ts` | Brevo transactional email integration (welcome emails). |
+| `lib/env.ts` | Centralized env-var validation with Railway migration notes. |
 | `lib/activity.ts` | `logActivity()` — append-only audit trail (`server-only`). |
 | `components/dashboard/` | All UI for the dashboard. Files are named after the page they primarily serve. |
-| `components/auth/` | Sign-in form (only client-side Supabase mutation in the app). |
+| `components/dashboard/smart-ai/` | Smart AI chat panel, analytics dashboard, shell layout. |
+| `components/dashboard/ai-usage/` | AI credit management and usage display. |
+| `components/auth/` | Sign-in form, forgot-password form. |
 | `components/ui/` | shadcn/ui primitives. |
+| `mcp-service/` | Node.js MCP chat orchestration service (separate Railway service). |
+| `rag-service/` | Python FastAPI RAG analytics service (separate Railway service). |
 | `scripts/*.sql` | Database migrations. **Run in numeric order, top-down.** |
+| `supabase/migrations/` | RAG pgvector schema + chat schema migrations. |
 | `proxy.ts` | Edge proxy entry; delegates to `lib/supabase/proxy.ts`. |
-| `vercel.json` | Cron schedule. |
-| `next.config.mjs` | Security headers + Server Actions body limit (30 MB). |
+| `railway.json` | Railway build + deploy configuration. |
+| `next.config.mjs` | Security headers + Server Actions body limit (30 MB) + standalone output. |
 
 ---
 
@@ -247,10 +269,10 @@ Every action returns a discriminated `ActionResult` (`{ ok: true, … } | { ok: 
    1. File type + size validated against `ACCEPTED_MIME_TYPES` and `MAX_FILE_SIZE_BYTES = 25 MB`.
    2. Per-user upload rate-limit (`uploadLimiter`: 20 / 10 min).
    3. Loads the task, the assignment, and re-applies the deadline rules. Refuses if the assignment is already in a non-`assigned` state.
-   4. Uploads to Vercel Blob with `addRandomSuffix: true`. The URL is unguessable; the client never receives it directly — they go through `/api/download/[id]?type=submission`.
+   4. Uploads to Cloudflare R2 with `addRandomSuffix: true`. The URL is unguessable; the client never receives it directly — they go through `/api/download/[id]?type=submission`.
    5. Inserts the `submissions` row with `task_id`, `task_assignment_id`, `is_late`, `late_reason`, `submitted_at`.
    6. **Eagerly mirrors** the matching `task_assignment` to `submitted` / `late_submitted` so manager dashboards reflect status without waiting for the pipeline.
-   7. `inngest.send` schedules the AI pipeline.
+   7. `inngest.send` schedules the AI pipeline as a durable Inngest step function.
 4. `revalidatePath` for the dashboard, submissions list, the task list, and the specific task detail page.
 
 ### 6.4 AI validation pipeline (`lib/inngest/functions.ts`)
@@ -263,32 +285,33 @@ Every action returns a discriminated `ActionResult` (`{ ok: true, … } | { ok: 
    - PPTX (and best-effort `.doc`) → `officeparser.parseOfficeAsync`.
    - Images → Tesseract; if confidence is low or the text is sparse, falls back to **Groq Vision** (`describeImage`).
    - Output is clamped to 60 KB with a `[...truncated...]` marker.
-4. **Vision fallback** triggers when the file is an image AND (text length < 60 OR OCR confidence < 60). The vision result wins only if it's longer than the OCR result.
-5. **Validate.** Pulls all `enabled` `validation_rules` for the team. If the submission is for a task with `instructions`, a **synthetic rule** is appended (id `task:{taskId}`, weight 2, threshold 70). All rules run **in parallel** via `Promise.all`. Each call is wrapped in `withRetry(3, exp-backoff)` against DigitalOcean 429/5xx.
-6. **Persist runs.** Synthetic `task:` rules are filtered out before writing `validation_runs` (they don't have a real FK target).
+4. **Vision fallback** triggers when the file is an image AND (text length < 60 OR OCR confidence < 60). Gemini Vision is used natively; the vision result wins only if it’s longer than the OCR result.
+5. **Validate.** Pulls all `enabled` `validation_rules` for the team (with optional `rule_ids` filtering per task). If the submission is for a task with `instructions`, a **synthetic rule** is appended (id `task:{taskId}`, weight 2, threshold 70). All rules run **in parallel** via `Promise.all`. Each call is wrapped in `withRetry(2, exp-backoff)` against OpenRouter 429/5xx.
+6. **Persist runs.** Synthetic `task:` rules are filtered out before writing `validation_runs` (they don’t have a real FK target).
 7. **Aggregate.** Weighted average of rule scores. `passed` requires every rule to pass and no `fail`-severity flag. Any hard fail → `failed`. Otherwise → `needs_review`.
-8. **Late preserves late.** If `submission.is_late` was already `true`, the final status is `late_submitted` regardless of the LLM verdict. The aggregate score, summary, and flags still reflect the AI's judgement and surface in the submission detail page.
+8. **Late preserves late.** If `submission.is_late` was already `true`, the final status is `late_submitted` regardless of the LLM verdict. The aggregate score, summary, and flags still reflect the AI’s judgement and surface in the submission detail page.
 9. **Mirror.** When the submission has a `task_assignment_id`, the assignment is updated to `submitted` / `late_submitted` (never `failed`/`needs_review` on the assignment row — see the asymmetry note in §4).
+10. **Index for RAG.** On successful processing, the submission content is indexed into `rag_documents` (pgvector) so Smart AI can retrieve it.
 
-### 6.5 Cron — missed deadlines and stuck-pipeline recovery
+### 6.5 Cron — missed deadlines, stuck-pipeline recovery, and expiration cleanup
 
-**Scheduling Strategy:** Since Vercel Cron allows only **one job per day**, we use **Upstash Redis** to maintain 15-minute execution intervals. The `vercel.json` entry calls `/api/cron/mark-missed` once daily (`0 0 * * *`), but the handler uses `shouldRunCronTask()` from `lib/upstash-scheduler.ts` to gate execution — it only runs if 15 minutes have elapsed since the last execution, stored in Redis.
+**Scheduling Strategy:** The cron runs as an **Inngest scheduled function** (`mark-missed-cron`) every 15 minutes. Upstash Redis is used for execution tracking and distributed locking via `lib/upstash-scheduler.ts`.
 
-The handler is protected by `Authorization: Bearer ${CRON_SECRET}` (see §8). It runs two queries via the admin client:
+The handler runs four operations via the admin client:
 
 1. **Mark missed.** `task_assignments.status = 'assigned'` join `tasks` where `due_at < now()` AND `tasks.allow_late = false` → flip to `missed`.
-2. **Recover stuck.** Any `submissions.status IN ('queued','parsing','validating')` whose `updated_at` is older than 30 minutes → flip to `failed` with a `"Validation pipeline timed out. Please retry."` flag. This is the failsafe for pipelines that crashed silently.
-
-The endpoint returns `{ ok, missedCount, stuckRecovered, skipped }` so it's easy to verify with curl. Executions are logged in `cron:mark-missed:executions` in Redis for monitoring.
+2. **Recover stuck.** Any `submissions.status IN ('queued','parsing','validating')` whose `updated_at` is older than 5 minutes → flip to `failed` with a `"Validation pipeline timed out. Please retry."` flag.
+3. **Expire announcements.** Deletes announcements where `expires_at < now()`.
+4. **Expire materials.** Deletes materials where `expires_at < now()`, removes R2 blobs, and cleans up RAG index entries.
 
 **Key modules:**
+- `lib/inngest/functions.ts` — `markMissedCronFn` Inngest scheduled function
 - `lib/upstash-scheduler.ts` — `shouldRunCronTask()`, `recordTaskExecution()`
-- `app/api/cron/scheduled-init/route.ts` — (optional) manual initialization endpoint
-- `app/api/cron/mark-missed/route.ts` — main cron handler with Upstash gating
+- `app/api/cron/mark-missed/route.ts` — legacy HTTP cron handler (also available)
 
 ### 6.6 Authenticated download proxy
 
-`/api/download/[id]?type=submission|material` runs `requireProfile()` first (which forces auth + must-reset gate via the proxy chain), then reads the row through the **session-bound** Supabase client so RLS enforces visibility. Once the row is resolved, the route fetches the unguessable Blob URL on the server and streams the bytes back with a sensible `Content-Disposition`. The Blob URL never crosses the network to the client.
+`/api/download/[id]?type=submission|material` runs `requireProfile()` first (which forces auth + must-reset gate via the proxy chain), then reads the row through the **session-bound** Supabase client so RLS enforces visibility. Once the row is resolved, the route fetches the file from Cloudflare R2 on the server and streams the bytes back with a sensible `Content-Disposition`. The R2 URL never crosses the network to the client.
 
 ---
 
@@ -296,8 +319,8 @@ The endpoint returns `{ ok, missedCount, stuckRecovered, skipped }` so it's easy
 
 | Module | Imports from | Imported by | Server-only? |
 |---|---|---|---|
-| `lib/upstash-scheduler.ts` | `@upstash/redis` | `app/api/cron/mark-missed`, monitoring tools | yes |
-| `lib/supabase/admin.ts` | `@supabase/supabase-js` | `app/actions/*`, `lib/inngest/functions.ts`, `lib/activity.ts`, `app/api/cron/*` | yes |
+| `lib/upstash-scheduler.ts` | `@upstash/redis` | `lib/inngest/functions.ts`, monitoring tools | yes |
+| `lib/supabase/admin.ts` | `@supabase/supabase-js` | `app/actions/*`, `lib/inngest/functions.ts`, `lib/activity.ts` | yes |
 | `lib/supabase/server.ts` | `@supabase/ssr`, `next/headers` | RSC pages, `lib/auth.ts`, `lib/data.ts`, action handlers | no (RSC compatible) |
 | `lib/supabase/client.ts` | `@supabase/ssr` | `components/auth/login-form.tsx` | no (browser) |
 | `lib/supabase/proxy.ts` | `@supabase/ssr`, `next/server` | `proxy.ts` (edge) | edge runtime |
@@ -305,42 +328,63 @@ The endpoint returns `{ ok, missedCount, stuckRecovered, skipped }` so it's easy
 | `lib/auth-shared.ts` | `lib/types.ts` | client components (sidebar/top-bar/etc) | no — safe for client |
 | `lib/data.ts` | `lib/supabase/server.ts`, `lib/types.ts` | RSC pages only | no |
 | `lib/activity.ts` | `lib/supabase/admin.ts`, `next/headers` | every action | yes |
-| `lib/redis.ts` | `@upstash/redis`, `@upstash/ratelimit` | `lib/inngest/functions.ts`, `app/actions/submissions.ts` | yes |
-| `lib/inngest/functions.ts` | `lib/supabase/admin.ts`, `lib/parse`, `lib/llm/validate.ts`, `lib/redis.ts` | `app/actions/submissions.ts` (via `after()`) | yes |
-| `lib/llm/validate.ts` | `ai`, `@ai-sdk/groq`, `zod` | `lib/inngest/functions.ts` | yes |
+| `lib/r2.ts` | `@aws-sdk/client-s3` | `app/actions/submissions.ts`, `app/actions/materials.ts`, `app/api/download/*` | yes |
+| `lib/redis.ts` | `@upstash/redis`, `@upstash/ratelimit` | `lib/inngest/functions.ts`, `app/actions/submissions.ts`, `app/api/smart-ai/chat` | yes |
+| `lib/email.ts` | native `fetch` (Brevo API) | `app/actions/users.ts` | no |
+| `lib/env.ts` | `process.env` | `lib/supabase/*`, `proxy.ts` | no |
+| `lib/inngest/client.ts` | `inngest` | `lib/inngest/functions.ts`, `app/actions/submissions.ts` | no |
+| `lib/inngest/functions.ts` | `lib/supabase/admin.ts`, `lib/parse`, `lib/llm/validate.ts`, `lib/redis.ts`, `lib/smart-ai/indexer.ts` | `app/api/inngest/route.ts` | yes |
+| `lib/llm/validate.ts` | `ai`, `@ai-sdk/openai`, `zod` | `lib/inngest/functions.ts` | yes |
 | `lib/parse/index.ts` | `pdf-parse`, `mammoth`, `officeparser`, `tesseract.js` | `lib/inngest/functions.ts` | yes |
+| `lib/smart-ai/indexer.ts` | `lib/supabase/admin.ts`, `@ai-sdk/openai` | `app/actions/*`, `lib/inngest/functions.ts` | yes |
+| `lib/smart-ai/retriever.ts` | `lib/supabase/admin.ts`, `@ai-sdk/openai` | `app/api/smart-ai/chat` | yes |
+| `lib/smart-ai/client.ts` | native `fetch` | `app/api/smart-ai/chat` | yes |
 
-The "yes" rows all start their files with `import "server-only"` so the bundler hard-fails on accidental client imports.
+The “yes” rows all start their files with `import "server-only"` so the bundler hard-fails on accidental client imports.
 
 ---
 
 ## 8. Environment variables
 
-These must be set on Vercel (Production + Preview). Locally they go in `.env.local` which is git-ignored.
+These must be set on the **Railway** service (`manager-portal`). Locally they go in `.env.local` which is git-ignored.
 
 | Variable | Required by | Notes |
 |---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | client + server | from Supabase project settings |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | client + server | RLS-bound public anon key |
+| `NEXT_PUBLIC_SUPABASE_URL` | client + server | Railway Kong public URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | client + server | JWT signed by self-hosted GoTrue |
 | `SUPABASE_SERVICE_ROLE_KEY` | server only | RLS bypass — keep secret |
-| `BLOB_READ_WRITE_TOKEN` | server only | Vercel Blob (auto-injected on Vercel) |
-| `UPSTASH_REDIS_REST_URL` | server only | rate limit + idempotency |
+| `R2_ACCOUNT_ID` | server only | Cloudflare R2 account |
+| `R2_ACCESS_KEY_ID` | server only | R2 access key |
+| `R2_SECRET_ACCESS_KEY` | server only | R2 secret key |
+| `R2_BUCKET_NAME` | server only | R2 bucket name |
+| `R2_PUBLIC_URL` | server only | R2 public URL (e.g. `https://pub-xxx.r2.dev`) |
+| `UPSTASH_REDIS_REST_URL` | server only | rate limit + cron tracking |
 | `UPSTASH_REDIS_REST_TOKEN` | server only | as above |
-| `DO_AI_API_KEY` | server only | used by the AI SDK Groq provider |
-| `DO_VALIDATION_MODEL` | optional | defaults to `deepseek-3.2` |
-| `DO_SUMMARY_MODEL` | optional | defaults to `deepseek-3.2` |
-| `DO_VISION_MODEL` | optional | defaults to `nemotron-nano-12b-v2-vl` |
-| `CRON_SECRET` | server only | shared secret for the cron endpoint — see below |
+| `OPENROUTER_API_KEY` | server only | OpenRouter API key (validation + Smart AI) |
+| `SMART_AI_MODEL` | optional | default: `openai/gpt-4o-mini` |
+| `DO_VALIDATION_MODEL` | optional | default: `google/gemini-2.0-flash-001` |
+| `DO_SUMMARY_MODEL` | optional | default: `google/gemini-2.0-flash-001` |
+| `DO_VISION_MODEL` | optional | default: `google/gemini-2.0-flash-001` |
+| `INNGEST_EVENT_KEY` | server only | Inngest Cloud event key |
+| `INNGEST_SIGNING_KEY` | server only | Inngest Cloud signing key |
+| `MCP_SERVICE_URL` | server only | MCP service private Railway URL |
+| `MCP_SERVICE_TOKEN` | server only | Shared secret for MCP |
+| `RAG_SERVICE_URL` | server only | RAG service private Railway URL |
+| `RAG_SERVICE_TOKEN` | server only | Shared secret for RAG |
+| `BREVO_API_KEY` | optional | Brevo transactional email |
+| `BREVO_SENDER_EMAIL` | optional | Sender address for emails |
+| `CRON_SECRET` | server only | shared secret for cron endpoint |
+| `NEXT_PUBLIC_SITE_URL` | client + server | public portal URL |
 
-### About `CRON_SECRET` and `UPSTASH_REDIS_*`
+### About `CRON_SECRET`
 
-**CRON_SECRET:** A random opaque token **you generate yourself**. There is no service that issues it. Generate one with:
+**CRON_SECRET:** A random opaque token **you generate yourself**. Generate one with:
 
 ```bash
 openssl rand -hex 32
 ```
 
-Add `CRON_SECRET = <value>` to *Vercel → Project → Settings → Environment Variables* for Production (and Preview if you want preview crons to fire). When Vercel Cron triggers `/api/cron/mark-missed`, it sends `Authorization: Bearer ${CRON_SECRET}` automatically. The route checks:
+Add `CRON_SECRET = <value>` to *Railway → Service → Variables*. The cron handler checks:
 
 ```ts
 const auth = request.headers.get("authorization")
@@ -349,29 +393,34 @@ if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
 }
 ```
 
-If the variable is **unset**, the check is skipped — intentional for local dev so `curl http://localhost:3000/api/cron/mark-missed` works without ceremony. **Always set it on Vercel** — otherwise anyone can trigger the job.
-
-**UPSTASH_REDIS_REST_URL & UPSTASH_REDIS_REST_TOKEN:** Required for 15-minute interval scheduling (via `lib/upstash-scheduler.ts`). These are auto-injected by Vercel if you've connected the Upstash integration, but can also be manually added. The cron handler uses Redis to gate execution, ensuring the task only runs once per 15 minutes despite Vercel calling it daily.
+If the variable is **unset**, the check is skipped — intentional for local dev. **Always set it on Railway.**
 
 Manual test:
 
 ```bash
 curl -i -H "Authorization: Bearer $CRON_SECRET" \
-  https://<your-deployment>.vercel.app/api/cron/mark-missed
+  https://<your-deployment>.up.railway.app/api/cron/mark-missed
 ```
 
 ---
 
 ## 9. Migrations
 
-Apply SQL files from `scripts/` in the Supabase **SQL Editor** (Project → SQL → New query → paste → Run). They are idempotent — safe to re-run.
+Apply SQL files from `scripts/` in the Supabase **SQL Editor** on Railway (Studio → SQL → New query → paste → Run). They are idempotent — safe to re-run.
 
 ```
-scripts/001_init_schema.sql                 -- tables, enums, indexes
-scripts/002_helper_functions.sql            -- current_user_role, etc + handle_new_user trigger
-scripts/003_rls_policies.sql                -- enable RLS + policies on the original tables
-scripts/004_seed_demo_data.sql              -- optional demo content
-scripts/005_tasks_and_late_submissions.sql  -- tasks / assignments / late columns / RLS hardening
+scripts/001_init_schema.sql                       -- tables, enums, indexes
+scripts/002_helper_functions.sql                  -- current_user_role, etc + handle_new_user trigger
+scripts/003_rls_policies.sql                      -- enable RLS + policies on the original tables
+scripts/004_seed_demo_data.sql                    -- optional demo content
+scripts/005_tasks_and_late_submissions.sql         -- tasks / assignments / late columns / RLS hardening
+scripts/006_security_hardening_and_indexes.sql     -- additional RLS + perf indexes
+scripts/006_expiration_for_materials.sql           -- expires_at for announcements/materials
+scripts/007_rule_ids_and_delete_policy.sql         -- per-task rule_ids + delete policies
+scripts/008_fix_manager_auth.sql                  -- manager auth fixes
+scripts/009_assign_managers_to_tasks.sql           -- manager task assignment
+supabase/migrations/20260505_rag_documents.sql    -- pgvector + HNSW + search RPCs + RLS
+scripts/smart-ai-chat-followup.sql                -- chat_threads/messages/documents schema + RLS
 ```
 
 If you only want the latest changes on top of an existing database, **running 005 alone is safe**: it re-creates any missing helpers (`current_user_role`, `current_user_team`, `is_manager_of`, `is_main_admin`, `touch_updated_at`) and skips anything that already exists.
@@ -389,42 +438,52 @@ If you only want the latest changes on top of an existing database, **running 00
 ### Shipped
 
 - Supabase auth with provision-only onboarding + forced password-reset gate
+- **Forgot password flow** (email-based reset with Brevo)
 - Three-role RBAC (main_admin / manager / member) enforced at RLS + middleware + server actions
-- **Tasks system end-to-end:** create, single/bulk assign, member submission, late-with-reason, missed via cron, manager assignment table on the task detail page
-- Submissions: upload, AI validation, retry, delete
-- Native parsers for PDF / DOCX / PPTX / images, with OCR + Vision fallback
-- LLM pipeline with idempotency lock, retry/backoff, structured output via Zod, weighted aggregate
+- **Department management** — full CRUD for teams with member/manager assignment, statistics, bulk operations
+- **Tasks system end-to-end:** create, single/bulk assign, member submission, late-with-reason, missed via cron, manager assignment table on the task detail page, per-task rule_ids selection
+- Submissions: upload to Cloudflare R2, AI validation via Inngest, retry, delete
+- Native parsers for PDF / DOCX / PPTX / images, with OCR + Gemini Vision fallback
+- LLM pipeline with Inngest step functions, idempotency lock, retry/backoff, structured output via Zod, weighted aggregate
 - Per-team validation rules CRUD with `{{TEXT}}` placeholder substitution
-- Announcements + materials (team-scoped, `expires_at` filtering for announcements)
+- **Smart AI conversational assistant** with native tool-calling, database access, and RAG retrieval
+- **Smart AI document upload** with R2 storage + pgvector RAG indexing
+- **Smart AI chat threads** with persistent history and thread sidebar
+- **AI credit system** — per-user usage quotas with configurable periods (daily/weekly/monthly)
+- **Native RAG** — pgvector + BM25 full-text search with RRF fusion, HNSW index
+- Announcements + materials (team-scoped, `expires_at` filtering, auto-expiration via Inngest cron)
+- **Welcome emails** via Brevo on user provisioning
 - Activity log (append-only audit trail; explicit RLS deny on client writes)
 - Reports page with daily metrics chart (90-day window)
 - Notion-inspired design tokens + Inter / JetBrains Mono fonts
-- Security headers (HSTS, X-Frame-Options DENY, Permissions-Policy), 30 MB Server-Action body limit, generic login error messages
+- Security headers (HSTS, X-Frame-Options DENY, CSP, Permissions-Policy), 30 MB Server-Action body limit, generic login error messages
 - AlertDialog replacing all `confirm()` / `alert()` calls
 - Loading + error boundaries on the dashboard route group
 - Mobile bottom nav with safe-area padding
-- Authenticated download proxy at `/api/download/[id]`
-- Cron route to mark missed assignments + recover stuck submissions
+- Authenticated download proxy at `/api/download/[id]` (streams from R2)
+- Inngest cron to mark missed assignments + recover stuck submissions + expire announcements/materials
+- **Railway deployment** with standalone Next.js builds via Railpack
 
 ### In flight / TODO (priority order)
 
-- **Manager UI to call `assignTask`**. The server action is implemented and the SQL RPC `assign_task_to_team` is granted to `authenticated`, but no button surfaces it yet. Useful when new members join after a task was created.
+- **Manager UI to call `assignTask`**. The server action is implemented and the SQL RPC `assign_task_to_team` is granted to `authenticated`, but no button surfaces it yet.
 - **Realtime status on submission detail.** Subscribe to a Supabase channel so members see `queued → validating → passed` without refreshing.
 - **Daily cron rollup of `report_snapshots`.** Reports currently compute from raw `submissions`; precompute to cut DB load.
 - **Redis cache on `getDailyMetrics`** (60s TTL) for hot dashboard reads.
 - **Read receipts on announcements** — track who has acknowledged.
 - **PDF report export** via `@react-pdf/renderer` (CSV is shipped already).
 - **CSV streaming export of activity log** for compliance audits.
-- **Sentry integration** — server + client (Sentry MCP is available).
+- **Sentry integration** — server + client.
 - **Generate full database types** from the Supabase CLI to replace the loose `Database = any` shim in `lib/supabase/database.types.ts`.
 - **Pagination UX on submissions table** — cursor pagination is implemented in `lib/data.ts → listSubmissions`, but the list page does not yet wire it through `searchParams`.
-- **Tests** — Playwright happy-paths + unit tests for the AI pipeline with a mocked Groq provider.
+- **Tests** — Playwright happy-paths + unit tests for the AI pipeline with a mocked provider.
+- **Team archiving** — soft-delete teams instead of hard delete.
 
-### Known small mismatches surfaced by this audit
+### Known small mismatches
 
-- `app/actions/users.ts → provisionUser` `revalidatePath`s `/dashboard/admin/users`, but no such route exists today. Harmless, just a leftover from an earlier sketch. Remove or implement.
-- The `assign_task_to_team` RPC is granted to `authenticated` but only the server action calls it (via the admin client which bypasses RLS anyway). The grant is harmless — it just means a future client-side caller would also be allowed if and when we wire one up.
-- The cron endpoint overwrites `submissions.flags` with the timeout flag rather than appending. That's acceptable today (the only path that triggers it is a stuck pipeline that hasn't written flags yet) but worth keeping in mind if we ever expand its behaviour.
+- `app/actions/users.ts → provisionUser` `revalidatePath`s `/dashboard/admin/users`, but no such route exists today. Harmless, just a leftover.
+- The `assign_task_to_team` RPC is granted to `authenticated` but only the server action calls it (via the admin client which bypasses RLS anyway). The grant is harmless.
+- The `env.ts` module still references the deprecated `rag-service (FastAPI)` in its header comment. The actual FastAPI service exists but RAG is now native via Supabase RPC.
 
 ---
 
@@ -433,12 +492,15 @@ If you only want the latest changes on top of an existing database, **running 00
 ```bash
 pnpm install
 cp .env.local.example .env.local        # fill in your own values
-# (Supabase) run scripts/001..005 in the SQL editor, in order
+# (Supabase) run scripts/001..009 + RAG migration in the SQL editor, in order
 pnpm dev
+# In a separate terminal, start Inngest dev server:
+npx inngest-cli@latest dev
 ```
 
 - The first user you create in Supabase becomes `main_admin` automatically (via the `is_first` branch in `handle_new_user()`).
-- Watch the v0/Vercel server logs for `[v0]`, `[pipeline]`, `[submissions]`, and `[activity]` lines while testing the upload flow.
+- Watch the Railway / terminal server logs for `[pipeline]`, `[smart-ai]`, `[submissions]`, and `[activity]` lines while testing the upload flow.
+- The Inngest dev server (http://localhost:8288) shows function execution history.
 - The cron endpoint can be hit locally with the curl snippet in §8. With `CRON_SECRET` unset locally it returns 200 to any caller, which is fine for dev.
 
 ---
@@ -447,7 +509,7 @@ pnpm dev
 
 - **RSC by default; Server Actions for every mutation.** The only client-side Supabase mutation is `signInWithPassword` in the login form — required so the SSR client's cookies refresh on the same response.
 - **Every action returns a discriminated `ActionResult`** (`{ ok: true, ... } | { ok: false, error }`). Forms read `res.error` directly into a `role="alert"` block.
-- **Server-only modules MUST start with `import "server-only"`.** Already applied to `admin.ts`, `redis.ts`, `activity.ts`, `pipeline.ts`, `validate.ts`, `parse/index.ts`. Any new module under `lib/` that touches service-role secrets, Redis, Blob, or Tesseract should follow.
+- **Server-only modules MUST start with `import "server-only"`.** Already applied to `admin.ts`, `redis.ts`, `activity.ts`, `pipeline.ts`, `validate.ts`, `parse/index.ts`, `indexer.ts`, `retriever.ts`. Any new module under `lib/` that touches service-role secrets, Redis, R2, or Tesseract should follow.
 - **Never use `localStorage` for persistence.** All state lives in Supabase.
 - **Use design tokens, not hex codes.** `bg-primary`, `text-foreground`, `bg-muted`, etc., defined in `app/globals.css`. The brand primary `#0075de` and the soft accent `#f2f9ff` are wired through tokens; reach for tokens first.
 - **Error messages are user-friendly.** "Submission failed: deadline has passed and late submissions are not allowed" — never "FK constraint violated".

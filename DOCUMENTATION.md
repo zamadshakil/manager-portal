@@ -10,205 +10,140 @@ Complete guide to all project documentation and resources.
 Start here if you're setting up the project for the first time:
 
 1. **[QUICK_START.md](./QUICK_START.md)** (5 min)
-   - Prerequisites
-   - 4-step local setup
-   - Common commands
-   - Troubleshooting
+   - Prerequisites (Node 22+, Railway credentials)
+   - 5-step local setup (including Inngest dev server)
+   - Common commands & troubleshooting
 
 2. **[README.md](./README.md)** (10 min)
-   - Project overview
-   - Tech stack
-   - Project structure
-   - Getting started guide
+   - Project overview & tech stack
+   - Railway infrastructure diagram
+   - Project structure (app/, lib/, mcp-service/, rag-service/)
+   - Key features & environment variables
 
-3. **[docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md)** (15 min)
-   - Complete architecture
-   - Data model
-   - Security design
+3. **[docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md)** (20 min)
+   - Complete architecture & data model
+   - Security design (3-layer auth)
    - Module dependencies
+   - End-to-end request traces
+
+### For Smart AI / RAG Development
+If you're working on the AI assistant or RAG pipeline:
+
+1. **[docs/SMART_AI_AUDIT.md](./docs/SMART_AI_AUDIT.md)** ⭐ START HERE
+   - Full audit of Smart AI, MCP, and RAG subsystems
+   - Schema/code alignment status
+   - AI SDK v6 migration details
+   - Attachment metadata wiring
+   - Operator runbook (§13)
+
+2. **[supabase/migrations/20260505_rag_documents.sql](./supabase/migrations/20260505_rag_documents.sql)**
+   - pgvector table + HNSW index
+   - Vector similarity search RPC (`search_rag_vector`)
+   - BM25 full-text search RPC (`search_rag_bm25`)
+   - RLS policies for RAG documents
 
 ### For Code Review
-If you're reviewing the audit fixes or understanding implementation:
+If you're reviewing code quality or implementation details:
 
-1. **[FIXES_COMPLETED.md](./FIXES_COMPLETED.md)** ⭐ START HERE
-   - Summary of 3 audit fixes
-   - Implementation details
-   - Testing checklist
-   - Quality assurance
-
-2. **[docs/IMPLEMENTATION_CHANGES.md](./docs/IMPLEMENTATION_CHANGES.md)**
-   - Detailed changelog
-   - How each fix works
-   - File-by-file changes
-   - Verification steps
-
-3. **[docs/CODEBASE_AUDIT.md](./docs/CODEBASE_AUDIT.md)**
-   - Comprehensive code audit
-   - Quality metrics
-   - Security assessment
+1. **[docs/CODEBASE_AUDIT.md](./docs/CODEBASE_AUDIT.md)**
+   - Comprehensive code quality audit
+   - Quality metrics & security assessment
    - Recommendations
+
+2. **[docs/AUDIT_SUMMARY.md](./docs/AUDIT_SUMMARY.md)**
+   - Executive audit summary & scorecard
+
+3. **[docs/IMPLEMENTATION_CHANGES.md](./docs/IMPLEMENTATION_CHANGES.md)**
+   - Detailed changelog of audit fixes
 
 ### For Deployment & Operations
 If you're deploying or managing the production system:
 
-1. **[README.md#Deployment](./README.md#deployment)** — Vercel setup
-2. **[.env.local.example](./.env.local.example)** — Environment variables
-3. **[docs/PROJECT_STATUS.md#8-Environment-variables](./docs/PROJECT_STATUS.md#8-environment-variables)** — Detailed env config
+1. **[DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md)** — Railway deployment guide
+2. **[.env.local.example](./.env.local.example)** — Complete environment variable template
+3. **[railway.json](./railway.json)** — Railway build & deploy configuration
 
 ---
 
 ## 📚 Complete Documentation Map
 
 ### Root-Level Guides
-- **[README.md](./README.md)** (199 lines)
-  - Project overview, features, tech stack
-  - Getting started, project structure
-  - Development & deployment guides
-  - Contributing guidelines
 
-- **[QUICK_START.md](./QUICK_START.md)** (96 lines)
-  - 5-minute setup guide
-  - Prerequisites checklist
-  - Environment configuration
-  - Common commands
-  - Troubleshooting
-
-- **[FIXES_COMPLETED.md](./FIXES_COMPLETED.md)** (264 lines)
-  - Executive summary of audit fixes
-  - Implementation details for each fix
-  - Testing & verification checklist
-  - Quality assurance metrics
-  - Ready for production status
-
-- **[DOCUMENTATION.md](./DOCUMENTATION.md)** (this file)
-  - Documentation index and navigation
+| File | Purpose |
+|------|---------|
+| [README.md](./README.md) | Project overview, tech stack, Railway infrastructure, getting started |
+| [QUICK_START.md](./QUICK_START.md) | 5-minute local setup guide |
+| [DOCUMENTATION.md](./DOCUMENTATION.md) | This file — documentation index |
+| [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md) | Deployment verification & testing |
+| [FIXES_COMPLETED.md](./FIXES_COMPLETED.md) | Historical: April 2026 audit fixes |
 
 ### Core Documentation (docs/ folder)
 
-#### Architecture & Design
-- **[docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md)** (447 lines) ⭐ MAIN SPEC
-  - TL;DR for new developers
-  - Product overview & roles
-  - High-level architecture diagram
-  - Complete data model
-  - Security & RLS design
-  - Module dependency matrix
-  - Environment variables guide
-  - Known issues & roadmap
+| File | Purpose |
+|------|---------|
+| [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md) | Complete architecture, data model, security design |
+| [docs/SMART_AI_AUDIT.md](./docs/SMART_AI_AUDIT.md) | Smart AI / MCP / RAG subsystem audit (838 lines) |
+| [docs/CODEBASE_AUDIT.md](./docs/CODEBASE_AUDIT.md) | Code quality audit |
+| [docs/AUDIT_SUMMARY.md](./docs/AUDIT_SUMMARY.md) | Executive audit scorecard |
+| [docs/IMPLEMENTATION_CHANGES.md](./docs/IMPLEMENTATION_CHANGES.md) | Detailed fix changelog |
+| [docs/IMPLEMENTATION_SUMMARY.md](./docs/IMPLEMENTATION_SUMMARY.md) | Implementation summary |
+| [docs/ARCHITECTURE_DIAGRAM.md](./docs/ARCHITECTURE_DIAGRAM.md) | Visual system architecture |
+| [docs/TASK_TEAM_MANAGEMENT_AUDIT.md](./docs/TASK_TEAM_MANAGEMENT_AUDIT.md) | Task & team management audit |
 
-#### Implementation & Changes
-- **[docs/IMPLEMENTATION_CHANGES.md](./docs/IMPLEMENTATION_CHANGES.md)** (188 lines)
-  - Summary of audit fixes
-  - Cron schedule solution details
-  - Tailwind configuration
-  - Environment & docs improvements
-  - Files changed with types
-  - Verification checklist
-  - Next steps
+### Configuration Files
 
-#### Audit & Code Quality
-- **[docs/CODEBASE_AUDIT.md](./docs/CODEBASE_AUDIT.md)** (555 lines)
-  - Executive summary
-  - PROJECT_STATUS.md accuracy review
-  - Code quality assessment
-  - Security analysis
-  - Architecture evaluation
-  - Performance considerations
-  - Best practices compliance
-  - Detailed issue inventory
-  - Recommendations by severity
-  - Metrics and scoring
+| File | Purpose |
+|------|---------|
+| [.env.local.example](./.env.local.example) | Full env var template with Railway/Kong/R2/Inngest docs |
+| [railway.json](./railway.json) | Railway Railpack build + standalone deploy config |
+| [next.config.mjs](./next.config.mjs) | Security headers, CSP, standalone output, body limits |
+| [tailwind.config.ts](./tailwind.config.ts) | Design token configuration |
+| [package.json](./package.json) | Dependencies (Node ≥22, Next 16, AI SDK v6, Inngest, pgvector) |
 
-- **[docs/AUDIT_SUMMARY.md](./docs/AUDIT_SUMMARY.md)** (330 lines)
-  - Executive summary
-  - Quality scorecard (92/100)
-  - Key patterns & rules
-  - Issue tracking
-  - Priority action items
-  - Code quality breakdown
+### Microservice Docs
 
-### Environment & Configuration
-- **[.env.local.example](./.env.local.example)** (52 lines)
-  - Complete environment template
-  - All required variables documented
-  - Links to credential sources
-  - Setup instructions
-  - Security guidance
-
-- **[vercel.json](./vercel.json)**
-  - Vercel deployment configuration
-  - Cron job schedule (with explanation)
-
-- **[tailwind.config.ts](./tailwind.config.ts)** (68 lines)
-  - Design token configuration
-  - Tailwind theme extension
-  - Color, radius, shadow mappings
+| File | Purpose |
+|------|---------|
+| [mcp-service/README.md](./mcp-service/README.md) | MCP service setup & API |
+| [rag-service/README.md](./rag-service/README.md) | RAG service setup & API |
 
 ---
 
 ## 🎯 Documentation by Topic
 
-### Getting Started
-- [QUICK_START.md](./QUICK_START.md) — 5-minute setup
-- [README.md#Getting-Started](./README.md#getting-started) — Prerequisites & setup
-- [.env.local.example](./.env.local.example) — Environment template
-
 ### Architecture & Design
+- [README.md#railway-infrastructure](./README.md#railway-infrastructure) — Service topology
 - [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md) — Complete specification
-- [README.md#Project-Structure](./README.md#project-structure) — File organization
-- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — (see PROJECT_STATUS.md)
+- [docs/ARCHITECTURE_DIAGRAM.md](./docs/ARCHITECTURE_DIAGRAM.md) — Visual diagrams
+
+### Smart AI / RAG / MCP
+- [docs/SMART_AI_AUDIT.md](./docs/SMART_AI_AUDIT.md) — Full subsystem audit
+- [lib/smart-ai/](./lib/smart-ai/) — Indexer, retriever, client, sliding-window
+- [supabase/migrations/20260505_rag_documents.sql](./supabase/migrations/20260505_rag_documents.sql) — pgvector schema
+
+### AI Validation Pipeline
+- [lib/inngest/functions.ts](./lib/inngest/functions.ts) — `processSubmission` Inngest function
+- [lib/llm/validate.ts](./lib/llm/validate.ts) — Rule runner + summariser + vision (Gemini 2.0 Flash)
+- [lib/parse/](./lib/parse/) — Document parsers (PDF, DOCX, PPTX, images)
 
 ### Security
-- [docs/PROJECT_STATUS.md#3-Roles-RLS](./docs/PROJECT_STATUS.md#3-roles-rls-and-the-principle-of-defence-in-depth) — 3-layer defense
-- [docs/CODEBASE_AUDIT.md#Security](./docs/CODEBASE_AUDIT.md#security-analysis) — Security assessment
-- [README.md#Security](./README.md#key-features) — Security features
+- [docs/PROJECT_STATUS.md#3-roles-rls](./docs/PROJECT_STATUS.md#3-roles-rls-and-the-principle-of-defence-in-depth) — 3-layer defense
+- [next.config.mjs](./next.config.mjs) — CSP, HSTS, security headers
+- [lib/auth.ts](./lib/auth.ts) — `requireProfile`, `requireRole`, `canManageTeam`
 
 ### Deployment & Operations
-- [README.md#Deployment](./README.md#deployment) — Vercel deployment
-- [docs/PROJECT_STATUS.md#8-Environment-variables](./docs/PROJECT_STATUS.md#8-environment-variables) — Environment config
-- [FIXES_COMPLETED.md#Cron-Schedule](./FIXES_COMPLETED.md#1-cron-schedule-upstash-redis-solution-) — Cron monitoring
-
-### Cron Jobs & Scheduling
-- [FIXES_COMPLETED.md#1-Cron-Schedule](./FIXES_COMPLETED.md#1-cron-schedule-upstash-redis-solution-) — Solution details
-- [docs/IMPLEMENTATION_CHANGES.md#1-Cron-Schedule](./docs/IMPLEMENTATION_CHANGES.md#1-cron-schedule-upstash-redis-15-minute-solution) — Implementation
-- [docs/PROJECT_STATUS.md#6.5-Cron](./docs/PROJECT_STATUS.md#65-cron--missed-deadlines-and-stuck-pipeline-recovery) — Technical spec
-
-### Design System & Styling
-- [FIXES_COMPLETED.md#2-Tailwind](./FIXES_COMPLETED.md#2-tailwind-configuration-design-tokens-) — Tailwind setup
-- [tailwind.config.ts](./tailwind.config.ts) — Configuration file
-- [app/globals.css](./app/globals.css) — Design tokens
+- [README.md#deployment](./README.md#deployment) — Railway deployment
+- [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md) — Verification
+- [railway.json](./railway.json) — Build configuration
 
 ### Data Model
-- [docs/PROJECT_STATUS.md#4-Data-model](./docs/PROJECT_STATUS.md#4-data-model) — Complete schema
-- [scripts/001_init_schema.sql](./scripts/001_init_schema.sql) — SQL definitions
+- [docs/PROJECT_STATUS.md#4-data-model](./docs/PROJECT_STATUS.md#4-data-model) — Complete schema
+- [scripts/](./scripts/) — SQL migration files (001–009)
+- [supabase/migrations/](./supabase/migrations/) — RAG + chat schema
 
-### Code Quality & Best Practices
-- [docs/CODEBASE_AUDIT.md](./docs/CODEBASE_AUDIT.md) — Full audit report
-- [docs/AUDIT_SUMMARY.md](./docs/AUDIT_SUMMARY.md) — Summary & scorecard
-- [docs/PROJECT_STATUS.md#7-Module-dependency-matrix](./docs/PROJECT_STATUS.md#7-module-dependency-matrix) — Architecture patterns
-
-### Troubleshooting
-- [QUICK_START.md#Troubleshooting](./QUICK_START.md#troubleshooting) — Common issues
-- [README.md](./README.md) — Feature & setup questions
-- [docs/CODEBASE_AUDIT.md#Known-Issues](./docs/CODEBASE_AUDIT.md#known-issues) — Technical issues
-
----
-
-## 📋 File Quick Reference
-
-| File | Type | Size | Purpose |
-|------|------|------|---------|
-| README.md | Guide | 199 lines | Project overview & onboarding |
-| QUICK_START.md | Guide | 96 lines | 5-minute setup guide |
-| FIXES_COMPLETED.md | Report | 264 lines | Audit fixes summary |
-| DOCUMENTATION.md | Index | (this) | Documentation map |
-| docs/PROJECT_STATUS.md | Spec | 447 lines | Complete architecture |
-| docs/IMPLEMENTATION_CHANGES.md | Changelog | 188 lines | Detailed fix changes |
-| docs/CODEBASE_AUDIT.md | Report | 555 lines | Code quality audit |
-| docs/AUDIT_SUMMARY.md | Summary | 330 lines | Audit scorecard |
-| .env.local.example | Template | 52 lines | Environment setup |
-| tailwind.config.ts | Config | 68 lines | Design tokens |
-| vercel.json | Config | 10 lines | Deployment config |
+### Design System & Styling
+- [tailwind.config.ts](./tailwind.config.ts) — Tailwind token configuration
+- [app/globals.css](./app/globals.css) — CSS custom properties
 
 ---
 
@@ -217,29 +152,24 @@ If you're deploying or managing the production system:
 ### When to Update Documentation
 
 **Update immediately:**
-- Major architectural changes
-- New features or modules
+- New services or microservices added to Railway
+- Database schema changes (new tables, columns, migrations)
+- New environment variables
 - Security-relevant changes
-- Environment variable additions
 - Breaking API changes
 
 **Update regularly:**
 - [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md) — After major features
-- [docs/KNOWN_ISSUES.md](./docs/KNOWN_ISSUES.md) — As issues are discovered
-- [README.md](./README.md) — Tech stack version updates
-
-**Update yearly:**
-- [docs/CODEBASE_AUDIT.md](./docs/CODEBASE_AUDIT.md) — Annual quality audit
-- [docs/ARCHITECTURE.md](./docs/PROJECT_STATUS.md) — Annual design review
+- [README.md](./README.md) — Tech stack or infrastructure changes
+- [.env.local.example](./.env.local.example) — New env vars
 
 ### Documentation Standards
 
 All documentation should include:
 - Clear section headings (h2-h4)
-- Links to related docs
+- Links to related docs and source files
 - Code examples where relevant
-- Table of contents for long documents
-- "Last updated" dates on specifications
+- "Last Updated" dates on specifications
 
 ---
 
@@ -248,53 +178,38 @@ All documentation should include:
 ### Day 1 (Setup)
 1. [QUICK_START.md](./QUICK_START.md) — Get it running (5 min)
 2. [README.md](./README.md) — Understand the project (10 min)
-3. Explore the app in browser
+3. Explore the app in browser — login, tasks, Smart AI
 
 ### Day 2-3 (Architecture)
 1. [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md) — Full specification (30 min)
 2. Read through key source files:
    - `app/layout.tsx` — Root layout
-   - `app/actions/` — Server actions
+   - `app/actions/` — Server actions pattern
    - `lib/supabase/` — Database clients
-3. Trace one end-to-end flow (create → assign → submit → validate)
+   - `lib/inngest/functions.ts` — Background jobs
+3. Trace one end-to-end flow (create task → assign → submit → validate)
 
 ### Week 1-2 (Deep Dive)
-1. [docs/CODEBASE_AUDIT.md](./docs/CODEBASE_AUDIT.md) — Code quality (30 min)
-2. Study the cron job implementation:
-   - [lib/upstash-scheduler.ts](./lib/upstash-scheduler.ts)
-   - [app/api/cron/mark-missed/route.ts](./app/api/cron/mark-missed/route.ts)
-3. Review database schema: [scripts/001_init_schema.sql](./scripts/001_init_schema.sql)
-4. Understand RLS: [scripts/002_helper_functions.sql](./scripts/002_helper_functions.sql)
-
-### First Feature
-1. Check [docs/PROJECT_STATUS.md#10-Known-issues](./docs/PROJECT_STATUS.md#10-known-issues) for guidance
-2. Review related modules in the code
-3. Follow the pattern established in existing code
-4. Test thoroughly
-5. Update relevant documentation
+1. [docs/SMART_AI_AUDIT.md](./docs/SMART_AI_AUDIT.md) — Smart AI subsystem (30 min)
+2. Study the validation pipeline:
+   - [lib/inngest/functions.ts](./lib/inngest/functions.ts) — Inngest functions
+   - [lib/llm/validate.ts](./lib/llm/validate.ts) — LLM validation
+3. Study the RAG system:
+   - [lib/smart-ai/indexer.ts](./lib/smart-ai/indexer.ts) — Document indexing
+   - [lib/smart-ai/retriever.ts](./lib/smart-ai/retriever.ts) — Hybrid retrieval
+4. Review database schema: [scripts/001_init_schema.sql](./scripts/001_init_schema.sql)
 
 ---
 
 ## 📞 Getting Help
 
-1. **Setup issues** → [QUICK_START.md#Troubleshooting](./QUICK_START.md#troubleshooting)
+1. **Setup issues** → [QUICK_START.md#troubleshooting](./QUICK_START.md#troubleshooting)
 2. **Architecture questions** → [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md)
-3. **Code quality** → [docs/CODEBASE_AUDIT.md](./docs/CODEBASE_AUDIT.md)
-4. **Specific feature** → Check [README.md](./README.md) or [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md)
-5. **Deployment** → [README.md#Deployment](./README.md#deployment)
+3. **Smart AI / RAG** → [docs/SMART_AI_AUDIT.md](./docs/SMART_AI_AUDIT.md)
+4. **Code quality** → [docs/CODEBASE_AUDIT.md](./docs/CODEBASE_AUDIT.md)
+5. **Deployment** → [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md)
 
 ---
 
-## ✅ Audit Completion Status
-
-**All audit fixes completed on April 30, 2026:**
-- ✅ Cron schedule solution (Upstash Redis)
-- ✅ Tailwind configuration (Design tokens)
-- ✅ Environment & documentation (Complete overhaul)
-
-See [FIXES_COMPLETED.md](./FIXES_COMPLETED.md) for details.
-
----
-
-**Last Updated:** April 30, 2026  
-**Status:** All documentation current and complete
+**Last Updated:** May 5, 2026
+**Status:** All documentation updated to reflect current codebase
