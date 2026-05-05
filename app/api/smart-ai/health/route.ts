@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireProfile } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { isDirectPgConfigured, pgPing, pgQuery } from "@/lib/smart-ai/pg-client"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -20,41 +21,82 @@ export async function GET() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""
   const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
 
+  const directPgUrl =
+    process.env.SUPABASE_DB_URL ??
+    process.env.DATABASE_URL ??
+    process.env.POSTGRES_URL ??
+    process.env.POSTGRES_PRISMA_URL ??
+    ""
+
   const checks: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
-    architecture: "native (Supabase JS RPCs)",
+    architecture: "native (direct-pg → rpc → postgrest fallback chain)",
     env: {
-      OPENROUTER_API_KEY: openrouterKey ? "✅ set" : "❌ missing",
+      OPENROUTER_API_KEY: openrouterKey ? "set" : "missing",
       EMBEDDING_MODEL: embeddingModel,
-      SUPABASE_URL: supabaseUrl ? "✅ set" : "❌ missing",
-      SUPABASE_SERVICE_ROLE_KEY: supabaseServiceRole ? "✅ set" : "❌ missing",
+      SUPABASE_URL: supabaseUrl ? "set" : "missing",
+      SUPABASE_SERVICE_ROLE_KEY: supabaseServiceRole ? "set" : "missing",
+      DIRECT_PG_URL: directPgUrl ? "set" : "missing (recommended for reliability)",
     },
   }
 
-  // Check Supabase connectivity & rag_documents count
+  // (a) Direct Postgres connection — the bulletproof path.
+  if (isDirectPgConfigured()) {
+    try {
+      const version = await pgPing()
+      const fnCheck = await pgQuery<{ exists: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM pg_proc p
+           JOIN pg_namespace n ON p.pronamespace = n.oid
+           WHERE n.nspname = 'public' AND p.proname = 'insert_rag_chunks'
+         ) AS exists`,
+      )
+      const colCheck = await pgQuery<{ exists: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND table_name = 'rag_documents'
+             AND column_name = 'chunk_index'
+         ) AS exists`,
+      )
+      const countRes = await pgQuery<{ n: string }>(`SELECT COUNT(*)::text AS n FROM rag_documents`)
+      checks.direct_pg = {
+        status: "ok",
+        version: version.split(",")[0],
+        rag_documents_count: Number(countRes.rows[0]?.n ?? 0),
+        chunk_index_column_exists: colCheck.rows[0]?.exists === true,
+        insert_rag_chunks_function_exists: fnCheck.rows[0]?.exists === true,
+      }
+    } catch (err: any) {
+      checks.direct_pg = { status: "error", error: err?.message ?? String(err) }
+    }
+  } else {
+    checks.direct_pg = {
+      status: "not configured",
+      hint: "Set SUPABASE_DB_URL or DATABASE_URL on manager-portal to enable the bulletproof insert path.",
+    }
+  }
+
+  // (b) Supabase admin client (PostgREST) — count rows.
   if (supabaseUrl && supabaseServiceRole) {
     try {
       const supabase = createAdminClient()
       const { count, error } = await supabase
         .from("rag_documents")
         .select("*", { count: "exact", head: true })
-
-      if (error) {
-        throw new Error(error.message)
-      }
-
-      checks.database = {
-        status: "✅ connected",
+      if (error) throw new Error(error.message)
+      checks.postgrest = {
+        status: "ok",
         rag_documents_count: count ?? 0,
       }
     } catch (err: any) {
-      checks.database = {
-        status: "❌ error",
+      checks.postgrest = {
+        status: "error",
         error: err?.message ?? String(err),
       }
     }
   } else {
-    checks.database = { status: "❌ Supabase not fully configured" }
+    checks.postgrest = { status: "Supabase not fully configured" }
   }
 
   // Check OpenRouter embedding endpoint
