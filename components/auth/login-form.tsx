@@ -53,12 +53,12 @@ export default function LoginForm() {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="space-y-2">
-        <h1 className="text-3xl sm:text-[34px] font-semibold tracking-tight text-balance">
+    <div className="space-y-6">
+      <div className="space-y-2 text-center">
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white font-['Space_Grotesk']">
           Sign in to your portal
         </h1>
-        <p className="text-sm text-muted-foreground leading-relaxed text-pretty">
+        <p className="text-sm text-slate-400 leading-relaxed text-pretty">
           Welcome back. Enter your credentials to access announcements,
           submissions, and team analytics.
         </p>
@@ -66,7 +66,7 @@ export default function LoginForm() {
 
       <form onSubmit={onSubmit} className="space-y-5" noValidate>
         <div className="space-y-2">
-          <Label htmlFor="email" className="text-sm font-medium">
+          <Label htmlFor="email" className="text-sm font-medium text-slate-300">
             Email
           </Label>
           <Input
@@ -78,18 +78,18 @@ export default function LoginForm() {
             onChange={(e) => setEmail(e.target.value)}
             disabled={loading}
             placeholder="you@company.com"
-            className="h-11"
+            className="h-11 bg-black/20 border-white/10 text-white placeholder:text-slate-500 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500/50 transition-all"
           />
         </div>
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label htmlFor="password" className="text-sm font-medium">
+            <Label htmlFor="password" className="text-sm font-medium text-slate-300">
               Password
             </Label>
             <Link
               href="/auth/forgot-password"
-              className="text-xs font-medium text-primary hover:underline underline-offset-4"
+              className="text-xs font-medium text-emerald-400 hover:text-emerald-300 hover:underline underline-offset-4 transition-colors"
             >
               Forgot password?
             </Link>
@@ -104,14 +104,14 @@ export default function LoginForm() {
               onChange={(e) => setPassword(e.target.value)}
               disabled={loading}
               placeholder="Enter your password"
-              className="h-11 pr-10"
+              className="h-11 pr-10 bg-black/20 border-white/10 text-white placeholder:text-slate-500 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500/50 transition-all"
             />
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
               tabIndex={-1}
               aria-label={showPassword ? "Hide password" : "Show password"}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus:outline-none focus-visible:text-foreground"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors focus:outline-none focus-visible:text-slate-200"
             >
               {showPassword ? (
                 <EyeOff className="h-4 w-4" aria-hidden="true" />
@@ -128,10 +128,11 @@ export default function LoginForm() {
             checked={remember}
             onCheckedChange={(v) => setRemember(v === true)}
             disabled={loading}
+            className="border-white/20 data-[state=checked]:bg-emerald-500 data-[state=checked]:text-white data-[state=checked]:border-emerald-500"
           />
           <Label
             htmlFor="remember"
-            className="text-sm font-normal text-muted-foreground cursor-pointer"
+            className="text-sm font-normal text-slate-400 cursor-pointer hover:text-slate-300 transition-colors"
           >
             Keep me signed in on this device
           </Label>
@@ -150,7 +151,7 @@ export default function LoginForm() {
         <Button
           type="submit"
           disabled={loading}
-          className="w-full h-11 text-sm font-semibold"
+          className="w-full h-11 text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] hover:shadow-[0_0_25px_rgba(16,185,129,0.6)] border-none transition-all duration-300"
         >
           {loading ? (
             <span className="inline-flex items-center justify-center gap-2">
@@ -163,9 +164,9 @@ export default function LoginForm() {
         </Button>
       </form>
 
-      <p className="text-center text-sm text-muted-foreground">
+      <p className="text-center text-sm text-slate-500">
         Need an account?{" "}
-        <span className="font-medium text-foreground">
+        <span className="font-medium text-slate-300 hover:text-white transition-colors cursor-help">
           Ask your administrator
         </span>{" "}
         to invite you.

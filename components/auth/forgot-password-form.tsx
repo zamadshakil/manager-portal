@@ -44,23 +44,23 @@ export default function ForgotPasswordForm() {
   if (success) {
     return (
       <div className="space-y-6 text-center">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
-          <CheckCircle2 className="h-7 w-7 text-primary" aria-hidden="true" />
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
+          <CheckCircle2 className="h-7 w-7 text-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] rounded-full" aria-hidden="true" />
         </div>
         <div className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-2xl font-semibold tracking-tight text-white font-['Space_Grotesk']">
             Check your inbox
           </h1>
-          <p className="text-sm text-muted-foreground leading-relaxed">
+          <p className="text-sm text-slate-400 leading-relaxed">
             We sent a password reset link to{" "}
-            <span className="font-medium text-foreground">{email}</span>.
+            <span className="font-medium text-white">{email}</span>.
             The link will expire in 1 hour.
           </p>
         </div>
         <div className="pt-2">
           <Link
             href="/auth/login"
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline underline-offset-4"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-400 hover:text-emerald-300 hover:underline underline-offset-4 transition-colors"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             Back to sign in
@@ -71,12 +71,12 @@ export default function ForgotPasswordForm() {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="space-y-2">
-        <h1 className="text-3xl sm:text-[34px] font-semibold tracking-tight text-balance">
+    <div className="space-y-6">
+      <div className="space-y-2 text-center">
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white font-['Space_Grotesk']">
           Reset your password
         </h1>
-        <p className="text-sm text-muted-foreground leading-relaxed text-pretty">
+        <p className="text-sm text-slate-400 leading-relaxed text-pretty">
           Enter the email associated with your account and we&apos;ll send
           you a secure link to set a new password.
         </p>
@@ -84,12 +84,12 @@ export default function ForgotPasswordForm() {
 
       <form onSubmit={onSubmit} className="space-y-5" noValidate>
         <div className="space-y-2">
-          <Label htmlFor="email" className="text-sm font-medium">
+          <Label htmlFor="email" className="text-sm font-medium text-slate-300">
             Email
           </Label>
           <div className="relative">
             <Mail
-              className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
+              className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"
               aria-hidden="true"
             />
             <Input
@@ -101,7 +101,7 @@ export default function ForgotPasswordForm() {
               onChange={(e) => setEmail(e.target.value)}
               disabled={loading}
               placeholder="you@company.com"
-              className="h-11 pl-10"
+              className="h-11 pl-10 bg-black/20 border-white/10 text-white placeholder:text-slate-500 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500/50 transition-all"
             />
           </div>
         </div>
@@ -119,7 +119,7 @@ export default function ForgotPasswordForm() {
         <Button
           type="submit"
           disabled={loading}
-          className="w-full h-11 text-sm font-semibold"
+          className="w-full h-11 text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] hover:shadow-[0_0_25px_rgba(16,185,129,0.6)] border-none transition-all duration-300"
         >
           {loading ? (
             <span className="inline-flex items-center justify-center gap-2">
@@ -135,7 +135,7 @@ export default function ForgotPasswordForm() {
       <div className="flex justify-center">
         <Link
           href="/auth/login"
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-400 hover:text-white transition-colors"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           Back to sign in

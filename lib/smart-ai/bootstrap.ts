@@ -95,8 +95,14 @@ const STEP_INDEXES = `
 CREATE INDEX IF NOT EXISTS rag_documents_embedding_hnsw_idx
     ON rag_documents USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
-CREATE INDEX IF NOT EXISTS rag_documents_source_idx
-    ON rag_documents (source_type, source_id);
+
+-- Drop the old flawed unique constraint (it prevented multiple chunks per doc)
+DROP INDEX IF EXISTS rag_documents_source_uniq;
+
+-- Recreate it with chunk_index so chunks of the same document don't collide
+CREATE UNIQUE INDEX IF NOT EXISTS rag_documents_source_chunk_uniq
+    ON rag_documents (source_type, source_id, chunk_index);
+
 CREATE INDEX IF NOT EXISTS rag_documents_owner_idx
     ON rag_documents (owner_id);
 CREATE INDEX IF NOT EXISTS rag_documents_tsv_idx
