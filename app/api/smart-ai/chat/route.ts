@@ -78,6 +78,48 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
   }
 
+  // ---- Credit gate: monthly/weekly/daily quota check ----
+  // We use an admin-level client here so the service-role can auto-advance
+  // the period window before reading the usage counter.
+  let creditRow: Record<string, any> | null = null
+  try {
+    const { createClient: createSBClientEarly } = await import("@supabase/supabase-js")
+    const _srKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
+    const _srUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? ""
+    if (_srKey && _srUrl) {
+      const srClient = createSBClientEarly(_srUrl, _srKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      })
+      // Auto-advance period if expired
+      await srClient.rpc("maybe_reset_period", { p_user_id: profile.id }).maybeSingle()
+      // Fetch credit row
+      const { data: cr } = await srClient
+        .from("ai_credit_limits")
+        .select("*")
+        .eq("user_id", profile.id)
+        .maybeSingle()
+      creditRow = cr as Record<string, any> | null
+    }
+  } catch (creditErr: any) {
+    console.warn("[smart-ai] credit check failed (non-blocking):", creditErr.message)
+  }
+
+  if (creditRow && !creditRow.is_unlimited) {
+    const used = creditRow.used_this_period ?? 0
+    const limit = creditRow.monthly_limit ?? 100
+    const remaining = limit - used
+    if (remaining <= 0) {
+      const periodType = creditRow.period_type ?? "monthly"
+      const resetDate = creditRow.period_end ?? "the end of this period"
+      return NextResponse.json(
+        {
+          error: `You have used all ${limit} AI credits for this ${periodType} period. Your credits reset on ${resetDate}. Contact your administrator to increase your limit.`,
+        },
+        { status: 429 },
+      )
+    }
+  }
+
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
     return NextResponse.json(
       { error: "messages array required" },
@@ -356,7 +398,7 @@ export async function POST(req: Request) {
       messages: await convertToModelMessages(trimmedUIMessages as any),
       tools,
       stopWhen: stepCountIs(5),
-      onFinish: async ({ text }) => {
+      onFinish: async ({ text, usage }) => {
         // ---- Persistence: save assistant reply ----
         if (text) {
           const { error: assistErr } = await persistClient
@@ -377,6 +419,30 @@ export async function POST(req: Request) {
               .update({ title: threadTitle, updated_at: new Date().toISOString() })
               .eq("id", threadId)
           }
+        }
+
+        // ---- Credit accounting: increment usage + log entry ----
+        try {
+          if (creditRow && !creditRow.is_unlimited) {
+            await persistClient
+              .from("ai_credit_limits")
+              .update({
+                used_this_period: (creditRow.used_this_period ?? 0) + 1,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("user_id", profile.id)
+          }
+          // Always log usage (even for unlimited users — for track record)
+          await persistClient.from("ai_usage_log").insert({
+            user_id: profile.id,
+            thread_id: threadId,
+            model: SMART_AI_MODEL,
+            tokens_in: usage?.inputTokens ?? null,
+            tokens_out: usage?.outputTokens ?? null,
+            period_type: creditRow?.period_type ?? "monthly",
+          })
+        } catch (acctErr: any) {
+          console.warn("[smart-ai] credit accounting failed (non-blocking):", acctErr.message)
         }
       },
     })

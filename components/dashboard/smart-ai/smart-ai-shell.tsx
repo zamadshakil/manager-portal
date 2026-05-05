@@ -15,6 +15,7 @@ import { roleLabel } from "@/lib/auth-shared"
 import { ChatPanel } from "@/components/dashboard/smart-ai/chat-panel"
 import { SubmissionsReviewPanel } from "@/components/dashboard/smart-ai/submissions-review-panel"
 import { AnalyticsPanel } from "@/components/dashboard/smart-ai/analytics-panel"
+import { CreditsBadge } from "@/components/dashboard/ai-usage/credits-badge"
 import type { Profile, Submission } from "@/lib/types"
 
 type TabId = "chat" | "submissions" | "analytics"
@@ -102,7 +103,15 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
 
   return (
     <div className="flex flex-col h-[calc(100vh-120px)] -mb-12">
-      {portalTarget ? createPortal(tabsContent, portalTarget) : tabsContent}
+      {/* Tab bar + credits badge row */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex-1 min-w-0">
+          {portalTarget ? createPortal(tabsContent, portalTarget) : tabsContent}
+        </div>
+        <div className="shrink-0">
+          <CreditsBadge />
+        </div>
+      </div>
 
       {/* Panels */}
       <div

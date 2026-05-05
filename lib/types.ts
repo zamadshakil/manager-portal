@@ -207,3 +207,45 @@ export const ACCEPTED_MIME_TYPES = [
 ] as const
 
 export const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024 // 25 MB
+
+// ---------------------------------------------------------------------------
+// AI Credit System
+// ---------------------------------------------------------------------------
+
+export type AiCreditPeriod = "daily" | "weekly" | "monthly"
+
+export interface AiCreditLimit {
+  id: string
+  user_id: string
+  monthly_limit: number        // messages allowed per period (field named monthly_limit in DB)
+  used_this_period: number
+  period_type: AiCreditPeriod
+  period_start: string         // ISO date string
+  period_end: string           // ISO date string
+  is_unlimited: boolean
+  notes: string | null
+  updated_by: string | null
+  created_at: string
+  updated_at: string
+  // Joined from profiles (populated by listAiCreditLimits)
+  user_email?: string
+  user_full_name?: string | null
+  user_role?: UserRole
+  user_team_name?: string | null
+  user_team_id?: string | null
+}
+
+export interface AiUsageLogEntry {
+  id: string
+  user_id: string
+  thread_id: string | null
+  model: string | null
+  tokens_in: number | null
+  tokens_out: number | null
+  period_type: AiCreditPeriod | null
+  created_at: string
+  // Joined from profiles (populated by getUserUsageHistory)
+  user_email?: string
+  user_full_name?: string | null
+}
+

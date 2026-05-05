@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   ListChecks,
   Sparkles,
+  BrainCircuit,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { roleLabel } from "@/lib/auth-shared"
@@ -110,6 +111,12 @@ const NAV: NavGroup[] = [
         label: "Departments",
         icon: Users,
         href: "/dashboard/departments",
+        roles: ["main_admin"],
+      },
+      {
+        label: "AI & Usage",
+        icon: BrainCircuit,
+        href: "/dashboard/ai-usage",
         roles: ["main_admin"],
       },
       {
