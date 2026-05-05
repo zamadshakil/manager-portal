@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { streamText, convertToModelMessages, stepCountIs, tool, type UIMessage } from "ai"
-import { createOpenAI } from "@ai-sdk/openai"
+import { openai, createOpenAI } from "@ai-sdk/openai"
 import { z } from "zod"
 import { requireProfile } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
@@ -40,7 +40,8 @@ function resolveModel() {
     })
     return openrouter.chat(SMART_AI_MODEL)
   }
-  return SMART_AI_MODEL
+  // Fall back to the default openai provider (requires OPENAI_API_KEY in env)
+  return openai(SMART_AI_MODEL.replace("openai/", ""))
 }
 
 export const runtime = "nodejs"
@@ -415,39 +416,47 @@ export async function POST(req: Request) {
     parts: [{ type: "text" as const, text: m.content }],
   }))
 
-  const result = streamText({
-    model: resolveModel(),
-    system: systemPrompt,
-    messages: await convertToModelMessages(trimmedUIMessages as any),
-    tools: fallbackTools,
-    stopWhen: stepCountIs(5),
-    onFinish: async ({ text }) => {
-      // ---- Persistence: save assistant reply ----
-      if (text) {
-        const { error: assistErr } = await persistClient
-          .from("chat_messages")
-          .insert({
-            thread_id: threadId,
-            role: "assistant",
-            content: text,
-          })
-        if (assistErr) {
-          console.error("[smart-ai] assistant message save failed:", assistErr.message)
-        }
+  try {
+    const result = streamText({
+      model: resolveModel(),
+      system: systemPrompt,
+      messages: await convertToModelMessages(trimmedUIMessages as any),
+      tools: fallbackTools,
+      stopWhen: stepCountIs(5),
+      onFinish: async ({ text }) => {
+        // ---- Persistence: save assistant reply ----
+        if (text) {
+          const { error: assistErr } = await persistClient
+            .from("chat_messages")
+            .insert({
+              thread_id: threadId,
+              role: "assistant",
+              content: text,
+            })
+          if (assistErr) {
+            console.error("[smart-ai] assistant message save failed:", assistErr.message)
+          }
 
-        // Auto-title: only update on new threads to avoid overwriting user edits
-        if (isNewThread && threadTitle !== "New conversation") {
-          await persistClient
-            .from("chat_threads")
-            .update({ title: threadTitle, updated_at: new Date().toISOString() })
-            .eq("id", threadId)
+          // Auto-title: only update on new threads to avoid overwriting user edits
+          if (isNewThread && threadTitle !== "New conversation") {
+            await persistClient
+              .from("chat_threads")
+              .update({ title: threadTitle, updated_at: new Date().toISOString() })
+              .eq("id", threadId)
+          }
         }
-      }
-    },
-  })
+      },
+    })
 
-  const res = result.toUIMessageStreamResponse()
-  res.headers.set("x-smart-ai-source", "fallback")
-  res.headers.set("x-smart-ai-fallback-reason", fallbackReason)
-  return res
+    const res = result.toUIMessageStreamResponse()
+    res.headers.set("x-smart-ai-source", "fallback")
+    res.headers.set("x-smart-ai-fallback-reason", fallbackReason)
+    return res
+  } catch (fallbackError: any) {
+    console.error("[smart-ai] fallback streamText failed:", fallbackError.message)
+    return new Response(
+      `Smart AI is currently unavailable (Fallback error: ${fallbackError.message}). Please try again later or check API key configurations.`,
+      { status: 503, headers: { "Content-Type": "text/plain" } }
+    )
+  }
 }

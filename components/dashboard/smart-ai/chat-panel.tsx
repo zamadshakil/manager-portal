@@ -420,7 +420,7 @@ export function ChatPanel({
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 lg:gap-6 min-w-0">
+    <div className="flex flex-col mx-auto w-full max-w-5xl h-[calc(100vh-220px)] min-h-[500px]">
       {/* Conversation */}
       <section
         aria-label="Conversation"
@@ -428,7 +428,7 @@ export function ChatPanel({
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         className={cn(
-          "xl:col-span-2 flex flex-col rounded-xl border border-border bg-card shadow-card overflow-hidden min-h-[560px] transition-colors relative",
+          "flex-1 flex flex-col rounded-2xl border border-border bg-card shadow-card overflow-hidden transition-all relative",
           isDragging && "bg-primary/5 border-primary/30",
         )}
       >
@@ -654,12 +654,6 @@ export function ChatPanel({
           </div>
         </form>
       </section>
-
-      {/* Sidebar — capabilities + sources */}
-      <aside className="space-y-4 lg:space-y-5 min-w-0">
-        <CapabilitiesCard role={profile.role} />
-        <KnowledgeCard services={services} />
-      </aside>
     </div>
   )
 }
@@ -687,7 +681,7 @@ function EmptyState({
         log. Ask anything in plain English.
       </p>
 
-      <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-2xl text-left">
+      <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full max-w-2xl text-left">
         {suggestions.map((s) => {
           const Icon = s.icon
           return (
@@ -695,14 +689,15 @@ function EmptyState({
               key={s.title}
               type="button"
               onClick={() => onPick(s)}
-              className="group flex items-start gap-3 rounded-xl border border-border bg-background px-3.5 py-3 text-left transition-all hover:border-foreground/15 hover:shadow-card"
+              className="group relative flex items-start gap-3.5 rounded-2xl border border-border/50 bg-background/50 p-4 text-left transition-all hover:bg-background hover:border-primary/20 hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.1)] hover:-translate-y-0.5 overflow-hidden"
             >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-warm-white text-foreground/70 group-hover:bg-[#f2f9ff] group-hover:text-[#097fe8] transition-colors">
-                <Icon className="h-4 w-4" aria-hidden="true" />
+              <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+              <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-warm-white text-foreground/60 transition-all group-hover:bg-[#f2f9ff] group-hover:text-[#097fe8] group-hover:scale-110">
+                <Icon className="h-5 w-5" aria-hidden="true" />
               </span>
-              <div className="min-w-0">
-                <p className="text-[13px] font-semibold leading-snug">{s.title}</p>
-                <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground line-clamp-2">
+              <div className="relative min-w-0 flex-1">
+                <p className="text-[13.5px] font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors">{s.title}</p>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground line-clamp-2">
                   {s.prompt}
                 </p>
               </div>
@@ -828,24 +823,26 @@ function ToolBadge({ part }: { part: { type: string;[k: string]: any } }) {
             : `Calling ${name}`
 
   return (
-    <span
+    <div
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
+        "inline-flex items-center gap-2 rounded-md px-1 py-0.5 text-[11.5px] font-medium transition-all duration-300",
         isError
-          ? "bg-[#fff1e6] text-[#a4400a]"
+          ? "text-[#a4400a]"
           : isDone
-            ? "bg-[#e8f8eb] text-[#157a2a]"
-            : "bg-[#f2f9ff] text-[#097fe8]",
+            ? "text-muted-foreground"
+            : "text-[#097fe8] animate-pulse",
       )}
     >
       {isDone || isError ? (
-        <Search className="h-3 w-3" aria-hidden="true" />
+        <Search className="h-3.5 w-3.5" aria-hidden="true" />
       ) : (
-        <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+        <Zap className="h-3.5 w-3.5" aria-hidden="true" />
       )}
-      {label}
-      {isError ? " · failed" : isDone ? "" : "…"}
-    </span>
+      <span>
+        {label}
+        {isError ? " failed" : isDone ? " completed" : "..."}
+      </span>
+    </div>
   )
 }
 
