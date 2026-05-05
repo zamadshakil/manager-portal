@@ -227,40 +227,45 @@ export async function indexDocument(
     // 3. Insert into pgvector
     client = await pool.connect()
 
-    // Ensure table + extensions exist
-    await client.query("CREATE EXTENSION IF NOT EXISTS vector")
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS rag_documents (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        source_type TEXT NOT NULL,
-        source_id TEXT NOT NULL,
-        chunk_index INT NOT NULL DEFAULT 0,
-        team_id TEXT,
-        owner_id TEXT,
-        title TEXT,
-        content TEXT NOT NULL,
-        embedding vector(${EMBEDDING_DIM}),
-        metadata JSONB DEFAULT '{}'::jsonb,
-        tsv tsvector,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `)
+    // Ensure table + extensions exist (best-effort, might fail if role lacks permissions
+    // but the table usually already exists).
+    try {
+      await client.query("CREATE EXTENSION IF NOT EXISTS vector")
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS rag_documents (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          source_type TEXT NOT NULL,
+          source_id TEXT NOT NULL,
+          chunk_index INT NOT NULL DEFAULT 0,
+          team_id TEXT,
+          owner_id TEXT,
+          title TEXT,
+          content TEXT NOT NULL,
+          embedding vector(${EMBEDDING_DIM}),
+          metadata JSONB DEFAULT '{}'::jsonb,
+          tsv tsvector,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `)
 
-    // Ensure HNSW index exists
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS rag_documents_embedding_hnsw_idx
-      ON rag_documents USING hnsw (embedding vector_cosine_ops)
-      WITH (m = 16, ef_construction = 64)
-    `)
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS rag_documents_source_idx
-      ON rag_documents (source_type, source_id)
-    `)
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS rag_documents_owner_idx
-      ON rag_documents (owner_id)
-    `)
+      // Ensure HNSW index exists
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS rag_documents_embedding_hnsw_idx
+        ON rag_documents USING hnsw (embedding vector_cosine_ops)
+        WITH (m = 16, ef_construction = 64)
+      `)
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS rag_documents_source_idx
+        ON rag_documents (source_type, source_id)
+      `)
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS rag_documents_owner_idx
+        ON rag_documents (owner_id)
+      `)
+    } catch (ddlError: any) {
+      console.warn("[rag] DDL init warning (can be ignored if table exists):", ddlError.message)
+    }
 
     // Delete existing chunks for this source (re-index)
     await client.query(
