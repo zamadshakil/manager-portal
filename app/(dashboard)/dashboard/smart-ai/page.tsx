@@ -1,6 +1,5 @@
 import { requireProfile } from "@/lib/auth"
 import { listSubmissions } from "@/lib/data"
-import { isMcpConfigured, isRagConfigured } from "@/lib/smart-ai/client"
 import { SmartAiShell } from "@/components/dashboard/smart-ai/smart-ai-shell"
 
 export const metadata = {
@@ -38,10 +37,10 @@ export default async function SmartAiPage({
   // Review" tab has something to show before any client fetch.
   const { rows: recentSubmissions } = await listSubmissions(profile, { limit: 24 })
 
-  const services = {
-    mcp: isMcpConfigured(),
-    rag: isRagConfigured(),
-  }
+  // Smart AI now runs entirely natively (chat, RAG, analytics) inside this
+  // Next.js app. The shell still accepts a `services` prop for forward-
+  // compatibility, but both flags are constant `true` post-decommission.
+  const services = { mcp: true, rag: true }
 
   return (
     <SmartAiShell

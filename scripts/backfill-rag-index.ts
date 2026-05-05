@@ -3,26 +3,29 @@
  * ============================
  *
  * One-shot script that walks every existing announcement / material / task /
- * submission row in Supabase and pushes it into the rag-service index. Run
- * this once after the Railway migration to seed pgvector with everything
- * the portal accumulated under managed Supabase.
+ * submission row in Supabase and pushes it through the native RAG indexer
+ * (`lib/smart-ai/indexer.ts`) which writes directly to the `rag_documents`
+ * pgvector table. Run this once after a fresh deploy — or anytime the
+ * embedding model changes — to seed / refresh the index.
  *
- * v2: Now processes documents in concurrent batches (default 5) instead
- *     of sequentially. This is 3-5x faster on large datasets.
+ * Concurrency: processes documents in batches (default 5) instead of
+ * sequentially. Tune via `BACKFILL_CONCURRENCY=10 pnpm tsx ...`.
  *
  * Usage (from the repo root, with env vars loaded):
  *
  *     pnpm tsx scripts/backfill-rag-index.ts
  *
- * Required env vars (the same ones the portal already needs):
+ * Required env vars:
  *
  *     NEXT_PUBLIC_SUPABASE_URL    Kong public URL on Railway
  *     SUPABASE_SERVICE_ROLE_KEY   Self-hosted GoTrue service-role JWT
- *     RAG_SERVICE_URL             FastAPI rag-service public URL
- *     RAG_SERVICE_TOKEN           Shared bearer token
+ *     OPENAI_API_KEY              (preferred) for embeddings, OR
+ *     OPENROUTER_API_KEY          OpenAI-compatible fallback
+ *     EMBEDDING_MODEL             defaults to "openai/text-embedding-3-small"
  *
- * The script is idempotent: rag-service upserts on (source_type, source_id,
- * chunk_index), so re-running it just refreshes the embeddings.
+ * The script is idempotent: `indexDocument` deletes existing chunks for
+ * each (source_type, source_id) before re-inserting, so re-running just
+ * refreshes the embeddings.
  */
 
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -52,8 +55,9 @@ function newCounter(): Counter {
 
 /**
  * Process an array of index jobs in concurrent batches.
- * Much faster than sequential processing — the RAG service handles
- * chunking + embedding internally so each call is self-contained.
+ * Much faster than sequential processing — the native indexer handles
+ * chunking + embedding + Supabase insert internally so each call is
+ * self-contained.
  */
 async function processBatch(jobs: IndexJob[], counter: Counter): Promise<void> {
   for (let i = 0; i < jobs.length; i += BATCH_SIZE) {
