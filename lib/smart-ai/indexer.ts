@@ -23,6 +23,7 @@ import "server-only"
  */
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { isDirectPgConfigured, pgQuery } from "@/lib/smart-ai/pg-client"
 
 // ---------------------------------------------------------------------------
 // Config
@@ -191,6 +192,133 @@ function vectorToPg(vec: number[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// Insert paths — direct Postgres, RPC, PostgREST (in order of reliability)
+// ---------------------------------------------------------------------------
+
+interface IndexedRow {
+  source_type: string
+  source_id: string
+  chunk_index: number
+  team_id: string | null
+  owner_id: string | null
+  title: string | null
+  content: string
+  embedding: string // pgvector text literal "[0.1,0.2,...]"
+  metadata: Record<string, unknown>
+}
+
+/**
+ * Talk to Postgres directly via the `pg` driver. This bypasses PostgREST
+ * + Kong + the schema cache entirely. Most reliable path; preferred when
+ * a DB connection string is available.
+ */
+async function insertViaDirectPg(rows: IndexedRow[]): Promise<void> {
+  // 1. Idempotent delete — single statement, parameterised.
+  // We dedupe (source_type, source_id) tuples so the WHERE is compact.
+  const seen = new Set<string>()
+  const sourceTypes: string[] = []
+  const sourceIds: string[] = []
+  for (const r of rows) {
+    const key = `${r.source_type}::${r.source_id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    sourceTypes.push(r.source_type)
+    sourceIds.push(r.source_id)
+  }
+  await pgQuery(
+    `DELETE FROM rag_documents
+       WHERE (source_type, source_id) IN (
+         SELECT * FROM unnest($1::text[], $2::text[])
+       )`,
+    [sourceTypes, sourceIds],
+  )
+
+  // 2. Multi-row insert. Postgres caps parameters at 65535, so we chunk.
+  const PARAMS_PER_ROW = 9
+  const MAX_ROWS_PER_BATCH = Math.floor(60_000 / PARAMS_PER_ROW)
+  for (let start = 0; start < rows.length; start += MAX_ROWS_PER_BATCH) {
+    const batch = rows.slice(start, start + MAX_ROWS_PER_BATCH)
+    const valuesSql: string[] = []
+    const params: unknown[] = []
+    let p = 1
+    for (const r of batch) {
+      valuesSql.push(
+        `($${p++}, $${p++}, $${p++}, $${p++}::uuid, $${p++}::uuid, $${p++}, $${p++}, $${p++}::vector, $${p++}::jsonb)`,
+      )
+      params.push(
+        r.source_type,
+        r.source_id,
+        r.chunk_index,
+        r.team_id,
+        r.owner_id,
+        r.title,
+        r.content,
+        r.embedding,
+        JSON.stringify(r.metadata),
+      )
+    }
+    await pgQuery(
+      `INSERT INTO rag_documents
+         (source_type, source_id, chunk_index, team_id, owner_id, title, content, embedding, metadata)
+       VALUES ${valuesSql.join(",")}`,
+      params,
+    )
+  }
+}
+
+/**
+ * Talk to Postgres via the `insert_rag_chunks(jsonb)` RPC. Also bypasses
+ * PostgREST's column-level cache (RPCs are validated against the function
+ * signature cache, which is reloaded reliably).
+ */
+async function insertViaRpc(
+  supabase: ReturnType<typeof createAdminClient>,
+  rows: IndexedRow[],
+): Promise<void> {
+  const { error: deleteError } = await supabase.rpc("delete_rag_chunks", {
+    p_source_type: rows[0].source_type,
+    p_source_id: rows[0].source_id,
+  })
+  if (deleteError) {
+    console.warn("[rag] delete_rag_chunks rpc non-fatal:", deleteError.message)
+  }
+  const { error } = await supabase.rpc("insert_rag_chunks", { rows })
+  if (error) {
+    throw new Error(
+      `${error.message}${error.hint ? ` (hint: ${error.hint})` : ""}${
+        error.details ? ` [${error.details}]` : ""
+      }`,
+    )
+  }
+}
+
+/**
+ * Last-resort PostgREST direct table insert. Subject to the schema-cache
+ * issue we've been hitting — only used when the other two paths are
+ * unavailable so we still have *something* in dev environments without a
+ * DB URL or migrated functions.
+ */
+async function insertViaPostgrest(
+  supabase: ReturnType<typeof createAdminClient>,
+  rows: IndexedRow[],
+): Promise<void> {
+  const r0 = rows[0]
+  await supabase
+    .from("rag_documents")
+    .delete()
+    .eq("source_type", r0.source_type)
+    .eq("source_id", r0.source_id)
+  const { error } = await supabase.from("rag_documents").insert(rows)
+  if (error) {
+    throw new Error(
+      `${error.message}${error.hint ? ` (hint: ${error.hint})` : ""}${
+        error.details ? ` [${error.details}]` : ""
+      }`,
+    )
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API — Types
 // ---------------------------------------------------------------------------
 
@@ -294,25 +422,8 @@ export async function indexDocument(
       }
     }
 
-    // 3. Idempotent delete (via RPC — bypasses PostgREST's column-level
-    //    schema cache, which has been unreliable on the self-hosted
-    //    Kong+PostgREST setup on Railway).
-    const { error: deleteError } = await supabase.rpc("delete_rag_chunks", {
-      p_source_type: input.source_type,
-      p_source_id: input.source_id,
-    })
-    if (deleteError) {
-      console.warn(
-        `[rag] delete prior chunks for ${input.source_type}:${input.source_id} non-fatal:`,
-        deleteError.message,
-      )
-    }
-
-    // 4. Insert via RPC. The embedding is sent as a pgvector text
-    //    literal `"[0.1,0.2,...]"` and cast to `vector` inside the
-    //    function — the only encoding that round-trips reliably
-    //    through PostgREST regardless of the column-cache state.
-    const rows = chunks.map((chunk, i) => ({
+    // 3. Build rows
+    const rows: IndexedRow[] = chunks.map((chunk, i) => ({
       source_type: input.source_type,
       source_id: input.source_id,
       chunk_index: i,
@@ -328,28 +439,57 @@ export async function indexDocument(
       },
     }))
 
-    const { error: insertError } = await supabase.rpc("insert_rag_chunks", {
-      rows,
-    })
-    if (insertError) {
-      console.error(
-        `[rag] insert ${input.source_type}:${input.source_id} failed:`,
-        insertError.message,
-        insertError.details,
-        insertError.hint,
-      )
-      return {
-        ok: false,
-        reason: `insert failed: ${insertError.message}${
-          insertError.hint ? ` (hint: ${insertError.hint})` : ""
-        }`,
+    // 4. Insert via the most reliable path available. We try in order:
+    //    (a) Direct Postgres connection — sidesteps PostgREST entirely.
+    //    (b) Supabase RPC — bypasses the column-level schema cache.
+    //    (c) Plain PostgREST insert — last resort for dev envs.
+    const errors: string[] = []
+
+    if (isDirectPgConfigured()) {
+      try {
+        await insertViaDirectPg(rows)
+        console.log(
+          `[rag] indexed ${input.source_type}:${input.source_id} via direct-pg (${chunks.length} chunks)`,
+        )
+        return { ok: true, chunks: chunks.length }
+      } catch (err: any) {
+        const msg = err?.message ?? String(err)
+        console.warn(`[rag] direct-pg insert failed, falling back to RPC: ${msg}`)
+        errors.push(`direct-pg: ${msg}`)
       }
     }
 
-    console.log(
-      `[rag] indexed ${input.source_type}:${input.source_id} ✓ (${chunks.length} chunks)`,
+    try {
+      await insertViaRpc(supabase, rows)
+      console.log(
+        `[rag] indexed ${input.source_type}:${input.source_id} via rpc (${chunks.length} chunks)`,
+      )
+      return { ok: true, chunks: chunks.length }
+    } catch (err: any) {
+      const msg = err?.message ?? String(err)
+      console.warn(`[rag] rpc insert failed, falling back to PostgREST: ${msg}`)
+      errors.push(`rpc: ${msg}`)
+    }
+
+    try {
+      await insertViaPostgrest(supabase, rows)
+      console.log(
+        `[rag] indexed ${input.source_type}:${input.source_id} via postgrest (${chunks.length} chunks)`,
+      )
+      return { ok: true, chunks: chunks.length }
+    } catch (err: any) {
+      const msg = err?.message ?? String(err)
+      errors.push(`postgrest: ${msg}`)
+    }
+
+    console.error(
+      `[rag] all insert paths failed for ${input.source_type}:${input.source_id}:`,
+      errors.join(" | "),
     )
-    return { ok: true, chunks: chunks.length }
+    return {
+      ok: false,
+      reason: `insert failed (all paths): ${errors.join(" | ")}`,
+    }
   } catch (err: any) {
     console.error(
       `[rag] index ${input.source_type}:${input.source_id} unexpected error:`,
@@ -367,14 +507,37 @@ export async function deleteIndexed(args: {
   source_type: IndexSourceType
   source_id: string
 }): Promise<void> {
+  // Fire-and-forget delete using whichever path is available. Same priority
+  // as inserts so we don't depend on PostgREST being healthy.
+  if (isDirectPgConfigured()) {
+    try {
+      await pgQuery(
+        `DELETE FROM rag_documents WHERE source_type = $1 AND source_id = $2`,
+        [args.source_type, args.source_id],
+      )
+      return
+    } catch (err) {
+      console.warn(`[rag] direct-pg delete ${args.source_type}:${args.source_id} threw`, err)
+    }
+  }
+
   if (!isSupabaseConfigured()) return
 
   try {
     const supabase = createAdminClient()
-    await supabase.rpc("delete_rag_chunks", {
+    const { error: rpcErr } = await supabase.rpc("delete_rag_chunks", {
       p_source_type: args.source_type,
       p_source_id: args.source_id,
     })
+    if (rpcErr) {
+      // Fall back to PostgREST delete — this one usually works since
+      // it doesn't reference any disputed columns.
+      await supabase
+        .from("rag_documents")
+        .delete()
+        .eq("source_type", args.source_type)
+        .eq("source_id", args.source_id)
+    }
   } catch (err) {
     console.warn(`[rag] delete ${args.source_type}:${args.source_id} threw`, err)
   }

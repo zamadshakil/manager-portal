@@ -71,6 +71,11 @@ INNGEST_SIGNING_KEY=local
 OPENAI_API_KEY=sk-...
 EMBEDDING_MODEL=openai/text-embedding-3-small
 
+# Direct Postgres connection for RAG indexing (RECOMMENDED on Railway).
+# Bypasses PostgREST's column-level schema cache, which has been unreliable
+# on the self-hosted Supabase stack. Use the Postgres internal URL.
+SUPABASE_DB_URL=postgresql://postgres:<password>@postgres.railway.internal:5432/postgres
+
 # Email (optional — skipped if missing)
 BREVO_API_KEY=...
 
@@ -131,7 +136,7 @@ curl -i http://localhost:3000/api/cron/mark-missed
 → Check `OPENROUTER_API_KEY` is set in `.env.local`. The chat is fully native — no external services required.
 
 **Smart AI upload returns `rag_status: "failed"`**
-→ Hit `GET /api/smart-ai/health` while signed in. It will report whether the embeddings provider is reachable and whether `rag_documents` is queryable. The most common causes are an invalid `OPENROUTER_API_KEY`, an embedding model name OpenRouter doesn't recognize, or the `20260505_rag_documents.sql` migration not having been applied.
+→ Hit `GET /api/smart-ai/health` while signed in. The response now reports each insert path independently (`direct_pg`, `postgrest`) so you can see which one is broken. The bulletproof fix is to set `SUPABASE_DB_URL` (or `DATABASE_URL`) on the manager-portal Railway service so the indexer talks to Postgres directly and skips PostgREST entirely. If `direct_pg.status: "ok"` then uploads will succeed regardless of PostgREST schema-cache state.
 
 **Railway deployment fails**
 → Ensure `output: "standalone"` is in `next.config.mjs` and `railway.json` is present
