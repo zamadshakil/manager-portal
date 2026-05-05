@@ -375,14 +375,35 @@ export async function POST(req: Request) {
   ].join("\n")
 
   // --- Sliding window: trim old messages to save tokens on long chats ---
+  //
+  // IMPORTANT: feed the window the *flat* array we built above, NOT the
+  // raw `body.messages`.
+  //
+  // The AI SDK's UIMessage stores text in `parts[]`, not on `.content`.
+  // Reading `m.content` directly here returns `undefined`, gets coerced
+  // to the string "undefined" via JSON.stringify, and the LLM ends up
+  // receiving an empty user turn — which is exactly the
+  // "It appears there was no content in your message" symptom.
+  //
+  // `flat` already contains: extracted text, injected attachment
+  // metadata for the latest user turn, and only the user/assistant/system
+  // roles. That's the canonical shape to send to the model.
   const trimmedMessages = applySlidingWindow(
-    body.messages.map((m: any) => ({
-      role: m.role ?? "user",
-      content: typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""),
+    flat.map((m) => ({
+      role: m.role,
+      content: m.content,
       metadata: m.metadata,
     })) as SimpleMessage[],
     { maxTokens: 12_000, recentKeepCount: 6 },
   )
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log(
+      `[smart-ai] LLM input: ${trimmedMessages.length} msgs, last user=${
+        trimmedMessages[trimmedMessages.length - 1]?.content?.slice(0, 80) ?? "(empty)"
+      }`,
+    )
+  }
 
   // Convert trimmed messages to UIMessage format for convertToModelMessages
   const trimmedUIMessages = trimmedMessages.map((m, i) => ({
