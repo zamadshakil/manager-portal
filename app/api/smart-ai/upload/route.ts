@@ -145,6 +145,8 @@ export async function POST(req: Request) {
     // returning. Worst case it adds a few hundred ms to the upload — that
     // tradeoff is worth the clearer UX.
     let ragStatus: "completed" | "failed" | "skipped" = "skipped"
+    let ragReason: string | undefined
+    let ragChunks: number | undefined
     if (parsedText.trim().length >= 16) {
       const indexResult = await indexDocument({
         source_type: "chat_attachment",
@@ -163,12 +165,22 @@ export async function POST(req: Request) {
       })
       if (indexResult.ok) {
         ragStatus = "completed"
-      } else if (indexResult.reason === "disabled" || indexResult.reason?.startsWith("skipped")) {
+        ragChunks = indexResult.chunks
+      } else if (
+        indexResult.reason?.startsWith("disabled") ||
+        indexResult.reason?.startsWith("skipped")
+      ) {
         ragStatus = "skipped"
+        ragReason = indexResult.reason
       } else {
-        console.error("[upload] RAG indexing failed", indexResult.reason)
+        console.error("[upload] RAG indexing failed:", indexResult.reason)
         ragStatus = "failed"
+        ragReason = indexResult.reason
       }
+    } else if (parseFailed) {
+      ragReason = "skipped: text extraction failed"
+    } else {
+      ragReason = "skipped: no extractable text"
     }
 
     if (ragStatus !== "skipped") {
@@ -185,6 +197,10 @@ export async function POST(req: Request) {
       file_type: doc.file_type,
       thread_id: doc.thread_id,
       rag_status: ragStatus,
+      // Surface the actual reason the indexer returned so the UI / network
+      // tab can show "embedding API 401 …" instead of a generic "failed".
+      rag_reason: ragReason,
+      rag_chunks: ragChunks,
       pages: parsedPages,
       truncated: parsedTruncated,
       warning: parseWarning,

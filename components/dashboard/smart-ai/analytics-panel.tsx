@@ -26,7 +26,7 @@ import { formatRelative } from "@/lib/format"
 import type { RagAnalytics } from "@/lib/smart-ai/client"
 
 interface AnalyticsResponse {
-  source: "rag" | "fallback"
+  source: "native" | "fallback"
   scope: { user_id: string; role: string; team_id: string | null }
   data: RagAnalytics
 }
@@ -49,7 +49,7 @@ export function AnalyticsPanel() {
   if (!data) return null
 
   const a = data.data
-  const isLive = data.source === "rag"
+  const isLive = data.source === "native"
 
   return (
     <div className="space-y-4 lg:space-y-6 min-w-0">
@@ -57,9 +57,9 @@ export function AnalyticsPanel() {
         <div className="rounded-xl border border-[#dd5b00]/20 bg-[#fff8e1] px-4 py-3 text-[12.5px] text-[#7a5b00] flex items-start gap-2">
           <Sparkles className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
           <p>
-            Showing a placeholder snapshot. Set <code className="font-mono">RAG_SERVICE_URL</code>{" "}
-            and <code className="font-mono">RAG_SERVICE_TOKEN</code> on Railway to stream live
-            retrieval analytics here.
+            Showing a placeholder snapshot. Configure the Supabase service-role key so analytics
+            can read from <code className="font-mono">rag_documents</code> and{" "}
+            <code className="font-mono">ai_usage_log</code>.
           </p>
         </div>
       ) : null}
@@ -265,7 +265,7 @@ export function AnalyticsPanel() {
                 Recent questions
               </h2>
               <p className="text-[12px] text-muted-foreground">
-                Audit log of every Smart AI query routed through the MCP.
+                Latest user prompts captured in <code className="font-mono">chat_messages</code>.
               </p>
             </div>
           </header>
@@ -309,7 +309,7 @@ export function AnalyticsPanel() {
               Vector index health
             </h2>
             <p className="text-[12px] text-muted-foreground">
-              pgvector backing store managed by the FastAPI RAG service.
+              pgvector backing store inside Supabase (<code className="font-mono">rag_documents</code>).
             </p>
           </div>
         </header>

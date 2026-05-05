@@ -5,27 +5,21 @@ import "server-only"
  * ==============================================
  *
  * Generates embeddings and stores document chunks directly into the
- * `rag_documents` pgvector table via the Supabase service-role client,
- * eliminating the need for raw `pg` connections or the external Python
- * rag-service.
+ * `rag_documents` pgvector table via the Supabase service-role client.
+ *
+ * Embedding provider resolution:
+ *   1. OPENAI_API_KEY      → call OpenAI directly (most reliable for embeddings)
+ *   2. OPENROUTER_API_KEY  → call OpenRouter's OpenAI-compatible /embeddings
  *
  * Design rules:
- *
- *   1. Indexing is **best-effort, fire-and-forget**. A failure here must
- *      never break the user-facing server action — content was already
- *      persisted to Supabase by the time we're called. We log and move on.
- *
- *   2. We never block the action's response on the index call. The helpers
- *      return Promises that the caller can `await` if it wants confirmation,
- *      but the recommended usage is `void indexDocument({...})` so the user
- *      sees an immediate redirect / revalidation.
- *
- *   3. If Supabase or embedding credentials are missing, the helpers no-op
- *      silently. Smart AI just falls back to its conservative no-RAG mode.
- *
- *   4. The `rag_documents` table, pgvector extension, and tsv trigger are
- *      managed by the SQL migration `supabase/migrations/20260505_rag_documents.sql`.
- *      No dynamic DDL is executed at runtime.
+ *   - Indexing is best-effort. Failures here never block the user-facing
+ *     response, but we DO bubble the actual reason up to the caller so the
+ *     UI / logs can show it instead of a generic "failed".
+ *   - Vectors are inserted as the pgvector text literal `"[0.1,0.2,...]"`,
+ *     which is the only format that survives PostgREST without being
+ *     reinterpreted as a Postgres array.
+ *   - The `rag_documents` table, pgvector extension, indexes, RLS, RPCs and
+ *     tsv trigger are managed by `supabase/migrations/20260505_rag_documents.sql`.
  */
 
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -34,6 +28,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 // Config
 // ---------------------------------------------------------------------------
 
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? ""
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "openai/text-embedding-3-small"
 
@@ -57,7 +52,6 @@ function chunkText(text: string): string[] {
   function splitRecursive(content: string, sepIdx: number): string[] {
     if (content.length <= CHUNK_SIZE) return [content]
     if (sepIdx >= separators.length) {
-      // Hard split at chunk_size
       const parts: string[] = []
       for (let i = 0; i < content.length; i += CHUNK_SIZE - CHUNK_OVERLAP) {
         parts.push(content.slice(i, i + CHUNK_SIZE))
@@ -74,11 +68,9 @@ function chunkText(text: string): string[] {
       const candidate = current ? current + sep + seg : seg
       if (candidate.length > CHUNK_SIZE && current) {
         result.push(current)
-        // Overlap: grab the tail of the last chunk
         const overlapStart = Math.max(0, current.length - CHUNK_OVERLAP)
         current = current.slice(overlapStart) + sep + seg
         if (current.length > CHUNK_SIZE) {
-          // Still too big — recurse with next separator
           result.push(...splitRecursive(current, sepIdx + 1))
           current = ""
         }
@@ -92,48 +84,116 @@ function chunkText(text: string): string[] {
 
   chunks.push(...splitRecursive(trimmed, 0))
 
-  // Filter trivially short chunks
   return chunks.filter((c) => c.trim().length >= 20)
 }
 
 // ---------------------------------------------------------------------------
-// Embedding via OpenRouter (OpenAI-compatible API)
+// Embedding via OpenAI / OpenRouter
 // ---------------------------------------------------------------------------
 
-async function embedTexts(texts: string[]): Promise<number[][]> {
-  if (!texts.length) return []
-  if (!OPENROUTER_API_KEY) throw new Error("No embedding API key configured")
+interface EmbedResponse {
+  data: Array<{ embedding: number[]; index?: number }>
+}
 
-  const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
+/**
+ * Stringify the model id correctly for whichever provider we're hitting.
+ * - OpenAI direct expects no provider prefix (`text-embedding-3-small`).
+ * - OpenRouter expects `openai/text-embedding-3-small`.
+ */
+function modelForProvider(provider: "openai" | "openrouter"): string {
+  if (provider === "openai") return EMBEDDING_MODEL.replace(/^openai\//, "")
+  return EMBEDDING_MODEL.includes("/") ? EMBEDDING_MODEL : `openai/${EMBEDDING_MODEL}`
+}
+
+async function callEmbedAPI(
+  url: string,
+  apiKey: string,
+  model: string,
+  texts: string[],
+  extraHeaders: Record<string, string> = {},
+): Promise<number[][]> {
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      authorization: `Bearer ${apiKey}`,
+      ...extraHeaders,
     },
-    body: JSON.stringify({
-      model: EMBEDDING_MODEL,
-      input: texts,
-    }),
+    body: JSON.stringify({ model, input: texts }),
     signal: AbortSignal.timeout(30_000),
   })
 
   if (!res.ok) {
     const body = await res.text().catch(() => "")
-    throw new Error(`Embedding API failed (${res.status}): ${body.slice(0, 200)}`)
+    throw new Error(
+      `embedding API ${res.status} ${res.statusText} via ${new URL(url).host}: ${body.slice(0, 400)}`,
+    )
   }
 
-  const json = await res.json()
-  // OpenAI-compatible response: { data: [{ embedding: [...] }] }
-  return (json.data as { embedding: number[] }[])
-    .sort((a: any, b: any) => a.index - b.index)
-    .map((d: { embedding: number[] }) => d.embedding)
+  let json: EmbedResponse
+  try {
+    json = (await res.json()) as EmbedResponse
+  } catch (err: any) {
+    throw new Error(`embedding API returned non-JSON: ${err?.message ?? String(err)}`)
+  }
+
+  if (!json?.data?.length) {
+    throw new Error(`embedding API returned empty data array (model="${model}")`)
+  }
+
+  // Sort by index when the field is present so we keep order stable across batches.
+  // OpenAI sets `.index`; OpenRouter doesn't always — fall back to insertion order.
+  const sorted = json.data.every((d) => typeof d.index === "number")
+    ? [...json.data].sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    : json.data
+
+  return sorted.map((d) => d.embedding)
+}
+
+async function embedTexts(texts: string[]): Promise<number[][]> {
+  if (!texts.length) return []
+
+  if (OPENAI_API_KEY) {
+    return callEmbedAPI(
+      "https://api.openai.com/v1/embeddings",
+      OPENAI_API_KEY,
+      modelForProvider("openai"),
+      texts,
+    )
+  }
+
+  if (OPENROUTER_API_KEY) {
+    return callEmbedAPI(
+      "https://openrouter.ai/api/v1/embeddings",
+      OPENROUTER_API_KEY,
+      modelForProvider("openrouter"),
+      texts,
+      {
+        "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL ?? "https://hierarchia.app",
+        "X-Title": "Hierarchia Smart AI",
+      },
+    )
+  }
+
+  throw new Error("no embedding API key configured (set OPENAI_API_KEY or OPENROUTER_API_KEY)")
+}
+
+/**
+ * Format a vector for pgvector via PostgREST.
+ *
+ * Critical: PostgREST treats a JSON array sent for a `vector` column as a
+ * Postgres `ARRAY` and the insert silently ends up with an empty / wrong
+ * value (or fails with a type cast error depending on Supabase version).
+ * The reliable wire format is the pgvector text literal: `"[0.1, 0.2, ...]"`.
+ */
+function vectorToPg(vec: number[]): string {
+  return `[${vec.join(",")}]`
 }
 
 // ---------------------------------------------------------------------------
 // Public API — Types
 // ---------------------------------------------------------------------------
 
-/** Sources we currently index. Add new kinds here as the surface grows. */
 export type IndexSourceType =
   | "announcement"
   | "material"
@@ -149,11 +209,6 @@ export interface IndexDocumentInput {
   team_id?: string | null
   owner_id?: string | null
   title?: string | null
-  /**
-   * Free-form text the embedding model will see. The caller is responsible
-   * for joining title + body / description / instructions — we keep this
-   * helper dumb and let each call site decide what's relevant.
-   */
   content: string
   metadata?: Record<string, unknown>
 }
@@ -171,6 +226,10 @@ function isSupabaseConfigured(): boolean {
   }
 }
 
+function hasEmbeddingKey(): boolean {
+  return Boolean(OPENAI_API_KEY || OPENROUTER_API_KEY)
+}
+
 // ---------------------------------------------------------------------------
 // Public API — indexDocument
 // ---------------------------------------------------------------------------
@@ -181,30 +240,26 @@ function isSupabaseConfigured(): boolean {
  */
 export async function indexDocument(
   input: IndexDocumentInput,
-): Promise<{ ok: boolean; reason?: string }> {
+): Promise<{ ok: boolean; reason?: string; chunks?: number }> {
   if (!isSupabaseConfigured()) {
-    console.log("[rag] indexing skipped: Supabase not configured")
-    return { ok: false, reason: "disabled" }
+    console.warn("[rag] indexing skipped: Supabase not configured")
+    return { ok: false, reason: "disabled: supabase not configured" }
   }
 
-  if (!OPENROUTER_API_KEY) {
-    console.log("[rag] indexing skipped: no embedding API key")
-    return { ok: false, reason: "disabled" }
+  if (!hasEmbeddingKey()) {
+    console.warn("[rag] indexing skipped: no embedding API key")
+    return { ok: false, reason: "disabled: no embedding API key" }
   }
 
-  // Optional kill-switch — set RAG_INDEX_DISABLED_TYPES="task,submission" in
-  // the env to skip specific source kinds during incident triage without
-  // redeploying. Default: index everything.
   const disabled = (process.env.RAG_INDEX_DISABLED_TYPES ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
   if (disabled.includes(input.source_type)) {
-    console.log(`[rag] indexing skipped: ${input.source_type} is disabled via env`)
-    return { ok: false, reason: "disabled" }
+    console.log(`[rag] indexing skipped: ${input.source_type} disabled via env`)
+    return { ok: false, reason: `disabled: ${input.source_type} kill-switch` }
   }
 
-  // Empty / whitespace-only content provides no retrieval value.
   if (!input.content || input.content.trim().length < 16) {
     return { ok: false, reason: "skipped: content too short" }
   }
@@ -212,28 +267,47 @@ export async function indexDocument(
   try {
     const supabase = createAdminClient()
 
-    // 1. Chunk the text
+    // 1. Chunk
     const chunks = chunkText(input.content)
-    if (!chunks.length) return { ok: false, reason: "no chunks produced" }
+    if (!chunks.length) return { ok: false, reason: "skipped: no chunks produced" }
 
-    console.log(`[rag] indexing ${input.source_type}:${input.source_id} → ${chunks.length} chunks`)
+    console.log(
+      `[rag] indexing ${input.source_type}:${input.source_id} → ${chunks.length} chunks`,
+    )
 
-    // 2. Generate embeddings for all chunks in one API call
-    const vectors = await embedTexts(chunks)
+    // 2. Embed
+    let vectors: number[][]
+    try {
+      vectors = await embedTexts(chunks)
+    } catch (embedErr: any) {
+      console.error(
+        `[rag] embedding ${input.source_type}:${input.source_id} failed:`,
+        embedErr?.message ?? embedErr,
+      )
+      return { ok: false, reason: `embedding failed: ${embedErr?.message ?? "unknown"}` }
+    }
 
-    // 3. Delete existing chunks for this source (re-index / idempotent)
+    if (vectors.length !== chunks.length) {
+      return {
+        ok: false,
+        reason: `embedding count mismatch (${vectors.length} vs ${chunks.length} chunks)`,
+      }
+    }
+
+    // 3. Idempotent delete
     const { error: deleteError } = await supabase
       .from("rag_documents")
       .delete()
       .eq("source_type", input.source_type)
       .eq("source_id", input.source_id)
-
     if (deleteError) {
-      console.warn("[rag] delete old chunks warning:", deleteError.message)
-      // Non-fatal — table might be empty or row might not exist
+      console.warn(
+        `[rag] delete prior chunks for ${input.source_type}:${input.source_id} non-fatal:`,
+        deleteError.message,
+      )
     }
 
-    // 4. Build all rows and insert via Supabase
+    // 4. Insert
     const rows = chunks.map((chunk, i) => ({
       source_type: input.source_type,
       source_id: input.source_id,
@@ -249,22 +323,34 @@ export async function indexDocument(
         chunk_index: i,
         total_chunks: chunks.length,
       },
-      // `tsv` is auto-populated by the database trigger
     }))
 
-    const { error: insertError } = await supabase
-      .from("rag_documents")
-      .insert(rows)
-
+    const { error: insertError } = await supabase.from("rag_documents").insert(rows)
     if (insertError) {
-      throw new Error(`Insert failed: ${insertError.message}`)
+      console.error(
+        `[rag] insert ${input.source_type}:${input.source_id} failed:`,
+        insertError.message,
+        insertError.details,
+        insertError.hint,
+      )
+      return {
+        ok: false,
+        reason: `insert failed: ${insertError.message}${
+          insertError.hint ? ` (hint: ${insertError.hint})` : ""
+        }`,
+      }
     }
 
-    console.log(`[rag] indexed ${input.source_type}:${input.source_id} ✓ (${chunks.length} chunks)`)
-    return { ok: true }
+    console.log(
+      `[rag] indexed ${input.source_type}:${input.source_id} ✓ (${chunks.length} chunks)`,
+    )
+    return { ok: true, chunks: chunks.length }
   } catch (err: any) {
-    console.error(`[rag] index ${input.source_type}:${input.source_id} failed:`, err.message)
-    return { ok: false, reason: err.message ?? "indexing error" }
+    console.error(
+      `[rag] index ${input.source_type}:${input.source_id} unexpected error:`,
+      err?.message ?? err,
+    )
+    return { ok: false, reason: err?.message ?? "indexing error" }
   }
 }
 
@@ -272,10 +358,6 @@ export async function indexDocument(
 // Public API — deleteIndexed
 // ---------------------------------------------------------------------------
 
-/**
- * Remove a document from the index. Called from the matching delete actions.
- * Best-effort: if it fails the row is just stale until the next reindex job.
- */
 export async function deleteIndexed(args: {
   source_type: IndexSourceType
   source_id: string
@@ -298,10 +380,6 @@ export async function deleteIndexed(args: {
 // Public API — joinContent
 // ---------------------------------------------------------------------------
 
-/**
- * Convenience: build the `content` string from typical fields. Keeps call
- * sites tidy and ensures we don't send `null` strings to the embedder.
- */
 export function joinContent(parts: Array<string | null | undefined>): string {
   return parts
     .map((p) => (p ?? "").trim())

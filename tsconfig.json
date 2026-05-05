@@ -36,8 +36,6 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    "mcp-service",
-    "rag-service"
+    "node_modules"
   ]
 }

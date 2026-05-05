@@ -9,13 +9,16 @@
 
 | Service | Type | Purpose |
 |---------|------|---------|
-| **manager-portal** | Next.js 16 (Railpack) | Main application |
-| **mcp-service** | Node.js | MCP chat orchestration |
-| **FastAPI-8UVj** | Python/FastAPI | RAG analytics |
+| **manager-portal** | Next.js 16 (Railpack) | Main app — includes native Smart AI (chat, RAG, analytics) |
 | **Supabase** | Self-hosted stack | Database, Auth, Storage, Realtime |
 | **Kong** | API Gateway | Supabase public URL |
 | **Postgres** | PostgreSQL + pgvector | Primary database |
 | **GoTrue Auth** | Auth server | Supabase authentication |
+
+> **Note:** The `mcp-service` and `FastAPI-8UVj` (`rag-service`) Railway
+> deployments have been **decommissioned**. All Smart AI orchestration now
+> runs inside `manager-portal` and talks to Supabase + pgvector directly.
+> Delete those two Railway services after this deploy succeeds.
 
 ---
 
@@ -85,33 +88,14 @@
 | `UPSTASH_REDIS_REST_TOKEN` | [ ] | Rate limiting + cron |
 | `INNGEST_EVENT_KEY` | [ ] | From Inngest Cloud |
 | `INNGEST_SIGNING_KEY` | [ ] | From Inngest Cloud |
-| `MCP_SERVICE_URL` | [ ] | Private Railway URL |
-| `MCP_SERVICE_TOKEN` | [ ] | Shared secret |
-| `RAG_SERVICE_URL` | [ ] | Private Railway URL |
-| `RAG_SERVICE_TOKEN` | [ ] | Shared secret |
+| `OPENAI_API_KEY` | [ ] | Optional — preferred for embeddings (falls back to OpenRouter) |
+| `EMBEDDING_MODEL` | [ ] | Defaults to `openai/text-embedding-3-small` |
+| `SMART_AI_MODEL` | [ ] | Defaults to `openai/gpt-4o-mini` |
 | `BREVO_API_KEY` | [ ] | Transactional emails |
 | `BREVO_SENDER_EMAIL` | [ ] | Sender address |
 | `CRON_SECRET` | [ ] | Cron endpoint auth |
 | `NEXT_PUBLIC_SITE_URL` | [ ] | Public portal URL |
 | `NODE_ENV` | [ ] | `production` |
-
-### mcp-service (Railway)
-
-| Variable | Set? | Notes |
-|----------|------|-------|
-| `SUPABASE_URL` | [ ] | Same as portal's SUPABASE_URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | [ ] | Required for persistence |
-| `MCP_SERVICE_TOKEN` | [ ] | Same shared secret |
-| `RAG_SERVICE_URL` | [ ] | For searchDocument tool |
-| `RAG_SERVICE_TOKEN` | [ ] | Same shared secret |
-| `OPENROUTER_API_KEY` | [ ] | LLM provider |
-
-### FastAPI-8UVj (Railway)
-
-| Variable | Set? | Notes |
-|----------|------|-------|
-| `DATABASE_URL` | [ ] | Railway Postgres connection string |
-| `RAG_SERVICE_TOKEN` | [ ] | Auth token |
 
 ---
 

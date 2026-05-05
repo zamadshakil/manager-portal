@@ -1,24 +1,23 @@
 /**
- * Centralized env-var access for Supabase + Smart AI services.
+ * Centralized env-var access for Supabase.
  *
- * The portal originally talked to managed Supabase. As of the Railway
- * migration it talks to a self-hosted Supabase stack that lives in the
- * same Railway project (Kong → Postgrest / GoTrue / Storage / Realtime
- * → Postgres + pgvector), plus two sibling services for Smart AI:
+ * The portal talks to a self-hosted Supabase stack on Railway
+ * (Kong → Postgrest / GoTrue / Storage / Realtime → Postgres + pgvector).
+ * Smart AI (chat, RAG indexing/retrieval, analytics) runs natively inside
+ * this Next.js app — there are no longer any sibling MCP/RAG services.
  *
- *   - mcp-service  (Node.js)  — chat orchestration over LangChain/LangGraph
- *   - rag-service  (FastAPI)  — pgvector retrieval + analytics
+ * Required env vars:
+ *   - NEXT_PUBLIC_SUPABASE_URL          -> the Railway Kong public URL
+ *   - NEXT_PUBLIC_SUPABASE_ANON_KEY     -> JWT signed with self-hosted GoTrue JWT_SECRET
+ *   - SUPABASE_SERVICE_ROLE_KEY         -> service-role JWT (server-only)
  *
- * The values themselves don't change — only their *origin*:
- *   - NEXT_PUBLIC_SUPABASE_URL    -> the Railway Kong public URL
- *   - NEXT_PUBLIC_SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY are now JWTs
- *     signed with the self-hosted GoTrue JWT_SECRET (rotate from the managed
- *     keys on the day of cutover).
+ * For Smart AI itself you also want OPENAI_API_KEY (preferred) or
+ * OPENROUTER_API_KEY for embeddings + completions.
  *
- * This module is the *only* place that reads those vars and the *only*
- * place that decides what to do when they are missing. Every other module
- * imports the helpers below so we get one consistent, friendly failure mode
- * during deploys, key rotations, or local development without `.env.local`.
+ * This module is the *only* place that reads those vars and decides what
+ * to do when they are missing — every other module imports the helpers
+ * below so we get one consistent, friendly failure mode during deploys,
+ * key rotations, or local development without `.env.local`.
  */
 
 type SupabaseEnv = {

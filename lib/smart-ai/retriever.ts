@@ -4,17 +4,14 @@ import "server-only"
  * RAG Retrieval – Native Supabase Implementation
  * ==============================================
  *
- * Performs vector similarity search against the `rag_documents` pgvector
- * table via Supabase RPC functions, eliminating the need for raw `pg`
- * connections or the external Python rag-service.
+ * Performs hybrid (vector + BM25) similarity search against the
+ * `rag_documents` pgvector table via Supabase RPC functions.
  *
- * Two retrieval strategies are combined via Reciprocal Rank Fusion (RRF):
- *   1. **Vector search** — cosine similarity against the query embedding
- *   2. **BM25 full-text** — tsvector/tsquery for keyword matching
+ *   1. Vector search   — cosine similarity (HNSW index)
+ *   2. BM25 full-text  — tsvector / tsquery (GIN index)
  *
- * Results are then reranked by keyword overlap for precision.
- *
- * The search RPCs (`search_rag_vector`, `search_rag_bm25`) are defined in
+ * Results are fused via Reciprocal Rank Fusion and reranked by keyword
+ * overlap. RPCs `search_rag_vector` and `search_rag_bm25` are defined in
  * `supabase/migrations/20260505_rag_documents.sql`.
  */
 
@@ -24,6 +21,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 // Config
 // ---------------------------------------------------------------------------
 
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? ""
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "openai/text-embedding-3-small"
 
@@ -31,7 +29,7 @@ const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "openai/text-embedding-3-
 const SCORE_THRESHOLD = 0.25
 
 // ---------------------------------------------------------------------------
-// Supabase availability check
+// Supabase availability
 // ---------------------------------------------------------------------------
 
 function isSupabaseConfigured(): boolean {
@@ -44,32 +42,58 @@ function isSupabaseConfigured(): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Embedding helper
+// Embedding (mirror of indexer.ts — kept here to avoid a circular import)
 // ---------------------------------------------------------------------------
 
-async function embedQuery(text: string): Promise<number[]> {
-  if (!OPENROUTER_API_KEY) throw new Error("No embedding API key configured")
+function modelForProvider(provider: "openai" | "openrouter"): string {
+  if (provider === "openai") return EMBEDDING_MODEL.replace(/^openai\//, "")
+  return EMBEDDING_MODEL.includes("/") ? EMBEDDING_MODEL : `openai/${EMBEDDING_MODEL}`
+}
 
-  const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
+async function embedQuery(text: string): Promise<number[]> {
+  const provider: "openai" | "openrouter" | null = OPENAI_API_KEY
+    ? "openai"
+    : OPENROUTER_API_KEY
+    ? "openrouter"
+    : null
+
+  if (!provider) throw new Error("no embedding API key configured")
+
+  const url =
+    provider === "openai"
+      ? "https://api.openai.com/v1/embeddings"
+      : "https://openrouter.ai/api/v1/embeddings"
+
+  const apiKey = provider === "openai" ? OPENAI_API_KEY : OPENROUTER_API_KEY
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    authorization: `Bearer ${apiKey}`,
+  }
+  if (provider === "openrouter") {
+    headers["HTTP-Referer"] = process.env.NEXT_PUBLIC_SITE_URL ?? "https://hierarchia.app"
+    headers["X-Title"] = "Hierarchia Smart AI"
+  }
+
+  const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${OPENROUTER_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: EMBEDDING_MODEL,
-      input: [text],
-    }),
+    headers,
+    body: JSON.stringify({ model: modelForProvider(provider), input: [text] }),
     signal: AbortSignal.timeout(15_000),
   })
 
   if (!res.ok) {
     const body = await res.text().catch(() => "")
-    throw new Error(`Embedding API failed (${res.status}): ${body.slice(0, 200)}`)
+    throw new Error(
+      `embedding API ${res.status} ${res.statusText}: ${body.slice(0, 200)}`,
+    )
   }
 
-  const json = await res.json()
-  return json.data[0].embedding as number[]
+  const json = (await res.json()) as { data: Array<{ embedding: number[] }> }
+  if (!json?.data?.[0]?.embedding) {
+    throw new Error("embedding API returned empty data")
+  }
+  return json.data[0].embedding
 }
 
 // ---------------------------------------------------------------------------
@@ -101,14 +125,12 @@ export interface RetrieveOptions {
 }
 
 // ---------------------------------------------------------------------------
-// RRF helper
+// RRF
 // ---------------------------------------------------------------------------
 
 const RRF_K = 60
 
-function reciprocalRankFusion(
-  ...lists: RetrievedChunk[][]
-): RetrievedChunk[] {
+function reciprocalRankFusion(...lists: RetrievedChunk[][]): RetrievedChunk[] {
   const scores: Record<string, number> = {}
   const itemMap: Record<string, RetrievedChunk> = {}
 
@@ -160,7 +182,7 @@ function rerankByKeywords(
 }
 
 // ---------------------------------------------------------------------------
-// Row parser helper
+// Helpers
 // ---------------------------------------------------------------------------
 
 function parseRow(r: any): RetrievedChunk {
@@ -175,6 +197,10 @@ function parseRow(r: any): RetrievedChunk {
   }
 }
 
+function vectorToPg(vec: number[]): string {
+  return `[${vec.join(",")}]`
+}
+
 // ---------------------------------------------------------------------------
 // Main retrieve function
 // ---------------------------------------------------------------------------
@@ -187,20 +213,22 @@ export async function retrieveChunks(
     return []
   }
 
-  if (!OPENROUTER_API_KEY) {
+  if (!OPENAI_API_KEY && !OPENROUTER_API_KEY) {
     console.warn("[rag] retrieval skipped: no embedding API key")
     return []
   }
 
   const topK = opts.topK ?? 6
   const isTargeted = !!opts.documentId
-  const limitCount = topK * 3 // Fetch extra for RRF fusion headroom
+  const limitCount = topK * 3
 
   try {
     const supabase = createAdminClient()
 
-    // 1. Embed the query
+    // 1. Embed query
     const vector = await embedQuery(opts.query)
+
+    // pgvector RPC params accept the text-literal vector form for safety.
     const rpcParams = {
       query_embedding: `[${vector.join(",")}]`,
       match_limit: limitCount,
@@ -211,25 +239,23 @@ export async function retrieveChunks(
       filter_source_id: opts.documentId ?? null,
     }
 
-    // 3. Vector similarity search via RPC
+    // 2. Vector search
     const { data: vecData, error: vecError } = await supabase.rpc(
       "search_rag_vector",
       rpcParams,
     )
 
     if (vecError) {
-      console.error("[rag] vector search RPC failed:", vecError.message)
+      console.error("[rag] vector RPC failed:", vecError.message, vecError.details)
       return []
     }
 
     let vectorResults: RetrievedChunk[] = (vecData ?? []).map(parseRow)
-
-    // Bypass threshold for targeted document searches
     if (!isTargeted) {
       vectorResults = vectorResults.filter((c) => c.score >= SCORE_THRESHOLD)
     }
 
-    // 4. BM25 full-text search (best effort) via RPC
+    // 3. BM25 (best-effort)
     let bm25Results: RetrievedChunk[] = []
     try {
       const bm25Params = {
@@ -248,24 +274,21 @@ export async function retrieveChunks(
       )
 
       if (bm25Error) {
-        console.warn("[rag] BM25 search RPC failed (non-fatal):", bm25Error.message)
+        console.warn("[rag] BM25 RPC non-fatal:", bm25Error.message)
       } else {
         bm25Results = (bm25Data ?? []).map(parseRow)
       }
     } catch (e) {
-      // BM25 is best-effort
       console.warn("[rag] BM25 search failed (non-fatal):", e)
     }
 
-    // 5. Reciprocal Rank Fusion
+    // 4. Fuse + rerank
     let fused = bm25Results.length
       ? reciprocalRankFusion(vectorResults, bm25Results)
       : vectorResults
-
-    // 6. Keyword reranking
     fused = rerankByKeywords(opts.query, fused)
 
-    // 7. Deduplication — skip for targeted doc searches (we want multiple chunks)
+    // 5. Dedup (skip for targeted document searches)
     const seen = new Set<string>()
     const deduplicated: RetrievedChunk[] = []
     for (const chunk of fused) {
@@ -284,7 +307,7 @@ export async function retrieveChunks(
 
     return deduplicated
   } catch (err: any) {
-    console.error("[rag] retrieve failed:", err.message)
+    console.error("[rag] retrieve failed:", err?.message ?? err)
     return []
   }
 }

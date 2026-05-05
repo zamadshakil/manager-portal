@@ -2,39 +2,17 @@ import "server-only"
 import type { Profile } from "@/lib/types"
 
 /**
- * Smart AI service clients.
+ * Smart AI shared types and helpers.
  *
- * The portal talks to two services that live alongside the Next.js app in
- * the monorepo and are deployed to Railway:
+ * Smart AI runs entirely natively inside the Next.js app:
+ *   - Chat orchestration & tool calling: `app/api/smart-ai/chat/route.ts` (streamText + AI SDK)
+ *   - RAG indexing/retrieval: `lib/smart-ai/{indexer,retriever}.ts` (Supabase + pgvector)
+ *   - Analytics: `app/api/smart-ai/analytics/route.ts` (queries Supabase directly)
  *
- *   1. mcp-service  (Node.js)  → exposes a Model Context Protocol surface
- *      that the chat UI calls. It in turn calls the rag-service for
- *      document retrieval and uses LangChain/LangGraph for orchestration.
- *
- *   2. rag-service  (FastAPI) → embeds documents into pgvector, performs
- *      similarity search, and surfaces analytics about the index.
- *
- * Both services authenticate via a shared bearer token. The Next route
- * never touches user input directly — it forwards a *role-scoped* request
- * so the backend can enforce row-level security identically to Supabase.
- *
- * If the env vars are not set yet (e.g. before Railway deployment), the
- * helpers return `null` and the API routes fall back to a graceful local
- * implementation so the UI remains functional during development.
+ * The standalone `mcp-service` and `rag-service` Railway deployments have
+ * been retired. This module now only carries the small shared types that
+ * other server-only modules import.
  */
-
-const MCP_URL = process.env.MCP_SERVICE_URL ?? ""
-const MCP_TOKEN = process.env.MCP_SERVICE_TOKEN ?? ""
-const RAG_URL = process.env.RAG_SERVICE_URL ?? ""
-const RAG_TOKEN = process.env.RAG_SERVICE_TOKEN ?? ""
-
-export function isMcpConfigured(): boolean {
-  return Boolean(MCP_URL && MCP_TOKEN)
-}
-
-export function isRagConfigured(): boolean {
-  return Boolean(RAG_URL && RAG_TOKEN)
-}
 
 export interface ChatScope {
   user_id: string
@@ -57,54 +35,9 @@ export interface ChatMessage {
 }
 
 /**
- * POSTs a chat turn to the MCP service and returns the streaming response
- * (text/event-stream-like newline-delimited tokens). Caller is responsible
- * for piping the response back to the browser.
+ * Shape returned by `/api/smart-ai/analytics`. Lives here so server and
+ * client (analytics panel) share one type definition.
  */
-export async function streamChatFromMcp(args: {
-  scope: ChatScope
-  accessToken: string | null
-  threadId?: string | null
-  messages: ChatMessage[]
-  signal?: AbortSignal
-}): Promise<Response | null> {
-  if (!isMcpConfigured()) return null
-
-  let res: Response
-  try {
-    res = await fetch(`${MCP_URL.replace(/\/$/, "")}/v1/chat`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${MCP_TOKEN}`,
-      },
-      body: JSON.stringify({
-        scope: args.scope,
-        accessToken: args.accessToken,
-        threadId: args.threadId,
-        messages: args.messages,
-        stream: true,
-      }),
-      signal: args.signal,
-      // No caching — chat is per-request.
-      cache: "no-store",
-    })
-  } catch (err) {
-    console.warn("[smart-ai] MCP fetch threw:", (err as Error)?.message ?? err)
-    return null
-  }
-
-  if (!res.ok || !res.body) {
-    // Surface the upstream error so deploys / token rotations are debuggable.
-    const detail = await res.text().catch(() => "")
-    console.warn(
-      `[smart-ai] MCP responded ${res.status} ${res.statusText}: ${detail.slice(0, 200)}`,
-    )
-    return null
-  }
-  return res
-}
-
 export interface RagAnalytics {
   index: {
     documents: number
@@ -128,63 +61,4 @@ export interface RagAnalytics {
     latency_ms: number
     sources: number
   }[]
-}
-
-export async function fetchRagAnalytics(args: {
-  scope: ChatScope
-  signal?: AbortSignal
-}): Promise<RagAnalytics | null> {
-  if (!isRagConfigured()) return null
-
-  const url = new URL(`${RAG_URL.replace(/\/$/, "")}/v1/analytics`)
-  url.searchParams.set("role", args.scope.role)
-  if (args.scope.team_id) url.searchParams.set("team_id", args.scope.team_id)
-  url.searchParams.set("user_id", args.scope.user_id)
-
-  const res = await fetch(url, {
-    headers: { authorization: `Bearer ${RAG_TOKEN}` },
-    signal: args.signal,
-    cache: "no-store",
-  })
-  if (!res.ok) return null
-  return (await res.json()) as RagAnalytics
-}
-
-/**
- * Fallback analytics computed entirely from values the front-end already
- * knows about. Lets the page render shape-complete data while Railway is
- * still being provisioned.
- */
-export function fallbackAnalytics(scope: ChatScope): RagAnalytics {
-  const now = Date.now()
-  const timeseries = Array.from({ length: 24 }).map((_, i) => {
-    const ts = new Date(now - (23 - i) * 60 * 60 * 1000).toISOString()
-    // Deterministic-ish wave so the chart renders predictably.
-    const base = 4 + Math.round(Math.sin(i / 3) * 3 + i / 4)
-    return { ts, queries: Math.max(0, base), tokens: Math.max(0, base) * 220 }
-  })
-
-  return {
-    index: {
-      documents: 0,
-      chunks: 0,
-      last_indexed_at: null,
-      embedding_model: "text-embedding-3-small",
-    },
-    queries: {
-      last_24h: timeseries.reduce((a, b) => a + b.queries, 0),
-      last_7d: timeseries.reduce((a, b) => a + b.queries, 0) * 6,
-      avg_latency_ms: 0,
-      avg_top_k: 6,
-    },
-    timeseries,
-    top_topics: [
-      { topic: "Submissions", count: 0 },
-      { topic: "Validation rules", count: 0 },
-      { topic: "Tasks", count: 0 },
-      { topic: "Team performance", count: 0 },
-      { topic: "Materials", count: 0 },
-    ],
-    recent_queries: [],
-  }
 }
