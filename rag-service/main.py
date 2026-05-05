@@ -909,7 +909,9 @@ async def retrieve(req: RetrieveRequest) -> list[RetrievedChunk]:
         ]
 
     vector_results = [
-        c for c in _parse_rows(vector_rows) if c["score"] >= SCORE_THRESHOLD
+        c for c in _parse_rows(vector_rows)
+        # Bypass threshold if explicitly requesting a specific document
+        if c["score"] >= SCORE_THRESHOLD or req.document_id is not None
     ]
     bm25_results = _parse_rows(bm25_rows)
 
@@ -927,11 +929,12 @@ async def retrieve(req: RetrieveRequest) -> list[RetrievedChunk]:
     # document score highly, keep only the best one to give the LLM diverse
     # context. (A user asking about "submission X" shouldn't get 5 chunks
     # from the same submission crowding out other relevant results.)
+    # Exception: If a specific document is requested, we WANT multiple chunks!
     seen_sources: set[str] = set()
     deduplicated: list[dict[str, Any]] = []
     for chunk in reranked:
         key = f"{chunk['source_type']}:{chunk['source_id']}"
-        if key not in seen_sources:
+        if req.document_id is not None or key not in seen_sources:
             seen_sources.add(key)
             deduplicated.append(chunk)
         if len(deduplicated) >= req.top_k:
