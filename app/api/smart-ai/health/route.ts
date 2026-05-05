@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireProfile } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { isDirectPgConfigured, pgPing, pgQuery } from "@/lib/smart-ai/pg-client"
+import { ensureRagSchema, getRagBootstrapState } from "@/lib/smart-ai/bootstrap"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -42,6 +43,10 @@ export async function GET() {
 
   // (a) Direct Postgres connection — the bulletproof path.
   if (isDirectPgConfigured()) {
+    // Run the auto-bootstrap so the health check itself can fix the
+    // schema if it's stale. This is idempotent and cached per-process.
+    const bootstrap = await ensureRagSchema()
+
     try {
       const version = await pgPing()
       const fnCheck = await pgQuery<{ exists: boolean }>(
@@ -66,15 +71,29 @@ export async function GET() {
         rag_documents_count: Number(countRes.rows[0]?.n ?? 0),
         chunk_index_column_exists: colCheck.rows[0]?.exists === true,
         insert_rag_chunks_function_exists: fnCheck.rows[0]?.exists === true,
+        bootstrap: {
+          ok: bootstrap.ok,
+          ranAt: bootstrap.ranAt,
+          reason: bootstrap.reason,
+          steps: bootstrap.steps,
+        },
       }
     } catch (err: any) {
-      checks.direct_pg = { status: "error", error: err?.message ?? String(err) }
+      checks.direct_pg = {
+        status: "error",
+        error: err?.message ?? String(err),
+        bootstrap: {
+          ok: bootstrap.ok,
+          reason: bootstrap.reason,
+        },
+      }
     }
   } else {
     checks.direct_pg = {
       status: "not configured",
-      hint: "Set SUPABASE_DB_URL or DATABASE_URL on manager-portal to enable the bulletproof insert path.",
+      hint: "Set SUPABASE_DB_URL or DATABASE_URL on manager-portal to enable the bulletproof insert path AND auto-bootstrap of the rag_documents schema + RPCs.",
     }
+    checks.bootstrap = getRagBootstrapState()
   }
 
   // (b) Supabase admin client (PostgREST) — count rows.
