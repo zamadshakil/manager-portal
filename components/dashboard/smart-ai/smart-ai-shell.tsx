@@ -11,7 +11,6 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { roleLabel } from "@/lib/auth-shared"
-import { roleLabel } from "@/lib/auth-shared"
 import { ChatPanel } from "@/components/dashboard/smart-ai/chat-panel"
 import { SubmissionsReviewPanel } from "@/components/dashboard/smart-ai/submissions-review-panel"
 import { AnalyticsPanel } from "@/components/dashboard/smart-ai/analytics-panel"
