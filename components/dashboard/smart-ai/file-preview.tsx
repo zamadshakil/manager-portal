@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 export interface Attachment {
   id: string
   filename: string
-  status: "uploading" | "ready" | "error"
+  status: "uploading" | "ready" | "error" | "skipped"
   url?: string
 }
 
@@ -25,7 +25,8 @@ export function FilePreview({ attachments, onRemove }: FilePreviewProps) {
           key={file.id}
           className={cn(
             "group relative flex items-center gap-2.5 rounded-lg border border-border bg-muted/30 px-2.5 py-1.5 transition-all hover:bg-muted/50",
-            file.status === "error" && "border-destructive/20 bg-destructive/5"
+            file.status === "error" && "border-destructive/20 bg-destructive/5",
+            file.status === "skipped" && "border-orange-500/20 bg-orange-500/5"
           )}
         >
           <div className="flex h-7 w-7 items-center justify-center rounded bg-background shadow-sm">
@@ -46,6 +47,11 @@ export function FilePreview({ attachments, onRemove }: FilePreviewProps) {
                 <>
                   <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500" />
                   <span className="text-[10px] text-muted-foreground">Ready</span>
+                </>
+              ) : file.status === "skipped" ? (
+                <>
+                  <AlertCircle className="h-2.5 w-2.5 text-orange-500" />
+                  <span className="text-[10px] text-orange-500">Unreadable</span>
                 </>
               ) : (
                 <>

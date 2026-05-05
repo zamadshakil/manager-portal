@@ -25,11 +25,12 @@ export interface ThreadSummary {
 }
 
 interface ThreadDrawerProps {
-  open: boolean
-  onClose: () => void
+  open?: boolean // Optional for sidebar variant
+  onClose?: () => void // Optional for sidebar variant
   activeThreadId: string | null
   onSelectThread: (threadId: string) => void
   onNewConversation: () => void
+  variant?: "drawer" | "sidebar"
 }
 
 function relativeTime(iso: string): string {
@@ -48,11 +49,12 @@ function relativeTime(iso: string): string {
 }
 
 export function ThreadDrawer({
-  open,
+  open = true,
   onClose,
   activeThreadId,
   onSelectThread,
   onNewConversation,
+  variant = "drawer",
 }: ThreadDrawerProps) {
   const [threads, setThreads] = useState<ThreadSummary[]>([])
   const [loading, setLoading] = useState(false)
@@ -107,8 +109,8 @@ export function ThreadDrawer({
 
   return (
     <>
-      {/* Backdrop */}
-      {open ? (
+      {/* Backdrop (Drawer only) */}
+      {variant === "drawer" && open ? (
         <div
           className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px] transition-opacity"
           onClick={onClose}
@@ -116,13 +118,16 @@ export function ThreadDrawer({
         />
       ) : null}
 
-      {/* Modal panel */}
+      {/* Container panel */}
       <div
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 w-[500px] max-h-[85vh] max-w-[90vw] -translate-x-1/2 -translate-y-1/2 flex flex-col bg-card border border-border shadow-2xl rounded-2xl transition-all duration-200 ease-out",
-          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none",
+          "flex flex-col bg-card overflow-hidden",
+          variant === "drawer"
+            ? "fixed top-1/2 left-1/2 z-50 w-[500px] max-h-[85vh] max-w-[90vw] -translate-x-1/2 -translate-y-1/2 border border-border shadow-2xl rounded-2xl transition-all duration-200 ease-out"
+            : "w-full h-full border-r border-border",
+          variant === "drawer" && !open && "opacity-0 scale-95 pointer-events-none"
         )}
-        role="dialog"
+        role={variant === "drawer" ? "dialog" : "complementary"}
         aria-label="Chat history"
       >
         {/* Header */}
@@ -140,14 +145,16 @@ export function ThreadDrawer({
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            aria-label="Close chat history"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          {variant === "drawer" && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              aria-label="Close chat history"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </header>
 
         {/* New conversation button */}
@@ -156,7 +163,7 @@ export function ThreadDrawer({
             type="button"
             onClick={() => {
               onNewConversation()
-              onClose()
+              if (onClose) onClose()
             }}
             className="flex w-full items-center gap-2.5 rounded-xl border border-dashed border-border px-3.5 py-2.5 text-[13px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground hover:border-foreground/15 transition-all"
           >

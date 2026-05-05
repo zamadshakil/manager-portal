@@ -31,14 +31,63 @@ export interface ParseResult {
 }
 
 async function parsePdf(buf: Buffer): Promise<ParseResult> {
-  const { extractText, getDocumentProxy } = await import("unpdf")
+  const { extractText, getDocumentProxy, renderPageAsImage } = await import("unpdf")
   const arr = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
   const doc = await getDocumentProxy(arr)
   const result = await extractText(doc, { mergePages: true })
-  const fullText = result.text ?? ""
-  const pageCount = result.totalPages ?? undefined
+  let fullText = result.text ?? ""
+  let pageCount = result.totalPages ?? undefined
+
+  let fromOcr = false
+  let warning: string | undefined = undefined
+  let ocrConfidence: number | undefined = undefined
+
+  // If text extraction yielded fewer than 16 characters, this is likely an image-based PDF.
+  // We fall back to OCR on the first few pages (max 3 for performance).
+  if (fullText.trim().length < 16) {
+    fromOcr = true
+    try {
+      const { createWorker } = await import("tesseract.js")
+      const worker = await createWorker("eng")
+      const maxPagesToOcr = Math.min(pageCount ?? 1, 3)
+      
+      let ocrText = ""
+      let totalConfidence = 0
+
+      for (let i = 1; i <= maxPagesToOcr; i++) {
+        const imgBuffer = await renderPageAsImage(doc, i, {
+          canvasImport: () => import("@napi-rs/canvas") as any,
+          scale: 2 // Higher scale for better OCR accuracy
+        })
+        const { data } = await worker.recognize(Buffer.from(imgBuffer))
+        ocrText += (data.text || "") + "\n\n"
+        totalConfidence += (typeof data.confidence === "number" ? data.confidence : 0)
+      }
+
+      await worker.terminate()
+      fullText = ocrText
+      ocrConfidence = maxPagesToOcr > 0 ? totalConfidence / maxPagesToOcr : 0
+
+      if (fullText.trim().length < 16) {
+        warning = "Document contains no extractable text even after OCR. It has been uploaded but will not be searchable."
+      } else if ((pageCount ?? 1) > maxPagesToOcr) {
+        warning = `Only the first ${maxPagesToOcr} pages were OCR'd due to performance limits.`
+      }
+    } catch (err: any) {
+      console.warn("[parsePdf] OCR fallback failed", err)
+      warning = "PDF text extraction failed and OCR fallback encountered an error. Document will not be searchable."
+    }
+  }
+
   const clamped = clamp(fullText)
-  return { text: clamped.text, pages: pageCount, truncated: clamped.truncated }
+  return { 
+    text: clamped.text, 
+    pages: pageCount, 
+    truncated: clamped.truncated,
+    fromOcr,
+    ocrConfidence,
+    warning
+  }
 }
 
 async function parseDocx(buf: Buffer): Promise<ParseResult> {

@@ -329,7 +329,7 @@ export function ChatPanel({
             ? {
               id: data.id,
               filename: data.file_name,
-              status: data.rag_status === "failed" ? "error" : "ready",
+              status: data.rag_status === "failed" ? "error" : data.rag_status === "skipped" ? "skipped" : "ready",
               url: data.file_url,
             }
             : a,
@@ -420,7 +420,17 @@ export function ChatPanel({
   }
 
   return (
-    <div className="flex flex-col mx-auto w-full max-w-5xl h-[calc(100vh-220px)] min-h-[500px]">
+    <div className="flex w-full h-[calc(100vh-280px)] min-h-[500px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative">
+      {/* History Sidebar (Desktop) */}
+      <aside className="hidden lg:block w-[300px] shrink-0 bg-background/50 border-r border-border overflow-hidden">
+        <ThreadDrawer
+          activeThreadId={threadId}
+          onSelectThread={loadThread}
+          onNewConversation={startNewConversation}
+          variant="sidebar"
+        />
+      </aside>
+
       {/* Conversation */}
       <section
         aria-label="Conversation"
@@ -428,8 +438,8 @@ export function ChatPanel({
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         className={cn(
-          "flex-1 flex flex-col rounded-2xl border border-border bg-card shadow-card overflow-hidden transition-all relative",
-          isDragging && "bg-primary/5 border-primary/30",
+          "flex-1 flex flex-col min-w-0 bg-card transition-all relative",
+          isDragging && "bg-primary/5",
         )}
       >
         {isDragging ? (
@@ -444,14 +454,17 @@ export function ChatPanel({
             </div>
           </div>
         ) : null}
-        {/* Thread drawer */}
-        <ThreadDrawer
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          activeThreadId={threadId}
-          onSelectThread={loadThread}
-          onNewConversation={startNewConversation}
-        />
+        {/* Mobile Thread drawer */}
+        <div className="lg:hidden">
+          <ThreadDrawer
+            open={drawerOpen}
+            onClose={() => setDrawerOpen(false)}
+            activeThreadId={threadId}
+            onSelectThread={loadThread}
+            onNewConversation={startNewConversation}
+            variant="drawer"
+          />
+        </div>
 
         <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3.5 lg:px-5">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -490,7 +503,7 @@ export function ChatPanel({
             <button
               type="button"
               onClick={() => setDrawerOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              className="lg:hidden inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
               title="View chat history"
             >
               <History className="h-3.5 w-3.5" aria-hidden="true" />
