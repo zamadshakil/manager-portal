@@ -117,10 +117,14 @@ CREATE POLICY "Admins can manage credit limits" ON public.ai_credit_limits
         )
     );
 
--- ai_usage_log: users can read their own, main_admin can read all
+-- ai_usage_log: users can read and insert their own, main_admin can read all
 DROP POLICY IF EXISTS "Users can view own usage logs" ON public.ai_usage_log;
 CREATE POLICY "Users can view own usage logs" ON public.ai_usage_log
     FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert own usage logs" ON public.ai_usage_log;
+CREATE POLICY "Users can insert own usage logs" ON public.ai_usage_log
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Admins can view all usage logs" ON public.ai_usage_log;
 CREATE POLICY "Admins can view all usage logs" ON public.ai_usage_log
