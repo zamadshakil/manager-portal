@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server"
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const code = searchParams.get("code")
+  const type = searchParams.get("type")
   const next = searchParams.get("next") ?? "/dashboard"
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
@@ -21,6 +22,11 @@ export async function GET(request: Request) {
     const supabase = await createClient()
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
+      // If the callback is from a password recovery email, redirect to
+      // the update-password page instead of the default dashboard.
+      if (type === "recovery") {
+        return NextResponse.redirect(`${origin}/auth/update-password`)
+      }
       return NextResponse.redirect(`${origin}${next}`)
     }
   }
