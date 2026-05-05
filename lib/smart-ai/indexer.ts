@@ -243,7 +243,7 @@ export async function indexDocument(
       title: input.title ?? null,
       content: chunk,
       // Supabase pgvector accepts the array string format for vector columns
-      embedding: `[${vectors[i].join(",")}]`,
+      embedding: vectors[i],
       metadata: {
         ...(input.metadata ?? {}),
         chunk_index: i,
