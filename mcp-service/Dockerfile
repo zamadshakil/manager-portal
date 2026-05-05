@@ -16,6 +16,7 @@ COPY tsconfig.json ./
 COPY index.ts ./
 COPY supabase-tools.ts ./
 COPY persistence.ts ./
+COPY sliding-window.ts ./
 RUN npx tsc -p tsconfig.json
 
 FROM node:22-alpine AS runner
