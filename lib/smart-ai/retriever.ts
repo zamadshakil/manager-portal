@@ -17,6 +17,7 @@ import "server-only"
 
 import { createAdminClient } from "@/lib/supabase/admin"
 import { isDirectPgConfigured, pgQuery } from "@/lib/smart-ai/pg-client"
+import { isRerankerConfigured, crossEncoderRerank } from "@/lib/smart-ai/reranker"
 
 // ---------------------------------------------------------------------------
 // Config
@@ -246,7 +247,7 @@ async function vectorSearchDirectPg(p: DirectPgSearchParams): Promise<RetrievedC
       source_type,
       source_id                              AS source_id,
       title,
-      LEFT(content, 800)                     AS snippet,
+      LEFT(content, 1500)                    AS snippet,
       (1 - (embedding <=> $1::vector))::float AS score,
       metadata
     FROM rag_documents
@@ -284,7 +285,7 @@ async function bm25SearchDirectPg(p: DirectPgSearchParams): Promise<RetrievedChu
       source_type,
       source_id                                        AS source_id,
       title,
-      LEFT(content, 800)                               AS snippet,
+      LEFT(content, 1500)                              AS snippet,
       ts_rank(tsv, plainto_tsquery('english', $1))::float AS score,
       metadata
     FROM rag_documents
@@ -431,11 +432,34 @@ export async function retrieveChunks(
       vectorResults = vectorResults.filter((c) => c.score >= SCORE_THRESHOLD)
     }
 
-    // 4. Fuse + rerank
+    // 4. Fuse + keyword rerank
     let fused = bm25Results.length
       ? reciprocalRankFusion(vectorResults, bm25Results)
       : vectorResults
     fused = rerankByKeywords(opts.query, fused)
+
+    // 4b. Cross-encoder reranking (Jina Reranker v2)
+    //     This is the highest-impact accuracy improvement: a cross-encoder
+    //     sees BOTH the query and each chunk together, producing much more
+    //     accurate relevance scores than bi-encoder (vector) similarity.
+    //     Only fires when JINA_API_KEY is configured. Falls back gracefully.
+    if (isRerankerConfigured() && fused.length >= 2) {
+      const docs = fused.map((c) => ({
+        id: c.id,
+        text: c.snippet,
+      }))
+      const reranked = await crossEncoderRerank(opts.query, docs)
+      // Rebuild fused array in the cross-encoder's preferred order,
+      // and update scores to reflect cross-encoder relevance.
+      const idToChunk = new Map(fused.map((c) => [c.id, c]))
+      fused = reranked
+        .map((r) => {
+          const chunk = idToChunk.get(r.id)
+          if (!chunk) return null
+          return { ...chunk, score: r.score }
+        })
+        .filter(Boolean) as typeof fused
+    }
 
     // 5. Dedup — for targeted doc searches we keep EVERY chunk from the
     //    document (they all share the same source_id). For corpus-wide

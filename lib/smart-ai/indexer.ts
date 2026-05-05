@@ -49,7 +49,10 @@ function chunkText(text: string, titlePrefix?: string): string[] {
   if (!text || text.trim().length < 20) return text?.trim() ? [text.trim()] : []
 
   const trimmed = text.trim()
-  if (trimmed.length <= CHUNK_SIZE) return [trimmed]
+  if (trimmed.length <= CHUNK_SIZE) {
+    const prefix = titlePrefix?.trim() ? `[${titlePrefix.trim()}]\n\n` : ""
+    return [`${prefix}${trimmed}`]
+  }
 
   const chunks: string[] = []
   const separators = ["\n\n", "\n", ". ", " "]
