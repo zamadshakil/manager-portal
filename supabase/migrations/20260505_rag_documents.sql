@@ -196,3 +196,9 @@ BEGIN
     LIMIT match_limit;
 END;
 $$ LANGUAGE plpgsql;
+
+-- 10. Tell PostgREST to reload its schema cache so the columns / RPCs
+-- defined above are visible to the REST API the moment this migration
+-- finishes. Without this, fresh installs hit "Could not find column …
+-- in the schema cache" until PostgREST is manually restarted.
+NOTIFY pgrst, 'reload schema';
