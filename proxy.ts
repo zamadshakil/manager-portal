@@ -1,12 +1,12 @@
 import { type NextRequest } from "next/server"
 import { updateSession } from "@/lib/supabase/proxy"
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   return await updateSession(request)
 }
 
 export const config = {
-  // Skip middleware for:
+  // Skip proxy for:
   //  - Next.js internals and static asset extensions
   //  - Cron endpoints (`/api/cron/*`) — they authenticate via shared secret,
   //    not via Supabase session cookies, so refreshing the session on every
