@@ -244,21 +244,21 @@ async function vectorSearchDirectPg(p: DirectPgSearchParams): Promise<RetrievedC
     SELECT
       id::text                               AS id,
       source_type,
-      source_id::text                        AS source_id,
+      source_id                              AS source_id,
       title,
-      content                                AS snippet,
+      LEFT(content, 800)                     AS snippet,
       (1 - (embedding <=> $1::vector))::float AS score,
       metadata
     FROM rag_documents
     WHERE
       ($6::text IS NULL OR source_type = $6)
-      AND ($7::uuid IS NULL OR source_id = $7)
+      AND ($7::text IS NULL OR source_id = $7)
       AND (
         $5 = 'main_admin'
-        OR owner_id = $3::uuid
+        OR owner_id = $3
         OR (
           owner_id IS NULL
-          AND ($4::uuid IS NULL OR team_id = $4 OR team_id IS NULL)
+          AND ($4::text IS NULL OR team_id = $4 OR team_id IS NULL)
         )
       )
     ORDER BY embedding <=> $1::vector ASC
@@ -282,22 +282,22 @@ async function bm25SearchDirectPg(p: DirectPgSearchParams): Promise<RetrievedChu
     SELECT
       id::text                                         AS id,
       source_type,
-      source_id::text                                  AS source_id,
+      source_id                                        AS source_id,
       title,
-      content                                          AS snippet,
+      LEFT(content, 800)                               AS snippet,
       ts_rank(tsv, plainto_tsquery('english', $1))::float AS score,
       metadata
     FROM rag_documents
     WHERE
       tsv @@ plainto_tsquery('english', $1)
       AND ($7::text IS NULL OR source_type = $7)
-      AND ($8::uuid IS NULL OR source_id = $8)
+      AND ($8::text IS NULL OR source_id = $8)
       AND (
         $6 = 'main_admin'
-        OR owner_id = $4::uuid
+        OR owner_id = $4
         OR (
           owner_id IS NULL
-          AND ($5::uuid IS NULL OR team_id = $5 OR team_id IS NULL)
+          AND ($5::text IS NULL OR team_id = $5 OR team_id IS NULL)
         )
       )
     ORDER BY score DESC
@@ -463,10 +463,10 @@ export async function retrieveChunks(
     ) {
       try {
         const fallback = await pgQuery<any>(
-          `SELECT id::text AS id, source_type, source_id::text AS source_id,
-                  title, content AS snippet, 0.0::float AS score, metadata
+          `SELECT id::text AS id, source_type, source_id AS source_id,
+                  title, LEFT(content, 800) AS snippet, 0.0::float AS score, metadata
              FROM rag_documents
-            WHERE source_id = $1::uuid
+            WHERE source_id = $1
               AND ($2::text IS NULL OR source_type = $2)
             ORDER BY chunk_index ASC
             LIMIT $3`,
