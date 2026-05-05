@@ -202,7 +202,7 @@ export async function retrieveChunks(
     // 1. Embed the query
     const vector = await embedQuery(opts.query)
     const rpcParams = {
-      query_embedding: vector,
+      query_embedding: `[${vector.join(",")}]`,
       match_limit: limitCount,
       filter_owner_id: opts.scope.user_id,
       filter_team_id: opts.scope.team_id ?? null,

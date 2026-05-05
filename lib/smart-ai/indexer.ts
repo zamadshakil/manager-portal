@@ -242,8 +242,8 @@ export async function indexDocument(
       owner_id: input.owner_id ?? null,
       title: input.title ?? null,
       content: chunk,
-      // Supabase pgvector accepts the array string format for vector columns
-      embedding: vectors[i],
+      // Supabase pgvector accepts the array string format for vector columns over PostgREST
+      embedding: `[${vectors[i].join(",")}]`,
       metadata: {
         ...(input.metadata ?? {}),
         chunk_index: i,
