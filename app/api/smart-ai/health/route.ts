@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireProfile } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { isDirectPgConfigured, pgPing, pgQuery } from "@/lib/smart-ai/pg-client"
+import { describePgConfig, isDirectPgConfigured, pgPing, pgQuery } from "@/lib/smart-ai/pg-client"
 import { ensureRagSchema, getRagBootstrapState } from "@/lib/smart-ai/bootstrap"
 
 export const runtime = "nodejs"
@@ -40,6 +40,12 @@ export async function GET() {
       DIRECT_PG_URL: directPgUrl ? "set" : "missing (recommended for reliability)",
     },
   }
+
+  // Always include a *safe* description of the connection string so the
+  // operator can verify the parsed host/db/user/ssl without leaking the
+  // password. This is what flags issues like "database name = 'postgres}'"
+  // caused by stray Railway template syntax in the env var.
+  checks.pg_config = describePgConfig()
 
   // (a) Direct Postgres connection — the bulletproof path.
   if (isDirectPgConfigured()) {
