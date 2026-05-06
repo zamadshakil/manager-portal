@@ -681,7 +681,7 @@ export async function POST(req: Request) {
     const result = streamText({
       model: resolveModel(),
       system: systemPrompt,
-      messages: convertToModelMessages(trimmedUIMessages as any),
+      messages: await convertToModelMessages(trimmedUIMessages as any),
       tools,
       // Bumped from 5 → 10. Complex multi-table queries (e.g. "compare
       // pass rates across teams + show top failing rules") plan 6–8 tool
