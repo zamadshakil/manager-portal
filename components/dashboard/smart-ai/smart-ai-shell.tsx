@@ -70,34 +70,38 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
     setActive("chat")
   }
 
-  const tabsContent = (
-    <div
-      role="tablist"
-      aria-label="Smart AI sections"
-      className="flex items-center gap-1 rounded-xl border border-border bg-card p-1 shadow-sm overflow-x-auto scrollbar-thin"
-    >
-      {TABS.map((tab) => {
-        const Icon = tab.icon
-        const isActive = active === tab.id
-        return (
-          <button
-            key={tab.id}
-            role="tab"
-            aria-selected={isActive}
-            aria-controls={`smartai-${tab.id}`}
-            onClick={() => setActive(tab.id)}
-            className={cn(
-              "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-semibold whitespace-nowrap transition-all",
-              isActive
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-            )}
-          >
-            <Icon className="h-4 w-4" aria-hidden="true" />
-            {tab.label}
-          </button>
-        )
-      })}
+  // Portal content: tabs + credits badge side by side in the topbar
+  const portalContent = (
+    <div className="flex items-center gap-3">
+      <div
+        role="tablist"
+        aria-label="Smart AI sections"
+        className="flex items-center gap-1 rounded-xl border border-border bg-card p-1 shadow-sm overflow-x-auto scrollbar-thin"
+      >
+        {TABS.map((tab) => {
+          const Icon = tab.icon
+          const isActive = active === tab.id
+          return (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`smartai-${tab.id}`}
+              onClick={() => setActive(tab.id)}
+              className={cn(
+                "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-semibold whitespace-nowrap transition-all",
+                isActive
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              <Icon className="h-4 w-4" aria-hidden="true" />
+              {tab.label}
+            </button>
+          )
+        })}
+      </div>
+      <CreditsBadge />
     </div>
   )
 
@@ -105,14 +109,8 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
     // Escape the layout's px-4/lg:px-8 py-6/lg:py-8 gutters so the chat
     // panel stretches flush to the content-area edges with zero dead whitespace.
     <div className="relative -mx-4 lg:-mx-8 -mt-6 lg:-mt-8 -mb-24 lg:-mb-12 flex flex-col h-[calc(100vh-64px)]">
-      {/* Tab bar — portalled into topbar; credits badge pinned top-right */}
       <div className="shrink-0">
-        {portalTarget ? createPortal(tabsContent, portalTarget) : null}
-      </div>
-
-      {/* Credits badge — floated top-right over the panel */}
-      <div className="absolute top-2 right-3 z-10 hidden lg:flex">
-        <CreditsBadge />
+        {portalTarget ? createPortal(portalContent, portalTarget) : null}
       </div>
 
       {/* Panels */}
