@@ -15,6 +15,7 @@ interface Props {
   creditLimits: AiCreditLimit[]
   usageTrend: Array<{ day: string; count: number }>
   ledger: any[]
+  totalMessages: number
   adminProfile: {
     id: string
     email: string
@@ -30,7 +31,7 @@ const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: st
   { id: "records", label: "User Track Records", icon: ScrollText },
 ]
 
-export function AiUsageShell({ creditLimits, usageTrend, ledger, adminProfile }: Props) {
+export function AiUsageShell({ creditLimits, usageTrend, ledger, totalMessages, adminProfile }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>("overview")
 
   return (
@@ -76,7 +77,7 @@ export function AiUsageShell({ creditLimits, usageTrend, ledger, adminProfile }:
       {/* Tab content */}
       <div className="pt-2">
         {activeTab === "overview" && (
-          <UsageOverviewPanel creditLimits={creditLimits} usageTrend={usageTrend} />
+          <UsageOverviewPanel creditLimits={creditLimits} usageTrend={usageTrend} totalMessages={totalMessages} />
         )}
         {activeTab === "ledger" && (
           <TransactionLedger ledger={ledger} />

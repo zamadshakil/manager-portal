@@ -19,6 +19,7 @@ import { createClient } from "@/lib/supabase/client"
 interface Props {
   creditLimits: AiCreditLimit[]
   usageTrend: Array<{ day: string; count: number }>
+  totalMessages: number
 }
 
 function StatCard({
@@ -50,15 +51,17 @@ function StatCard({
   )
 }
 
-export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTrend: initialUsageTrend }: Props) {
+export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTrend: initialUsageTrend, totalMessages: initialTotalMessages }: Props) {
   const [creditLimits, setCreditLimits] = useState(initialCreditLimits)
   const [usageTrend, setUsageTrend] = useState(initialUsageTrend)
+  const [totalMessages, setTotalMessages] = useState(initialTotalMessages)
   const [chartType, setChartType] = useState<"area" | "bar">("bar")
 
   useEffect(() => {
     setCreditLimits(initialCreditLimits)
     setUsageTrend(initialUsageTrend)
-  }, [initialCreditLimits, initialUsageTrend])
+    setTotalMessages(initialTotalMessages)
+  }, [initialCreditLimits, initialUsageTrend, initialTotalMessages])
 
   useEffect(() => {
     const supabase = createClient()
@@ -91,16 +94,16 @@ export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTre
         (payload) => {
           const newLog = payload.new as any
           const today = new Date().toISOString().slice(0, 10)
-          const creditsToDeduct = newLog.credits_deducted ?? 1
+          // Increment the total messages counter (1 per log entry)
+          setTotalMessages((prev) => prev + 1)
           
           setUsageTrend((prev) => {
             const index = prev.findIndex((d) => d.day === today)
             if (index === -1) {
-              // New day starts
-              return [...prev, { day: today, count: creditsToDeduct }].slice(-30)
+              return [...prev, { day: today, count: 1 }].slice(-30)
             }
             const next = [...prev]
-            next[index] = { ...next[index], count: next[index].count + creditsToDeduct }
+            next[index] = { ...next[index], count: next[index].count + 1 }
             return next
           })
         }
@@ -114,7 +117,6 @@ export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTre
   }, [])
 
   const stats = useMemo(() => {
-    const totalMessages = usageTrend.reduce((s, d) => s + d.count, 0)
     const activeUsers = creditLimits.filter((u) => u.used_this_period > 0).length
     const withLimits = creditLimits.filter((u) => !u.is_unlimited && u.monthly_limit > 0)
     const avgPct =
@@ -132,8 +134,8 @@ export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTre
         u.monthly_limit > 0 &&
         u.used_this_period / u.monthly_limit >= 0.9,
     ).length
-    return { totalMessages, activeUsers, avgPct, nearLimit }
-  }, [creditLimits, usageTrend])
+    return { activeUsers, avgPct, nearLimit }
+  }, [creditLimits])
 
   // Top consumers sorted by used_this_period desc
   const topConsumers = useMemo(
@@ -167,7 +169,7 @@ export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTre
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Messages This Period"
-          value={stats.totalMessages.toLocaleString()}
+          value={totalMessages.toLocaleString()}
           subtitle="Across all users"
           icon={TrendingUp}
           accent="bg-violet-500"
@@ -206,7 +208,7 @@ export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTre
               clears that up without hiding the chart entirely (which was
               the previous behaviour and made the page look broken).
             */}
-            {stats.totalMessages === 0 ? (
+            {totalMessages === 0 ? (
               <span className="text-[11px] text-muted-foreground">
                 No logged messages in the last 30 days
               </span>
@@ -237,7 +239,11 @@ export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTre
             </button>
           </div>
         </div>
-        {chartType === "area" ? (
+        {usageTrend.every((d) => d.count === 0) ? (
+          <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
+            No AI usage recorded yet.
+          </div>
+        ) : chartType === "area" ? (
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={chartData} margin={{ top: 8, right: 16, left: -20, bottom: 0 }}>
               <defs>
