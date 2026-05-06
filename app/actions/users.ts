@@ -188,3 +188,86 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
   revalidatePath("/dashboard/admin/users")
   return { ok: true }
 }
+
+const RoleTransitionSchema = z.object({
+  userId: z.string().uuid(),
+  newRole: z.enum(["main_admin", "manager", "member"]),
+})
+
+/**
+ * Update a user's role. Only main_admin can do this.
+ * Reconfigures ACL, validates last admin guardrail, updates metadata,
+ * invalidates sessions, and logs the activity.
+ */
+export async function updateUserRole(userId: string, newRole: "main_admin" | "manager" | "member"): Promise<{ ok: boolean; error?: string }> {
+  const actor = await requireRole(["main_admin"])
+  const parsed = RoleTransitionSchema.safeParse({ userId, newRole })
+  
+  if (!parsed.success) return { ok: false, error: "Invalid input" }
+
+  if (userId === actor.id && newRole !== "main_admin") {
+    return { ok: false, error: "You cannot demote yourself." }
+  }
+
+  const admin = createAdminClient()
+
+  // Last admin check
+  const { data: currentProfile, error: profileError } = await admin
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .single()
+
+  if (profileError || !currentProfile) {
+    return { ok: false, error: "User not found." }
+  }
+
+  if (currentProfile.role === "main_admin" && newRole !== "main_admin") {
+    const { count, error: countError } = await admin
+      .from("profiles")
+      .select("*", { count: "exact", head: true })
+      .eq("role", "main_admin")
+
+    if (countError) return { ok: false, error: "Failed to verify admin count." }
+    if (count !== null && count <= 1) {
+      return { ok: false, error: "Cannot demote the last main admin account. System requires at least one active main admin." }
+    }
+  }
+
+  if (currentProfile.role === newRole) {
+    return { ok: true } // No change needed
+  }
+
+  // 1. Update the profile row
+  const { error: updateError } = await admin
+    .from("profiles")
+    .update({ role: newRole })
+    .eq("id", userId)
+
+  if (updateError) return { ok: false, error: "Could not update user role." }
+
+  // 2. Sync the role into Supabase Auth metadata
+  await admin.auth.admin.updateUserById(userId, {
+    user_metadata: { role: newRole },
+  })
+
+  // 3. Real-time session invalidation (kills active tokens)
+  await admin.rpc("invalidate_user_sessions", { target_user_id: userId })
+
+  // 4. Immutable Audit Trail
+  await logActivity({
+    actorId: actor.id,
+    teamId: null,
+    action: "user.role_changed",
+    entityType: "profile",
+    entityId: userId,
+    metadata: {
+      old_role: currentProfile.role,
+      new_role: newRole,
+    },
+  })
+
+  revalidatePath("/dashboard/team")
+  revalidatePath("/dashboard/admin/users")
+  return { ok: true }
+}

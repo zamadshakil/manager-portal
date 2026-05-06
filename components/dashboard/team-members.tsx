@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Users, Trash2, Loader2, Eye, EyeOff, Key, Mail, ShieldCheck } from "lucide-react"
+import { Users, Trash2, Loader2, Eye, EyeOff, Key, Mail, ShieldCheck, Shield } from "lucide-react"
+import { RoleTransitionModal } from "./role-transition-modal"
 import { roleLabel } from "@/lib/auth-shared"
 import { formatRelative } from "@/lib/format"
 import { deleteUser } from "@/app/actions/users"
@@ -23,6 +24,7 @@ export function TeamMembers({ members, teams, isMainAdmin = false }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [pending, start] = useTransition()
   const [expandedCredentials, setExpandedCredentials] = useState<Set<string>>(new Set())
+  const [transitioningUser, setTransitioningUser] = useState<Profile | null>(null)
 
   function handleDeleteClick(id: string) {
     setError(null)
@@ -151,6 +153,17 @@ export function TeamMembers({ members, teams, isMainAdmin = false }: Props) {
                         )}
                       </button>
 
+                      {/* Change Role button */}
+                      <button
+                        type="button"
+                        onClick={() => setTransitioningUser(m)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-primary/5 hover:text-primary hover:border-primary/30"
+                        aria-label="Change user role"
+                        title="Change user role"
+                      >
+                        <Shield className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+
                       {/* Delete button */}
                       {m.role !== "main_admin" && (
                         <button
@@ -221,6 +234,14 @@ export function TeamMembers({ members, teams, isMainAdmin = false }: Props) {
             )
           })}
         </ul>
+      )}
+
+      {transitioningUser && (
+        <RoleTransitionModal
+          user={transitioningUser}
+          isOpen={!!transitioningUser}
+          onClose={() => setTransitioningUser(null)}
+        />
       )}
     </section>
   )
