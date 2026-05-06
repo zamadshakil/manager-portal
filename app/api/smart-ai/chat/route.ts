@@ -185,6 +185,8 @@ export async function POST(req: Request) {
     console.warn("[smart-ai] credit check failed (non-blocking):", creditErr.message)
   }
 
+  // ---- Near-limit proactive alert string (injected into system prompt) ----
+  let nearLimitAlert: string | null = null
   if (creditRow && !creditRow.is_unlimited) {
     const used = creditRow.used_this_period ?? 0
     const limit = creditRow.monthly_limit ?? 100
@@ -198,6 +200,10 @@ export async function POST(req: Request) {
         },
         { status: 429 },
       )
+    }
+    const pct = limit > 0 ? (used / limit) * 100 : 0
+    if (pct >= 90) {
+      nearLimitAlert = `⚠️ PROACTIVE CREDIT ALERT: This user has consumed ${used} out of ${limit} AI credits (${Math.round(pct)}% used) for this ${creditRow.period_type ?? "monthly"} period. Their credits reset on ${creditRow.period_end ?? "period end"}. At the END of your next response, add a brief, friendly note (1 sentence) warning them they are near their limit and should contact their administrator if they need more. Keep the warning conversational and non-alarming.`
     }
   }
 
@@ -570,6 +576,233 @@ export async function POST(req: Request) {
         }
       },
     }),
+
+    // ---- Credit Intelligence Tools ----------------------------------------
+
+    getMyCredits: tool({
+      description:
+        "Retrieve AI credit usage and quota for the current user. " +
+        "Use this when the user asks about their credits, limits, remaining messages, " +
+        "quota, or how many AI uses they have left. " +
+        "For main_admin: use scope='global' to get a department-level breakdown.",
+      inputSchema: z.object({
+        scope: z
+          .enum(["self", "global"])
+          .default("self")
+          .describe(
+            "'self' for the current user's own quota. " +
+            "'global' for a platform-wide department breakdown (main_admin only).",
+          ),
+      }),
+      execute: async ({ scope }) => {
+        try {
+          if (scope === "global") {
+            if (profile.role !== "main_admin") {
+              return {
+                error: "Access denied. Only the Main Admin can view global credit summaries.",
+                retryable: false,
+              }
+            }
+            const { data, error } = await persistClient.rpc("get_department_credit_summary")
+            if (error) {
+              console.error("[smart-ai] get_department_credit_summary failed:", error.message)
+              return { error: `Could not fetch department summary: ${error.message}`, retryable: true }
+            }
+            return {
+              scope: "global",
+              departments: (data ?? []).map((row: any) => ({
+                team: row.team_name,
+                total_credits_used: row.total_credits_used,
+                active_users: row.active_users,
+                avg_per_user: row.avg_credits_per_user,
+                near_limit_users: row.near_limit_users,
+              })),
+            }
+          }
+
+          // scope === 'self': use RLS-scoped client so user sees only their row
+          const { data, error } = await supabase
+            .from("ai_credit_limits")
+            .select("monthly_limit, used_this_period, period_type, period_start, period_end, is_unlimited")
+            .eq("user_id", profile.id)
+            .maybeSingle()
+
+          if (error) {
+            return { error: `Could not fetch credit data: ${error.message}`, retryable: true }
+          }
+
+          if (!data) {
+            // No row yet — default limits apply
+            return {
+              scope: "self",
+              used: 0,
+              limit: 100,
+              remaining: 100,
+              usage_pct: 0,
+              period_type: "monthly",
+              period_end: null,
+              is_unlimited: profile.role === "main_admin",
+              is_near_limit: false,
+            }
+          }
+
+          const row = data as any
+          const used = row.used_this_period ?? 0
+          const limit = row.monthly_limit ?? 100
+          const isUnlimited = row.is_unlimited ?? false
+          const remaining = isUnlimited ? null : Math.max(0, limit - used)
+          const usagePct = isUnlimited || limit === 0 ? 0 : Math.round((used / limit) * 100)
+
+          return {
+            scope: "self",
+            used,
+            limit,
+            remaining,
+            usage_pct: usagePct,
+            period_type: row.period_type,
+            period_start: row.period_start,
+            period_end: row.period_end,
+            is_unlimited: isUnlimited,
+            is_near_limit: !isUnlimited && usagePct >= 90,
+          }
+        } catch (err: any) {
+          console.error("[smart-ai] getMyCredits failed:", err?.message ?? err)
+          return { error: `Credit lookup failed: ${err?.message ?? String(err)}`, retryable: true }
+        }
+      },
+    }),
+
+    getUsageLogs: tool({
+      description:
+        "Fetch recent AI credit consumption log entries. " +
+        "Use this when the user asks what used their credits, why their credits went down, " +
+        "or to explain recent deductions. Each entry shows the event type, credits deducted, " +
+        "model used, and timestamp. Main admins can optionally fetch logs for any specific user.",
+      inputSchema: z.object({
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(20)
+          .default(10)
+          .describe("Number of log entries to return (max 20)."),
+        targetUserId: z
+          .string()
+          .optional()
+          .describe("Main admin only: fetch logs for a specific user by their UUID."),
+      }),
+      execute: async ({ limit, targetUserId }) => {
+        try {
+          // RBAC: only main_admin can query other users' logs
+          if (targetUserId && profile.role !== "main_admin") {
+            return {
+              error: "Access denied. Only the Main Admin can view other users' usage logs.",
+              retryable: false,
+            }
+          }
+
+          const resolvedUserId = targetUserId ?? profile.id
+          // Use admin client when fetching for a different user (bypasses RLS),
+          // otherwise use RLS-scoped client (user sees only their own rows)
+          const client = targetUserId ? persistClient : supabase
+
+          const { data, error } = await client
+            .from("ai_usage_log")
+            .select("id, created_at, event_type, credits_deducted, model, thread_id, period_type")
+            .eq("user_id", resolvedUserId)
+            .order("created_at", { ascending: false })
+            .limit(limit)
+
+          if (error) {
+            console.error("[smart-ai] getUsageLogs failed:", error.message)
+            return { error: `Could not fetch usage logs: ${error.message}`, retryable: true }
+          }
+
+          const logs = (data ?? []) as any[]
+
+          // Humanise the log entries — resolve thread titles where available
+          let threadTitleMap: Record<string, string> = {}
+          const threadIds = [...new Set(logs.map((l) => l.thread_id).filter(Boolean))]
+          if (threadIds.length > 0) {
+            const { data: threads } = await persistClient
+              .from("chat_threads")
+              .select("id, title")
+              .in("id", threadIds)
+            if (threads) {
+              for (const t of threads as any[]) {
+                threadTitleMap[t.id] = t.title ?? "Untitled conversation"
+              }
+            }
+          }
+
+          return {
+            logs: logs.map((l) => ({
+              timestamp: l.created_at,
+              event: l.event_type ?? "smart_ai_query",
+              credits_deducted: l.credits_deducted ?? 1,
+              model: l.model,
+              period_type: l.period_type,
+              conversation: l.thread_id ? (threadTitleMap[l.thread_id] ?? "Untitled conversation") : null,
+            })),
+            count: logs.length,
+          }
+        } catch (err: any) {
+          console.error("[smart-ai] getUsageLogs failed:", err?.message ?? err)
+          return { error: `Usage log lookup failed: ${err?.message ?? String(err)}`, retryable: true }
+        }
+      },
+    }),
+
+    getTopCreditConsumers: tool({
+      description:
+        "Main admin only: List the top N users by AI credit consumption for the current period. " +
+        "Use this when the admin asks 'who uses the most credits', 'top consumers', or " +
+        "'who is consuming the most AI credits this month/week'.",
+      inputSchema: z.object({
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(20)
+          .default(3)
+          .describe("Number of top consumers to return (default 3)."),
+      }),
+      execute: async ({ limit }) => {
+        if (profile.role !== "main_admin") {
+          return {
+            error: "Access denied. Only the Main Admin can view top consumer rankings.",
+            retryable: false,
+          }
+        }
+        try {
+          const { data, error } = await persistClient.rpc("get_top_credit_consumers", {
+            p_limit: limit,
+          })
+          if (error) {
+            console.error("[smart-ai] get_top_credit_consumers failed:", error.message)
+            return { error: `Could not fetch top consumers: ${error.message}`, retryable: true }
+          }
+          return {
+            consumers: (data ?? []).map((row: any) => ({
+              name: row.full_name ?? row.email ?? "Unknown",
+              email: row.email,
+              role: row.role,
+              team: row.team_name ?? "No team",
+              used: row.used_this_period,
+              limit: row.monthly_limit,
+              is_unlimited: row.is_unlimited,
+              usage_pct: row.usage_pct,
+              period_type: row.period_type,
+              resets_on: row.period_end,
+            })),
+            count: (data ?? []).length,
+          }
+        } catch (err: any) {
+          console.error("[smart-ai] getTopCreditConsumers failed:", err?.message ?? err)
+          return { error: `Top consumers lookup failed: ${err?.message ?? String(err)}`, retryable: true }
+        }
+      },
+    }),
   }
 
   const roleLabel = profile.role.replace("_", " ")
@@ -624,6 +857,23 @@ export async function POST(req: Request) {
     "DOCUMENT ANSWERS: When answering questions about a specific document, use ALL retrieved snippets — not just the top-scoring ones. Scan every snippet for the requested information before saying it's not available.",
     "",
     "LINKS: NEVER generate links to internal portal pages (e.g. /dashboard/..., /documents/...). These will 404. Instead, reference documents by their filename and friendly name so the user can find them in the portal. If you want to help the user locate something, describe where to find it in the portal navigation (e.g. 'Go to Dashboard > Materials').",
+    "",
+
+    // --- CREDIT INTELLIGENCE ---
+    "CREDIT & QUOTA INTELLIGENCE:",
+    "- When the user asks about their credits, limits, remaining messages, quota, or AI usage, call 'getMyCredits' with scope='self'. DO NOT guess or use any credit data from the conversation context.",
+    "- When the user asks what consumed their credits, why their count went down, or wants a usage history, call 'getUsageLogs'.",
+    "- MAIN ADMIN ONLY: When asked 'which department uses the most credits?', 'global usage summary', or similar cross-department questions, call 'getMyCredits' with scope='global'.",
+    "- MAIN ADMIN ONLY: When asked 'who are the top consumers?', 'list top 3 credit users', or 'who uses the most AI?', call 'getTopCreditConsumers'.",
+    "- Report credits in a friendly, human format: e.g. 'You have 42 out of 100 credits remaining for this monthly period (58% used). Your credits reset on May 31.'.",
+    "- If is_unlimited is true, say 'You have unlimited AI credits — no restrictions apply.'.",
+    "- If is_near_limit is true in the result, proactively and gently note this in your response.",
+    "- NEVER expose raw user UUIDs when discussing credit data. Always use full_name or email.",
+    "- NEVER allow non-admin users to see other users' credit data. The tools enforce this — if a tool returns an 'Access denied' error, tell the user politely they cannot view that information.",
+    "- Key credit tables (for reference only — use the dedicated tools, not queryDatabase, for credit data):",
+    "  · ai_credit_limits: user_id, monthly_limit, used_this_period, period_type, period_start, period_end, is_unlimited",
+    "  · ai_usage_log: user_id, thread_id, model, event_type, credits_deducted, status, created_at",
+    nearLimitAlert ?? "",
   ].join("\n")
 
   // --- Sliding window: trim old messages to save tokens on long chats ---
