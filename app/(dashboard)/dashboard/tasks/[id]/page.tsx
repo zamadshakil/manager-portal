@@ -46,12 +46,18 @@ export default async function TaskDetailPage({
     .filter(m => m.team_id === task.team_id && m.role === "member")
     .map(member => {
       const existing = rawAssignments.find(a => a.assignee_id === member.id)
-      if (existing) return existing
+      if (existing) {
+        // If assigned but no submission, show as pending in the ledger for better visibility
+        if (existing.status === "assigned" && !existing.submission_id) {
+          return { ...existing, status: "pending" as any }
+        }
+        return existing
+      }
       return {
         id: `virtual-${member.id}`,
         task_id: id,
         assignee_id: member.id,
-        status: "assigned" as const,
+        status: "pending" as any,
         submission_id: null,
         late_reason: null,
         submitted_at: null,

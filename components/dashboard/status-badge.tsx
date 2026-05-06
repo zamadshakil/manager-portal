@@ -16,6 +16,7 @@ const styles: Record<string, { label: string; cls: string }> = {
   // Task assignment states
   assigned: { label: "Assigned", cls: "bg-muted text-muted-foreground" },
   submitted: { label: "Submitted", cls: "bg-[#e8f8eb] text-[#157a2a]" },
+  pending: { label: "Not Started", cls: "bg-[#fff8e1] text-[#7a5b00]" },
 }
 
 export function StatusBadge({
