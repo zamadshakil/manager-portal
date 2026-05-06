@@ -37,8 +37,6 @@
   ],
   "exclude": [
     "node_modules",
-    "scratch",
-    ".next",
-    "scripts/*.mjs"
+    "scratch"
   ]
 }
