@@ -102,15 +102,17 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
   )
 
   return (
-    <div className="flex flex-col h-[calc(100vh-120px)] -mb-12">
-      {/* Tab bar + credits badge row */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex-1 min-w-0">
-          {portalTarget ? createPortal(tabsContent, portalTarget) : tabsContent}
-        </div>
-        <div className="shrink-0">
-          <CreditsBadge />
-        </div>
+    // Escape the layout's px-4/lg:px-8 py-6/lg:py-8 gutters so the chat
+    // panel stretches flush to the content-area edges with zero dead whitespace.
+    <div className="relative -mx-4 lg:-mx-8 -mt-6 lg:-mt-8 -mb-24 lg:-mb-12 flex flex-col h-[calc(100vh-64px)]">
+      {/* Tab bar — portalled into topbar; credits badge pinned top-right */}
+      <div className="shrink-0">
+        {portalTarget ? createPortal(tabsContent, portalTarget) : null}
+      </div>
+
+      {/* Credits badge — floated top-right over the panel */}
+      <div className="absolute top-2 right-3 z-10 hidden lg:flex">
+        <CreditsBadge />
       </div>
 
       {/* Panels */}
@@ -130,16 +132,22 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
           />
         ) : null}
         {active === "submissions" ? (
-          <SubmissionsReviewPanel
-            submissions={submissions}
-            onAskAi={(s) =>
-              jumpToChat(
-                `Summarize submission "${s.title}" (id ${s.id}). Highlight validation flags, score, and any reviewer follow-ups.`,
-              )
-            }
-          />
+          <div className="h-full overflow-auto px-4 lg:px-8 py-4 lg:py-6">
+            <SubmissionsReviewPanel
+              submissions={submissions}
+              onAskAi={(s) =>
+                jumpToChat(
+                  `Summarize submission "${s.title}" (id ${s.id}). Highlight validation flags, score, and any reviewer follow-ups.`,
+                )
+              }
+            />
+          </div>
         ) : null}
-        {active === "analytics" ? <AnalyticsPanel /> : null}
+        {active === "analytics" ? (
+          <div className="h-full overflow-auto px-4 lg:px-8 py-4 lg:py-6">
+            <AnalyticsPanel />
+          </div>
+        ) : null}
       </div>
     </div>
   )

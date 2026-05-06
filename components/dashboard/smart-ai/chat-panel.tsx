@@ -420,9 +420,9 @@ export function ChatPanel({
   }
 
   return (
-    <div className="flex w-full h-full min-h-[500px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative">
+    <div className="flex w-full h-full overflow-hidden relative bg-card">
       {/* History Sidebar (Desktop) */}
-      <aside className="hidden lg:block w-[300px] shrink-0 bg-background/50 border-r border-border overflow-hidden">
+      <aside className="hidden lg:block w-[260px] shrink-0 bg-background/50 border-r border-border overflow-hidden">
         <ThreadDrawer
           activeThreadId={threadId}
           onSelectThread={loadThread}
@@ -503,7 +503,7 @@ export function ChatPanel({
         {/* Scroll area */}
         <div
           ref={scrollerRef}
-          className="flex-1 overflow-y-auto scrollbar-thin px-4 py-5 lg:px-6 lg:py-6 space-y-5"
+          className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 lg:px-5 lg:py-5 space-y-4"
         >
           {loadingThread ? (
             <div className="flex items-center justify-center py-12 text-muted-foreground">
@@ -552,7 +552,7 @@ export function ChatPanel({
         {/* Composer */}
         <form
           onSubmit={handleSubmit}
-          className="border-t border-border bg-background/50 px-3 py-3 lg:px-4 lg:py-4"
+          className="border-t border-border bg-background/50 px-3 py-2.5 lg:px-4 lg:py-3"
         >
           <div className="rounded-xl border border-border bg-background shadow-sm focus-within:ring-2 focus-within:ring-ring focus-within:border-ring transition-all">
             <textarea
@@ -650,19 +650,19 @@ function EmptyState({
 }) {
   const greeting = profile.full_name?.split(" ")[0] ?? "there"
   return (
-    <div className="flex flex-col items-center text-center py-8 lg:py-12">
-      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#f2f9ff] text-[#097fe8] mb-4 shadow-card">
-        <Sparkles className="h-6 w-6" aria-hidden="true" />
+    <div className="flex flex-col items-center text-center py-6 lg:py-8">
+      <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#f2f9ff] text-[#097fe8] mb-3 shadow-card">
+        <Sparkles className="h-5 w-5" aria-hidden="true" />
       </span>
-      <h3 className="text-[20px] font-semibold tracking-tight">
+      <h3 className="text-[18px] font-semibold tracking-tight">
         Hi {greeting}, what can I help you find?
       </h3>
-      <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground max-w-md">
+      <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted-foreground max-w-md">
         I&apos;m grounded in your portal&apos;s submissions, tasks, validation runs, and audit
         log. Ask anything in plain English.
       </p>
 
-      <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full max-w-2xl text-left">
+      <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-2xl text-left">
         {suggestions.map((s) => {
           const Icon = s.icon
           return (
@@ -670,15 +670,15 @@ function EmptyState({
               key={s.title}
               type="button"
               onClick={() => onPick(s)}
-              className="group relative flex items-start gap-3.5 rounded-2xl border border-border/50 bg-background/50 p-4 text-left transition-all hover:bg-background hover:border-primary/20 hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.1)] hover:-translate-y-0.5 overflow-hidden"
+              className="group relative flex items-start gap-3 rounded-xl border border-border/50 bg-background/50 p-3 text-left transition-all hover:bg-background hover:border-primary/20 hover:shadow-[0_6px_20px_-10px_rgba(0,0,0,0.1)] hover:-translate-y-0.5 overflow-hidden"
             >
               <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-              <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-warm-white text-foreground/60 transition-all group-hover:bg-[#f2f9ff] group-hover:text-[#097fe8] group-hover:scale-110">
-                <Icon className="h-5 w-5" aria-hidden="true" />
+              <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-warm-white text-foreground/60 transition-all group-hover:bg-[#f2f9ff] group-hover:text-[#097fe8] group-hover:scale-110">
+                <Icon className="h-4 w-4" aria-hidden="true" />
               </span>
               <div className="relative min-w-0 flex-1">
-                <p className="text-[13.5px] font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors">{s.title}</p>
-                <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground line-clamp-2">
+                <p className="text-[12.5px] font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors">{s.title}</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground line-clamp-2">
                   {s.prompt}
                 </p>
               </div>
