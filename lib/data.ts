@@ -557,8 +557,8 @@ export async function getMyAssignmentForTask(
 export async function listAssignmentsForTask(taskId: string): Promise<
   Array<
     TaskAssignment & {
-      assignee: { full_name: string | null; email: string } | null
-      submission: { status: string; score: number | null; title: string | null } | null
+      assignee: { full_name: string | null; email: string; avatar_url: string | null } | null
+      submission: { status: string; score: number | null; title: string | null; summary: string | null } | null
     }
   >
 > {
@@ -566,7 +566,7 @@ export async function listAssignmentsForTask(taskId: string): Promise<
   const { data, error } = await supabase
     .from("task_assignments")
     .select(
-      "*, assignee:profiles!task_assignments_assignee_id_fkey(full_name, email), submission:submissions(status, score, title)",
+      "*, assignee:assignee_id(full_name, email, avatar_url), submission:submission_id(status, score, title, summary)",
     )
     .eq("task_id", taskId)
     .order("created_at", { ascending: true })
@@ -577,8 +577,8 @@ export async function listAssignmentsForTask(taskId: string): Promise<
 
   return (data ?? []) as unknown as Array<
     TaskAssignment & {
-      assignee: { full_name: string | null; email: string } | null
-      submission: { status: string; score: number | null; title: string | null } | null
+      assignee: { full_name: string | null; email: string; avatar_url: string | null } | null
+      submission: { status: string; score: number | null; title: string | null; summary: string | null } | null
     }
   >
 }
