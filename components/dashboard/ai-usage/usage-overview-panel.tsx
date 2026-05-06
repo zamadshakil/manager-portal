@@ -200,7 +200,20 @@ export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTre
       {/* Chart card */}
       <div className="rounded-xl border border-border bg-card p-5">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-sm font-semibold">AI Messages — Last 30 Days</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-semibold">AI Messages — Last 30 Days</h2>
+            {/*
+              When the log table is empty but credit_limits show usage, the
+              user reasonably wonders why the chart is flat. This soft hint
+              clears that up without hiding the chart entirely (which was
+              the previous behaviour and made the page look broken).
+            */}
+            {totalMessages === 0 ? (
+              <span className="text-[11px] text-muted-foreground">
+                No logged messages in the last 30 days
+              </span>
+            ) : null}
+          </div>
           <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 text-xs">
             <button
               onClick={() => setChartType("area")}

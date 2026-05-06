@@ -9,8 +9,6 @@ import { NextResponse } from "next/server"
  * doing any heavy work synchronously so beacons never block the next
  * navigation.
  */
-export const runtime = "edge"
-
 export async function POST(request: Request) {
   try {
     // We intentionally don't `await` parsing; we just drain the body so the
