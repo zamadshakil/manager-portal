@@ -333,6 +333,48 @@ export async function getUserUsageHistory(
 }
 
 // ---------------------------------------------------------------------------
+// Admin: get system-wide transaction ledger
+// ---------------------------------------------------------------------------
+
+export async function getSystemTransactionLedger(days = 30) {
+  await requireRole(["main_admin"])
+  const admin = createAdminClient()
+
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+
+  const { data, error } = await admin
+    .from("ai_usage_log")
+    .select("*")
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(1000)
+
+  if (error || !data) return []
+
+  const { data: profiles } = await admin.from("profiles").select("id, email, full_name, team_id")
+  const { data: teams } = await admin.from("teams").select("id, name")
+
+  const profileMap = new Map((profiles ?? []).map((p: any) => [p.id, p]))
+  const teamMap = new Map((teams ?? []).map((t: any) => [t.id, t.name]))
+
+  return data.map((row: any) => {
+    const prof = profileMap.get(row.user_id)
+    return {
+      id: row.id,
+      user_id: row.user_id,
+      user_email: prof?.email ?? null,
+      user_full_name: prof?.full_name ?? null,
+      team_name: prof?.team_id ? (teamMap.get(prof.team_id) ?? null) : null,
+      event_type: row.event_type ?? "smart_ai_query",
+      model: row.model,
+      status: row.status ?? "success",
+      credits_deducted: row.credits_deducted ?? 1,
+      created_at: row.created_at,
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Admin: system-wide daily usage trend for the overview chart
 // ---------------------------------------------------------------------------
 
@@ -345,7 +387,7 @@ export async function getSystemUsageTrend(days = 30): Promise<
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
   const { data } = await admin
     .from("ai_usage_log")
-    .select("created_at")
+    .select("created_at, credits_deducted")
     .gte("created_at", since)
     .order("created_at", { ascending: true })
 
@@ -354,7 +396,8 @@ export async function getSystemUsageTrend(days = 30): Promise<
   const buckets = new Map<string, number>()
   for (const row of data as any[]) {
     const day = (row.created_at as string).slice(0, 10)
-    buckets.set(day, (buckets.get(day) ?? 0) + 1)
+    const credits = row.credits_deducted ?? 1
+    buckets.set(day, (buckets.get(day) ?? 0) + credits)
   }
 
   // Fill all days including zeros
@@ -381,7 +424,7 @@ export async function getUserDailyTrend(
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
   const { data } = await admin
     .from("ai_usage_log")
-    .select("created_at")
+    .select("created_at, credits_deducted")
     .eq("user_id", userId)
     .gte("created_at", since)
 
@@ -390,7 +433,8 @@ export async function getUserDailyTrend(
   const buckets = new Map<string, number>()
   for (const row of data as any[]) {
     const day = (row.created_at as string).slice(0, 10)
-    buckets.set(day, (buckets.get(day) ?? 0) + 1)
+    const credits = row.credits_deducted ?? 1
+    buckets.set(day, (buckets.get(day) ?? 0) + credits)
   }
 
   const out: Array<{ day: string; count: number }> = []

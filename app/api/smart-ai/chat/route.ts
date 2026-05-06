@@ -565,6 +565,7 @@ export async function POST(req: Request) {
           if (!isUnlimited) {
             const { error: incErr } = await persistClient.rpc("increment_ai_usage", {
               p_user_id: profile.id,
+              p_credits: 1,
             })
             if (incErr) {
               // Fallback: direct update if RPC doesn't exist yet
@@ -588,6 +589,9 @@ export async function POST(req: Request) {
             tokens_in: totalUsage?.inputTokens ?? null,
             tokens_out: totalUsage?.outputTokens ?? null,
             period_type: creditRow?.period_type ?? "monthly",
+            event_type: "smart_ai_query",
+            status: "success",
+            credits_deducted: isUnlimited ? 0 : 1,
           })
 
           if (logErr) {

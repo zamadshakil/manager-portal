@@ -1,26 +1,28 @@
 import { requireRole } from "@/lib/auth"
-import { listAiCreditLimits, getSystemUsageTrend } from "@/app/actions/ai-credits"
+import { listAiCreditLimits, getSystemUsageTrend, getSystemTransactionLedger } from "@/app/actions/ai-credits"
 import { AiUsageShell } from "@/components/dashboard/ai-usage/ai-usage-shell"
 
 export const metadata = {
-  title: "AI & Usage · Hierarchia",
+  title: "Main Admin Executive Dashboard · Hierarchia",
   description:
-    "Manage AI credit limits per user, track consumption history, and monitor system-wide AI usage across all teams.",
+    "Centralized real-time audit trail of all AI credit activities across the platform.",
 }
 
 export default async function AiUsagePage() {
   // Strictly main_admin only — redirects all other roles to /dashboard
   const profile = await requireRole(["main_admin"])
 
-  const [creditLimits, usageTrend] = await Promise.all([
+  const [creditLimits, usageTrend, ledger] = await Promise.all([
     listAiCreditLimits(),
     getSystemUsageTrend(30),
+    getSystemTransactionLedger(30),
   ])
 
   return (
     <AiUsageShell
       creditLimits={creditLimits}
       usageTrend={usageTrend}
+      ledger={ledger}
       adminProfile={{
         id: profile.id,
         email: profile.email,

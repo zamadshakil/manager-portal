@@ -562,6 +562,43 @@ async function runPipeline(submissionId: string) {
         })
         .eq("id", submission.task_assignment_id)
     }
+
+    // ---- Credit accounting ----
+    try {
+      const uploaderId = submission.uploader_id;
+      // Auto-advance period if expired
+      await admin.rpc("maybe_reset_period", { p_user_id: uploaderId }).maybeSingle();
+      
+      const { data: creditRow } = await admin
+        .from("ai_credit_limits")
+        .select("is_unlimited, period_type")
+        .eq("user_id", uploaderId)
+        .maybeSingle();
+        
+      const isUnlimited = creditRow?.is_unlimited ?? false;
+      const creditsToDeduct = 1; // 1 credit per submission validation
+
+      if (!isUnlimited && creditRow) {
+        await admin.rpc("increment_ai_usage", {
+          p_user_id: uploaderId,
+          p_credits: creditsToDeduct,
+        });
+      }
+
+      await admin.from("ai_usage_log").insert({
+        user_id: uploaderId,
+        thread_id: null,
+        model: successful.length > 0 ? successful[0].model : "pipeline",
+        tokens_in: null, 
+        tokens_out: null,
+        period_type: creditRow?.period_type ?? "monthly",
+        event_type: "llm_validation",
+        status: finalStatus === "failed" ? "failure" : "success",
+        credits_deducted: isUnlimited ? 0 : creditsToDeduct,
+      });
+    } catch (acctErr: any) {
+      console.error("[pipeline] credit accounting failed:", acctErr.message);
+    }
   } finally {
     clearTimeout(deadlineTimer)
   }

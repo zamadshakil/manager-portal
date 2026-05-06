@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server"
+// @ts-ignore
+import { unstable_after as after } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { processSubmission } from "@/lib/pipeline/process"
+import { processSubmission } from "@/lib/llm/pipeline"
 
 /**
  * This route owns the AI pipeline lifecycle — parsing, LLM validation,
@@ -80,11 +82,20 @@ export async function POST(
     })
   }
 
-  // Fire-and-forget: run the pipeline in the background.
-  // The Node process on Railway is persistent — no timeout to worry about.
-  processSubmission(submissionId).catch((err) => {
-    console.error("[pipeline] background crash for", submissionId, err)
-  })
+  // Fire-and-forget using Next.js after() to ensure background execution isn't killed
+  // by the serverless runtime.
+  if (typeof after === 'function') {
+    after(() => {
+      processSubmission(submissionId).catch((err) => {
+        console.error("[pipeline] background crash for", submissionId, err)
+      })
+    })
+  } else {
+    // Fallback if after is not available (e.g. Next.js 14 non-experimental)
+    processSubmission(submissionId).catch((err) => {
+      console.error("[pipeline] background crash for", submissionId, err)
+    })
+  }
 
   // Return immediately so the client can begin polling.
   return NextResponse.json({
