@@ -8,6 +8,8 @@ export const metadata = {
     "Centralized real-time audit trail of all AI credit activities across the platform.",
 }
 
+export const dynamic = "force-dynamic"
+
 export default async function AiUsagePage() {
   // Strictly main_admin only — redirects all other roles to /dashboard
   const profile = await requireRole(["main_admin"])

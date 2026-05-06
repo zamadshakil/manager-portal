@@ -91,15 +91,16 @@ export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTre
         (payload) => {
           const newLog = payload.new as any
           const today = new Date().toISOString().slice(0, 10)
+          const creditsToDeduct = newLog.credits_deducted ?? 1
           
           setUsageTrend((prev) => {
             const index = prev.findIndex((d) => d.day === today)
             if (index === -1) {
               // New day starts
-              return [...prev, { day: today, count: 1 }].slice(-30)
+              return [...prev, { day: today, count: creditsToDeduct }].slice(-30)
             }
             const next = [...prev]
-            next[index] = { ...next[index], count: next[index].count + 1 }
+            next[index] = { ...next[index], count: next[index].count + creditsToDeduct }
             return next
           })
         }

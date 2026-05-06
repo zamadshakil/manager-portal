@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Search, Download, ArrowUpDown, ChevronLeft, ChevronRight, CheckCircle2, XCircle } from "lucide-react"
 import { format } from "date-fns"
 import { Input } from "@/components/ui/input"
@@ -22,13 +22,61 @@ interface Props {
   ledger: LedgerRow[]
 }
 
-export function TransactionLedger({ ledger }: Props) {
+export function TransactionLedger({ ledger: initialLedger }: Props) {
+  const [ledgerState, setLedgerState] = useState<LedgerRow[]>(initialLedger)
   const [searchTerm, setSearchTerm] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 15
 
+  // Initialize and handle real-time updates
+  useEffect(() => {
+    setLedgerState(initialLedger)
+  }, [initialLedger])
+
+  useEffect(() => {
+    // dynamically import createClient to avoid breaking SSR completely
+    import("@/lib/supabase/client").then(({ createClient }) => {
+      const supabase = createClient()
+      const channel = supabase
+        .channel("ledger-realtime")
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "ai_usage_log" },
+          (payload) => {
+            const newLog = payload.new as any
+            
+            setLedgerState((prev) => {
+              // Try to find the user in existing ledger rows to reuse their profile info
+              const existingUserRow = prev.find(r => r.user_id === newLog.user_id)
+              
+              const newRow: LedgerRow = {
+                id: newLog.id,
+                user_id: newLog.user_id,
+                user_email: existingUserRow?.user_email ?? "Unknown (Refreshing...)",
+                user_full_name: existingUserRow?.user_full_name ?? "Loading...",
+                team_name: existingUserRow?.team_name ?? "—",
+                event_type: newLog.event_type ?? "smart_ai_query",
+                model: newLog.model,
+                status: newLog.status ?? "success",
+                credits_deducted: newLog.credits_deducted ?? 1,
+                created_at: newLog.created_at,
+              }
+              
+              // Add to top of the list and keep latest 1000 to match backend
+              return [newRow, ...prev].slice(0, 1000)
+            })
+          }
+        )
+        .subscribe()
+
+      return () => {
+        void supabase.removeChannel(channel)
+      }
+    })
+  }, [])
+
   // Filter
-  const filtered = ledger.filter((row) => {
+  const filtered = ledgerState.filter((row) => {
     if (!searchTerm) return true
     const term = searchTerm.toLowerCase()
     return (
