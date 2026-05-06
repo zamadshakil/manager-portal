@@ -29,3 +29,11 @@ restore_pass.js
 update_pass.js
 inngest_res.txt
 old_schema.sql
+
+# Scratch / one-off debug scripts (not part of the build)
+scratch/
+
+# Duplicate lockfile (we use pnpm) — guard against accidental npm/bun installs
+package-lock.json
+bun.lockb
+yarn.lock
