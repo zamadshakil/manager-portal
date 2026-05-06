@@ -395,7 +395,11 @@ export async function getSystemUsageTrend(days = 30): Promise<
 
   const buckets = new Map<string, number>()
   for (const row of data as any[]) {
-    const day = (row.created_at as string).slice(0, 10)
+    // Robust date parsing: handle both string and Date objects
+    const dateStr = typeof row.created_at === "string" 
+      ? row.created_at 
+      : (row.created_at as Date).toISOString()
+    const day = dateStr.slice(0, 10)
     const credits = row.credits_deducted ?? 1
     buckets.set(day, (buckets.get(day) ?? 0) + credits)
   }
@@ -432,7 +436,10 @@ export async function getUserDailyTrend(
 
   const buckets = new Map<string, number>()
   for (const row of data as any[]) {
-    const day = (row.created_at as string).slice(0, 10)
+    const dateStr = typeof row.created_at === "string" 
+      ? row.created_at 
+      : (row.created_at as Date).toISOString()
+    const day = dateStr.slice(0, 10)
     const credits = row.credits_deducted ?? 1
     buckets.set(day, (buckets.get(day) ?? 0) + credits)
   }
