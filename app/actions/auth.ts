@@ -1,10 +1,17 @@
 "use server"
 
+import { headers } from "next/headers"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { sendPasswordResetEmail } from "@/lib/email"
 
 export async function requestPasswordReset(email: string) {
   try {
+    const headersList = await headers()
+    const host = headersList.get("host") || "localhost:3000"
+    const protocol = host.includes("localhost") ? "http" : "https"
+    const dynamicSiteUrl = `${protocol}://${host}`
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || dynamicSiteUrl
+
     const supabase = createAdminClient()
     
     // We generate a recovery link using the admin API so we can handle the email sending ourselves
@@ -12,7 +19,7 @@ export async function requestPasswordReset(email: string) {
       type: "recovery",
       email,
       options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/auth/update-password`,
+        redirectTo: `${siteUrl}/auth/update-password`,
       }
     })
 
@@ -34,7 +41,6 @@ export async function requestPasswordReset(email: string) {
       const type = url.searchParams.get("type")
       
       if (token && type === "recovery") {
-        const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
         resetLink = `${siteUrl}/auth/update-password?token_hash=${token}&type=recovery`
       }
     } catch (e) {

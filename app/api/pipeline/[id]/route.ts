@@ -1,13 +1,13 @@
-import { NextResponse, after } from "next/server"
+import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { inngest } from "@/lib/inngest/client"
+import { processSubmission } from "@/lib/pipeline/process"
 
 /**
  * This route owns the AI pipeline lifecycle — parsing, LLM validation,
  * scoring — completely decoupled from the upload Server Action so the
- * upload stays fast (~2s) and the pipeline gets a dedicated execution
- * budget via Inngest.
+ * upload stays fast (~2s) and the pipeline runs asynchronously in the
+ * background within the same Railway process.
  */
 export const maxDuration = 60
 
@@ -15,8 +15,8 @@ export const maxDuration = 60
  * POST /api/pipeline/[id]
  *
  * Triggers the AI validation pipeline for a submission. Called by the
- * client immediately after a successful upload or retry. The pipeline's
- * own Redis idempotency lock prevents double-runs from concurrent callers.
+ * client immediately after a successful upload or retry. The pipeline
+ * runs as a fire-and-forget async function in the Node process.
  *
  * Auth: requires an authenticated Supabase session. The caller must be
  * the uploader, a manager of the same team, or a main_admin.
@@ -71,49 +71,27 @@ export async function POST(
     return NextResponse.json({ error: "Not authorized" }, { status: 403 })
   }
 
-  try {
-    // Only process if the submission is in a processable state.
-    if (!["queued", "parsing", "validating"].includes(sub.status)) {
-      return NextResponse.json({
-        ok: true,
-        status: sub.status,
-        message: "Submission already processed.",
-      })
-    }
-
-    // Trigger the background job via Inngest.
-    // This uses Inngest to orchestrate execution across multiple invocations
-    // with automatic retries, eliminating serverless timeout concerns.
-    await inngest.send({
-      name: "app/submission.process",
-      data: { submissionId },
-    })
-
-    // Return immediately so the client can begin polling.
+  // Only process if the submission is in a processable state.
+  if (!["queued", "parsing", "validating"].includes(sub.status)) {
     return NextResponse.json({
       ok: true,
       status: sub.status,
-      queued: true,
+      message: "Submission already processed.",
     })
-  } catch (error: any) {
-    console.error("Pipeline trigger error:", error)
-    
-    // Provide a helpful hint if the local Inngest dev server is missing
-    if (error.cause?.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
-      return NextResponse.json(
-        { 
-          error: "Inngest Dev Server is not running", 
-          details: "Please run 'npx inngest-cli@latest dev' in a new terminal tab to process background jobs locally." 
-        },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json(
-      { error: "Internal Server Error", details: error.message || String(error) },
-      { status: 500 }
-    )
   }
+
+  // Fire-and-forget: run the pipeline in the background.
+  // The Node process on Railway is persistent — no timeout to worry about.
+  processSubmission(submissionId).catch((err) => {
+    console.error("[pipeline] background crash for", submissionId, err)
+  })
+
+  // Return immediately so the client can begin polling.
+  return NextResponse.json({
+    ok: true,
+    status: sub.status,
+    queued: true,
+  })
 }
 
 /**

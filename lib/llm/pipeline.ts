@@ -22,9 +22,8 @@ const EXTRACTED_TEXT_PREVIEW_CHARS = 2_000
 
 /**
  * Soft pipeline deadline. Railway doesn't impose a strict function timeout,
- * but we keep a budget to prevent runaway submissions. The Inngest path
- * (processSubmissionFn) is preferred for production — this legacy pipeline
- * is retained as a fallback from /api/pipeline/[id].
+ * but we keep a budget to prevent runaway submissions. The primary pipeline
+ * entry point is `lib/pipeline/process.ts` called from `/api/pipeline/[id]`.
  */
 const PIPELINE_BUDGET_MS = Number(process.env.PIPELINE_BUDGET_MS ?? 50_000)
 
