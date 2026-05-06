@@ -17,7 +17,7 @@ Last reviewed: 2026-05-05 (full architecture + documentation audit)
 - **Files:** Cloudflare R2 (S3-compatible), fronted by an authenticated download proxy.
 - **AI — Validation:** OpenRouter → Gemini 2.0 Flash (via Vercel AI SDK v6) for validation + summarisation + vision OCR.
 - **AI — Smart AI Chat:** OpenRouter → GPT-4o-mini (configurable) with native tool-calling + RAG retrieval (pgvector + BM25).
-- **Background work:** Inngest durable step functions for the validation pipeline + 15-minute cron for missed-deadline sweeps, stuck-submission recovery, and expiration cleanup.
+- **Background work:** In-process async pipeline for AI validation + Railway HTTP cron (every 15 min) for missed-deadline sweeps, stuck-submission recovery, and expiration cleanup.
 - **Rate limit / idempotency:** Upstash Redis.
 - **Email:** Brevo (transactional welcome emails on user provisioning).
 - **Deployment:** Railway (all services — portal, MCP, RAG, Supabase stack — in a single project).
@@ -51,7 +51,7 @@ Authentication is **Supabase Auth** (self-hosted GoTrue on Railway, email + pass
 +---------------------+      |  proxy.ts (middleware)    |      |  (via Kong gateway)     |
                              |  Server Actions           |      +--------------------------+
                              |  Route Handlers           |
-                             |  Inngest step functions   |      +--------------------------+
+                             |  Async pipeline runner    |      +--------------------------+
                              |                           +----->|  Cloudflare R2          |
                              |                           |      |  (S3-compatible files)  |
                              |                           |      +--------------------------+
@@ -73,12 +73,12 @@ Authentication is **Supabase Auth** (self-hosted GoTrue on Railway, email + pass
                             +-------------+   +----------------+
                                        ^
                                        |
-                            +--------------------+
-                            |  Inngest Cron      |
-                            |  every 15 minutes  |
-                            |  mark-missed +     |
-                            |  expire + recover  |
-                            +--------------------+
+                             +--------------------+
+                             |  Railway HTTP Cron |
+                             |  every 15 minutes  |
+                             |  mark-missed +     |
+                             |  expire + recover  |
+                             +--------------------+
 ```
 
 ### Major source areas
@@ -89,13 +89,13 @@ Authentication is **Supabase Auth** (self-hosted GoTrue on Railway, email + pass
 | `app/auth/` | Login, forgot-password, update-password, OAuth callback, signout, error page. |
 | `app/actions/` | Server Actions: `submissions`, `tasks`, `materials`, `announcements`, `departments`, `users`, `rules`, `profile`, `ai-credits`. Each validates with Zod, re-checks role with `requireRole`, writes to Supabase, then `revalidatePath`s. |
 | `app/api/smart-ai/` | Smart AI endpoints: `chat` (streaming), `upload` (R2 + RAG indexing), `threads` (history), `analytics`, `health`. |
-| `app/api/inngest/` | Inngest webhook handler for background functions. |
+| `app/api/cron/` | Railway cron endpoint for scheduled background jobs (mark-missed, expire content, recover stuck). |
 | `app/api/` | Route handlers: `/api/download/[id]` (RLS-checked file streaming), `/api/ai-credits/me`, `/api/vitals`. |
 | `lib/supabase/` | `client.ts` (browser SSR), `server.ts` (RSC + actions), `admin.ts` (service-role; **`server-only`**), `proxy.ts` (middleware session refresh + must-reset gate), `database.types.ts` (loose stub). |
 | `lib/llm/` | `pipeline.ts` (orchestrator), `validate.ts` (Zod-typed OpenRouter/Gemini calls + retry/backoff). |
 | `lib/parse/` | Format-specific parsers: PDF (`pdf-parse`), DOCX (`mammoth`), PPTX/.doc (`officeparser`), images (Tesseract → Gemini Vision fallback). |
 | `lib/smart-ai/` | `indexer.ts` (pgvector document indexing), `retriever.ts` (hybrid vector+BM25 retrieval via RPC), `client.ts` (MCP client), `sliding-window.ts` (token management). |
-| `lib/inngest/` | `client.ts` (Inngest instance), `functions.ts` (process-submission, mark-missed-cron, handle-failure). |
+| `lib/pipeline/` | `process.ts` (in-process async AI validation pipeline with built-in crash recovery). |
 | `lib/data.ts` | All **read** queries used by RSC pages — single source of truth for query shapes. |
 | `lib/auth.ts` | `requireProfile`, `requireRole`, `canManageTeam`, `getCurrentProfile`. |
 | `lib/auth-shared.ts` | `roleLabel` (safe to import from client components — no `server-only` deps). |
@@ -220,7 +220,7 @@ Each row below is a verified path through the codebase as of this audit.
 | Manager creates a task | `/dashboard/tasks` → `TaskComposer` | `app/actions/tasks.ts → createTask` → Zod + `canManageTeam` → insert `tasks` (session client) → bulk insert `task_assignments` (admin client) | `tasks`, `task_assignments`, `activity_log` |
 | Re-assign on an existing task | (no UI yet) | `app/actions/tasks.ts → assignTask` → `assign_task_to_team(p_task_id, p_team_id)` RPC (SECURITY DEFINER) | `task_assignments`, `activity_log` |
 | Member opens a task | `/dashboard/tasks/[id]` | RSC reads via `getTaskById`, `getMyAssignmentForTask`, `listAssignmentsForTask` | none |
-| Member submits to a task | `TaskSubmissionForm` on task detail | `app/actions/submissions.ts → createSubmission` (rate-limit, deadline check, blob upload, insert submission, mirror assignment, send `app/submission.process` to Inngest) | `submissions`, `task_assignments`, Blob, `activity_log` |
+| Member submits to a task | `TaskSubmissionForm` on task detail | `app/actions/submissions.ts → createSubmission` (rate-limit, deadline check, blob upload, insert submission, mirror assignment, trigger async pipeline) | `submissions`, `task_assignments`, Blob, `activity_log` |
 | AI pipeline runs | (background) | `lib/llm/pipeline.ts → processSubmission` (Redis lock → parse → optional vision fallback → run rules + task brief → write `validation_runs` → update submission + assignment) | `submissions`, `task_assignments`, `validation_runs` |
 | Manager retries a submission | submission detail → `SubmissionActions` | `app/actions/submissions.ts → retrySubmission` resets status to `queued` then `after(processSubmission)` | `submissions`, `activity_log` |
 | Manager deletes a submission | submission detail → `SubmissionActions` | `app/actions/submissions.ts → deleteSubmission` deletes row + Blob | `submissions`, Blob, `activity_log` |
@@ -272,10 +272,10 @@ Every action returns a discriminated `ActionResult` (`{ ok: true, … } | { ok: 
    4. Uploads to Cloudflare R2 with `addRandomSuffix: true`. The URL is unguessable; the client never receives it directly — they go through `/api/download/[id]?type=submission`.
    5. Inserts the `submissions` row with `task_id`, `task_assignment_id`, `is_late`, `late_reason`, `submitted_at`.
    6. **Eagerly mirrors** the matching `task_assignment` to `submitted` / `late_submitted` so manager dashboards reflect status without waiting for the pipeline.
-   7. `inngest.send` schedules the AI pipeline as a durable Inngest step function.
+   7. The pipeline route fires `processSubmission()` as a background async function in the Node process.
 4. `revalidatePath` for the dashboard, submissions list, the task list, and the specific task detail page.
 
-### 6.4 AI validation pipeline (`lib/inngest/functions.ts`)
+### 6.4 AI validation pipeline (`lib/pipeline/process.ts`)
 
 1. **Idempotency.** `redis.set("pipeline:lock:{id}", "1", { nx: true, ex: 600 })` — first writer wins for 10 minutes. Releases in `finally`. Prevents duplicate `after()` invocations and racing retries.
 2. **LLM rate limit.** `llmLimiter` (60 / 1 min per team). If the team is over budget, the submission is parked at `needs_review` with a warning flag instead of failing.
@@ -295,7 +295,7 @@ Every action returns a discriminated `ActionResult` (`{ ok: true, … } | { ok: 
 
 ### 6.5 Cron — missed deadlines, stuck-pipeline recovery, and expiration cleanup
 
-**Scheduling Strategy:** The cron runs as an **Inngest scheduled function** (`mark-missed-cron`) every 15 minutes. Upstash Redis is used for execution tracking and distributed locking via `lib/upstash-scheduler.ts`.
+**Scheduling Strategy:** The cron runs via **Railway HTTP cron** hitting `GET /api/cron/mark-missed` every 15 minutes, protected by `CRON_SECRET`. Upstash Redis is used for execution tracking via `lib/upstash-scheduler.ts`.
 
 The handler runs four operations via the admin client:
 
@@ -305,9 +305,8 @@ The handler runs four operations via the admin client:
 4. **Expire materials.** Deletes materials where `expires_at < now()`, removes R2 blobs, and cleans up RAG index entries.
 
 **Key modules:**
-- `lib/inngest/functions.ts` — `markMissedCronFn` Inngest scheduled function
-- `lib/upstash-scheduler.ts` — `shouldRunCronTask()`, `recordTaskExecution()`
-- `app/api/cron/mark-missed/route.ts` — legacy HTTP cron handler (also available)
+- `app/api/cron/mark-missed/route.ts` — Railway cron endpoint
+- `lib/upstash-scheduler.ts` — `recordTaskExecution()` for monitoring
 
 ### 6.6 Authenticated download proxy
 
@@ -319,8 +318,8 @@ The handler runs four operations via the admin client:
 
 | Module | Imports from | Imported by | Server-only? |
 |---|---|---|---|
-| `lib/upstash-scheduler.ts` | `@upstash/redis` | `lib/inngest/functions.ts`, monitoring tools | yes |
-| `lib/supabase/admin.ts` | `@supabase/supabase-js` | `app/actions/*`, `lib/inngest/functions.ts`, `lib/activity.ts` | yes |
+| `lib/upstash-scheduler.ts` | `@upstash/redis` | `app/api/cron/mark-missed`, monitoring tools | yes |
+| `lib/supabase/admin.ts` | `@supabase/supabase-js` | `app/actions/*`, `lib/pipeline/process.ts`, `lib/activity.ts` | yes |
 | `lib/supabase/server.ts` | `@supabase/ssr`, `next/headers` | RSC pages, `lib/auth.ts`, `lib/data.ts`, action handlers | no (RSC compatible) |
 | `lib/supabase/client.ts` | `@supabase/ssr` | `components/auth/login-form.tsx` | no (browser) |
 | `lib/supabase/proxy.ts` | `@supabase/ssr`, `next/server` | `proxy.ts` (edge) | edge runtime |
@@ -329,14 +328,13 @@ The handler runs four operations via the admin client:
 | `lib/data.ts` | `lib/supabase/server.ts`, `lib/types.ts` | RSC pages only | no |
 | `lib/activity.ts` | `lib/supabase/admin.ts`, `next/headers` | every action | yes |
 | `lib/r2.ts` | `@aws-sdk/client-s3` | `app/actions/submissions.ts`, `app/actions/materials.ts`, `app/api/download/*` | yes |
-| `lib/redis.ts` | `@upstash/redis`, `@upstash/ratelimit` | `lib/inngest/functions.ts`, `app/actions/submissions.ts`, `app/api/smart-ai/chat` | yes |
+| `lib/redis.ts` | `@upstash/redis`, `@upstash/ratelimit` | `lib/pipeline/process.ts`, `app/actions/submissions.ts`, `app/api/smart-ai/chat` | yes |
 | `lib/email.ts` | native `fetch` (Brevo API) | `app/actions/users.ts` | no |
 | `lib/env.ts` | `process.env` | `lib/supabase/*`, `proxy.ts` | no |
-| `lib/inngest/client.ts` | `inngest` | `lib/inngest/functions.ts`, `app/actions/submissions.ts` | no |
-| `lib/inngest/functions.ts` | `lib/supabase/admin.ts`, `lib/parse`, `lib/llm/validate.ts`, `lib/redis.ts`, `lib/smart-ai/indexer.ts` | `app/api/inngest/route.ts` | yes |
-| `lib/llm/validate.ts` | `ai`, `@ai-sdk/openai`, `zod` | `lib/inngest/functions.ts` | yes |
-| `lib/parse/index.ts` | `pdf-parse`, `mammoth`, `officeparser`, `tesseract.js` | `lib/inngest/functions.ts` | yes |
-| `lib/smart-ai/indexer.ts` | `lib/supabase/admin.ts`, `@ai-sdk/openai` | `app/actions/*`, `lib/inngest/functions.ts` | yes |
+| `lib/pipeline/process.ts` | `lib/supabase/admin.ts`, `lib/parse`, `lib/llm/validate.ts`, `lib/smart-ai/indexer.ts` | `app/api/pipeline/[id]/route.ts` | yes |
+| `lib/llm/validate.ts` | `ai`, `@ai-sdk/openai`, `zod` | `lib/pipeline/process.ts` | yes |
+| `lib/parse/index.ts` | `pdf-parse`, `mammoth`, `officeparser`, `tesseract.js` | `lib/pipeline/process.ts` | yes |
+| `lib/smart-ai/indexer.ts` | `lib/supabase/admin.ts`, `@ai-sdk/openai` | `app/actions/*`, `lib/pipeline/process.ts` | yes |
 | `lib/smart-ai/retriever.ts` | `lib/supabase/admin.ts`, `@ai-sdk/openai` | `app/api/smart-ai/chat` | yes |
 | `lib/smart-ai/client.ts` | native `fetch` | `app/api/smart-ai/chat` | yes |
 
@@ -365,8 +363,7 @@ These must be set on the **Railway** service (`manager-portal`). Locally they go
 | `DO_VALIDATION_MODEL` | optional | default: `google/gemini-2.0-flash-001` |
 | `DO_SUMMARY_MODEL` | optional | default: `google/gemini-2.0-flash-001` |
 | `DO_VISION_MODEL` | optional | default: `google/gemini-2.0-flash-001` |
-| `INNGEST_EVENT_KEY` | server only | Inngest Cloud event key |
-| `INNGEST_SIGNING_KEY` | server only | Inngest Cloud signing key |
+
 | `MCP_SERVICE_URL` | server only | MCP service private Railway URL |
 | `MCP_SERVICE_TOKEN` | server only | Shared secret for MCP |
 | `RAG_SERVICE_URL` | server only | RAG service private Railway URL |
@@ -442,16 +439,16 @@ If you only want the latest changes on top of an existing database, **running 00
 - Three-role RBAC (main_admin / manager / member) enforced at RLS + middleware + server actions
 - **Department management** — full CRUD for teams with member/manager assignment, statistics, bulk operations
 - **Tasks system end-to-end:** create, single/bulk assign, member submission, late-with-reason, missed via cron, manager assignment table on the task detail page, per-task rule_ids selection
-- Submissions: upload to Cloudflare R2, AI validation via Inngest, retry, delete
+- Submissions: upload to Cloudflare R2, AI validation via in-process async pipeline, retry, delete
 - Native parsers for PDF / DOCX / PPTX / images, with OCR + Gemini Vision fallback
-- LLM pipeline with Inngest step functions, idempotency lock, retry/backoff, structured output via Zod, weighted aggregate
+- LLM pipeline with in-process async runner, crash recovery, retry/backoff, structured output via Zod, weighted aggregate
 - Per-team validation rules CRUD with `{{TEXT}}` placeholder substitution
 - **Smart AI conversational assistant** with native tool-calling, database access, and RAG retrieval
 - **Smart AI document upload** with R2 storage + pgvector RAG indexing
 - **Smart AI chat threads** with persistent history and thread sidebar
 - **AI credit system** — per-user usage quotas with configurable periods (daily/weekly/monthly)
 - **Native RAG** — pgvector + BM25 full-text search with RRF fusion, HNSW index
-- Announcements + materials (team-scoped, `expires_at` filtering, auto-expiration via Inngest cron)
+- Announcements + materials (team-scoped, `expires_at` filtering, auto-expiration via Railway HTTP cron)
 - **Welcome emails** via Brevo on user provisioning
 - Activity log (append-only audit trail; explicit RLS deny on client writes)
 - Reports page with daily metrics chart (90-day window)
@@ -461,7 +458,7 @@ If you only want the latest changes on top of an existing database, **running 00
 - Loading + error boundaries on the dashboard route group
 - Mobile bottom nav with safe-area padding
 - Authenticated download proxy at `/api/download/[id]` (streams from R2)
-- Inngest cron to mark missed assignments + recover stuck submissions + expire announcements/materials
+- Railway HTTP cron to mark missed assignments + recover stuck submissions + expire announcements/materials
 - **Railway deployment** with standalone Next.js builds via Railpack
 
 ### In flight / TODO (priority order)
@@ -494,13 +491,11 @@ pnpm install
 cp .env.local.example .env.local        # fill in your own values
 # (Supabase) run scripts/001..009 + RAG migration in the SQL editor, in order
 pnpm dev
-# In a separate terminal, start Inngest dev server:
-npx inngest-cli@latest dev
 ```
 
 - The first user you create in Supabase becomes `main_admin` automatically (via the `is_first` branch in `handle_new_user()`).
 - Watch the Railway / terminal server logs for `[pipeline]`, `[smart-ai]`, `[submissions]`, and `[activity]` lines while testing the upload flow.
-- The Inngest dev server (http://localhost:8288) shows function execution history.
+- The pipeline runs in-process — no separate dev server needed.
 - The cron endpoint can be hit locally with the curl snippet in §8. With `CRON_SECRET` unset locally it returns 200 to any caller, which is fine for dev.
 
 ---

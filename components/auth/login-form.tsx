@@ -55,7 +55,7 @@ export default function LoginForm() {
   return (
     <div className="space-y-6">
       <div className="space-y-2 text-center">
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white font-['Space_Grotesk']">
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white">
           Sign in to your portal
         </h1>
         <p className="text-sm text-slate-400 leading-relaxed text-pretty">
@@ -78,7 +78,7 @@ export default function LoginForm() {
             onChange={(e) => setEmail(e.target.value)}
             disabled={loading}
             placeholder="you@company.com"
-            className="h-11 bg-black/20 border-white/10 text-white placeholder:text-slate-500 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500/50 transition-all"
+            className="h-11 bg-black/50 border-white/10 text-white placeholder:text-slate-500 focus-visible:ring-blue-500/20 focus-visible:border-blue-500/50 transition-all"
           />
         </div>
 
@@ -89,7 +89,7 @@ export default function LoginForm() {
             </Label>
             <Link
               href="/auth/forgot-password"
-              className="text-xs font-medium text-emerald-400 hover:text-emerald-300 hover:underline underline-offset-4 transition-colors"
+              className="text-xs font-medium text-blue-400 hover:text-blue-300 hover:underline underline-offset-4 transition-colors"
             >
               Forgot password?
             </Link>
@@ -104,7 +104,7 @@ export default function LoginForm() {
               onChange={(e) => setPassword(e.target.value)}
               disabled={loading}
               placeholder="Enter your password"
-              className="h-11 pr-10 bg-black/20 border-white/10 text-white placeholder:text-slate-500 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500/50 transition-all"
+              className="h-11 pr-10 bg-black/50 border-white/10 text-white placeholder:text-slate-500 focus-visible:ring-blue-500/20 focus-visible:border-blue-500/50 transition-all"
             />
             <button
               type="button"
@@ -128,7 +128,7 @@ export default function LoginForm() {
             checked={remember}
             onCheckedChange={(v) => setRemember(v === true)}
             disabled={loading}
-            className="border-white/20 data-[state=checked]:bg-emerald-500 data-[state=checked]:text-white data-[state=checked]:border-emerald-500"
+            className="border-white/20 data-[state=checked]:bg-blue-500 data-[state=checked]:text-white data-[state=checked]:border-blue-500"
           />
           <Label
             htmlFor="remember"
@@ -151,7 +151,7 @@ export default function LoginForm() {
         <Button
           type="submit"
           disabled={loading}
-          className="w-full h-11 text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] hover:shadow-[0_0_25px_rgba(16,185,129,0.6)] border-none transition-all duration-300"
+          className="w-full h-11 text-sm font-semibold bg-blue-500 hover:bg-blue-600 text-white shadow-[0_0_15px_rgba(59,130,246,0.4)] hover:shadow-[0_0_25px_rgba(59,130,246,0.6)] border-none transition-all duration-300"
         >
           {loading ? (
             <span className="inline-flex items-center justify-center gap-2">

@@ -28,9 +28,9 @@ const MODEL = process.env.DO_VALIDATION_MODEL || process.env.VALIDATION_MODEL ||
 const SUMMARY_MODEL = process.env.DO_SUMMARY_MODEL || process.env.SUMMARY_MODEL || "google/gemini-2.0-flash-001"
 const VISION_MODEL = process.env.DO_VISION_MODEL || process.env.VISION_MODEL || "google/gemini-2.0-flash-001"
 
-// Per-LLM-call hard timeout. With Inngest, each step runs in its own
-// serverless invocation, so we no longer need to squeeze into a shared 60s
-// budget. We set it to 45s to fit within the pipeline budget (default 50s).
+// Per-LLM-call hard timeout. On Railway each call runs in the same
+// persistent Node process, so we set a generous 45s to fit within the
+// pipeline budget (default 50s).
 const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS ?? 45_000)
 
 // Bumped whenever the system prompt or schema changes so we can compare
