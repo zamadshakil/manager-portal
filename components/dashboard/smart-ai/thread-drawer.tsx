@@ -60,7 +60,7 @@ export function ThreadDrawer({
   onNewConversation,
   variant = "drawer",
 }: ThreadDrawerProps) {
-  const { data, error, isLoading, mutate } = useSWR("/api/smart-ai/threads", fetcher, {
+  const { data, error, isLoading, mutate } = useSWR<{ threads: ThreadSummary[] }>("/api/smart-ai/threads", fetcher, {
     revalidateOnFocus: false,
   })
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -199,7 +199,7 @@ export function ThreadDrawer({
               </p>
             </div>
           ) : (
-            threads.map((thread) => {
+            threads.map((thread: ThreadSummary) => {
               const isActive = thread.id === activeThreadId
               const preview =
                 thread.last_message?.content?.slice(0, 60) ?? "Empty conversation"
