@@ -143,7 +143,7 @@ export async function listAnnouncements(_profile: Profile, limit = 50): Promise<
   // Hide announcements whose `expires_at` has passed; keep ones with no expiry.
   const { data } = await supabase
     .from("announcements")
-    .select("*")
+    .select("*, teams(name)")
     .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
     .order("created_at", { ascending: false })
     .limit(limit)
@@ -154,7 +154,7 @@ export async function listMaterials(profile: Profile, limit = 100): Promise<Mate
   const supabase = await createClient()
   const { data } = await supabase
     .from("materials")
-    .select("*")
+    .select("*, teams(name)")
     .order("created_at", { ascending: false })
     .limit(limit)
   return (data ?? []) as Material[]

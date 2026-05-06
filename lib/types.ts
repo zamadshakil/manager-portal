@@ -144,6 +144,8 @@ export interface Announcement {
   priority: AnnouncementPriority
   expires_at: string | null
   created_at: string
+  // Join metadata
+  teams?: { name: string } | null
 }
 
 export interface Material {
@@ -157,7 +159,10 @@ export interface Material {
   file_type: string | null
   size_bytes: number | null
   tags: string[]
+  expires_at: string | null
   created_at: string
+  // Join metadata
+  teams?: { name: string } | null
 }
 
 export interface ActivityLogEntry {
