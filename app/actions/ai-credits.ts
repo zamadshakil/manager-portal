@@ -385,23 +385,27 @@ export async function getSystemUsageTrend(days = 30): Promise<
   const admin = createAdminClient()
 
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
-  const { data } = await admin
+
+  // IMPORTANT: Only select created_at. Do NOT select credits_deducted here because
+  // that column may not exist yet on the live database if migrations haven't been applied.
+  // Counting rows per day is always accurate and resilient to schema state.
+  const { data, error } = await admin
     .from("ai_usage_log")
-    .select("created_at, credits_deducted")
+    .select("created_at")
     .gte("created_at", since)
     .order("created_at", { ascending: true })
 
-  if (!data) return []
+  if (error) {
+    console.error("[getSystemUsageTrend] query error:", error.message)
+  }
 
   const buckets = new Map<string, number>()
-  for (const row of data as any[]) {
-    // Robust date parsing: handle both string and Date objects
-    const dateStr = typeof row.created_at === "string" 
-      ? row.created_at 
+  for (const row of (data ?? []) as any[]) {
+    const dateStr = typeof row.created_at === "string"
+      ? row.created_at
       : (row.created_at as Date).toISOString()
     const day = dateStr.slice(0, 10)
-    const credits = row.credits_deducted ?? 1
-    buckets.set(day, (buckets.get(day) ?? 0) + credits)
+    buckets.set(day, (buckets.get(day) ?? 0) + 1)
   }
 
   // Fill all days including zeros
@@ -412,6 +416,26 @@ export async function getSystemUsageTrend(days = 30): Promise<
     out.push({ day: key, count: buckets.get(key) ?? 0 })
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// Admin: total messages this period — derived from credit limits (reliable source)
+// ---------------------------------------------------------------------------
+
+export async function getSystemTotalMessages(): Promise<number> {
+  await requireRole(["main_admin"])
+  const admin = createAdminClient()
+
+  const { data, error } = await admin
+    .from("ai_credit_limits")
+    .select("used_this_period")
+
+  if (error) {
+    console.error("[getSystemTotalMessages] query error:", error.message)
+    return 0
+  }
+
+  return (data ?? []).reduce((sum: number, row: any) => sum + (row.used_this_period ?? 0), 0)
 }
 
 // ---------------------------------------------------------------------------
