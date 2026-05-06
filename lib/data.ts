@@ -557,7 +557,7 @@ export async function getMyAssignmentForTask(
 export async function listAssignmentsForTask(taskId: string): Promise<
   Array<
     TaskAssignment & {
-      assignee: { full_name: string | null; email: string } | null
+      assignee: { full_name: string | null; email: string; avatar_url: string | null } | null
       submission: { status: string; score: number | null; title: string | null } | null
     }
   >
@@ -577,7 +577,7 @@ export async function listAssignmentsForTask(taskId: string): Promise<
 
   return (data ?? []) as unknown as Array<
     TaskAssignment & {
-      assignee: { full_name: string | null; email: string } | null
+      assignee: { full_name: string | null; email: string; avatar_url: string | null } | null
       submission: { status: string; score: number | null; title: string | null } | null
     }
   >
