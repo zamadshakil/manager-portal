@@ -11,6 +11,8 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
+import useSWR from "swr"
+
 export interface ThreadSummary {
   id: string
   title: string
@@ -48,6 +50,8 @@ function relativeTime(iso: string): string {
   })
 }
 
+const fetcher = (url: string) => fetch(url).then((res) => res.json())
+
 export function ThreadDrawer({
   open = true,
   onClose,
@@ -56,28 +60,14 @@ export function ThreadDrawer({
   onNewConversation,
   variant = "drawer",
 }: ThreadDrawerProps) {
-  const [threads, setThreads] = useState<ThreadSummary[]>([])
-  const [loading, setLoading] = useState(false)
+  const { data, error, isLoading, mutate } = useSWR("/api/smart-ai/threads", fetcher, {
+    revalidateOnFocus: false,
+  })
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  const fetchThreads = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch("/api/smart-ai/threads")
-      if (res.ok) {
-        const data = await res.json()
-        setThreads(data.threads ?? [])
-      }
-    } catch (err) {
-      console.error("[threads] fetch failed", err)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const threads = data?.threads ?? []
+  const loading = isLoading
 
-  useEffect(() => {
-    if (open) fetchThreads()
-  }, [open, fetchThreads])
 
   async function handleDelete(e: React.MouseEvent, threadId: string) {
     e.stopPropagation()
@@ -89,7 +79,7 @@ export function ThreadDrawer({
         method: "DELETE",
       })
       if (res.ok) {
-        setThreads((prev) => prev.filter((t) => t.id !== threadId))
+        mutate()
         // If we deleted the active thread, start a new conversation
         if (threadId === activeThreadId) {
           onNewConversation()
