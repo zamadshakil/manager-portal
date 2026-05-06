@@ -1,8 +1,18 @@
 "use client"
 
 import { useMemo, useState, useEffect } from "react"
-import { TrendingUp, Users, Zap, AlertTriangle } from "lucide-react"
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts"
+import { TrendingUp, Users, Zap, AlertTriangle, BarChart2, Activity } from "lucide-react"
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts"
 import type { AiCreditLimit } from "@/lib/types"
 import { createClient } from "@/lib/supabase/client"
 
@@ -43,6 +53,7 @@ function StatCard({
 export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTrend: initialUsageTrend }: Props) {
   const [creditLimits, setCreditLimits] = useState(initialCreditLimits)
   const [usageTrend, setUsageTrend] = useState(initialUsageTrend)
+  const [chartType, setChartType] = useState<"area" | "bar">("bar")
 
   useEffect(() => {
     setCreditLimits(initialCreditLimits)
@@ -175,17 +186,49 @@ export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTre
         />
       </div>
 
-      {/* Line chart */}
+      {/* Chart card */}
       <div className="rounded-xl border border-border bg-card p-5">
-        <h2 className="text-sm font-semibold mb-4">AI Messages — Last 30 Days</h2>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-sm font-semibold">AI Messages — Last 30 Days</h2>
+          <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 text-xs">
+            <button
+              onClick={() => setChartType("area")}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 transition-colors ${
+                chartType === "area"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Activity className="h-3 w-3" />
+              Area
+            </button>
+            <button
+              onClick={() => setChartType("bar")}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 transition-colors ${
+                chartType === "bar"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <BarChart2 className="h-3 w-3" />
+              Bar
+            </button>
+          </div>
+        </div>
         {stats.totalMessages === 0 ? (
           <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
             No AI usage recorded yet.
           </div>
-        ) : (
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={chartData} margin={{ top: 4, right: 16, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+        ) : chartType === "area" ? (
+          <ResponsiveContainer width="100%" height={240}>
+            <AreaChart data={chartData} margin={{ top: 8, right: 16, left: -20, bottom: 0 }}>
+              <defs>
+                <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
               <XAxis
                 dataKey="label"
                 tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
@@ -203,21 +246,69 @@ export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTre
                 contentStyle={{
                   background: "hsl(var(--card))",
                   border: "1px solid hsl(var(--border))",
-                  borderRadius: 8,
+                  borderRadius: 10,
                   fontSize: 12,
+                  boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
                 }}
-                labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
+                labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 700, marginBottom: 2 }}
+                itemStyle={{ color: "hsl(var(--primary))" }}
+                cursor={{ stroke: "hsl(var(--primary))", strokeWidth: 1, strokeDasharray: "4 4" }}
               />
-              <Line
+              <Area
                 type="monotone"
                 dataKey="count"
                 name="Messages"
                 stroke="hsl(var(--primary))"
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4 }}
+                strokeWidth={2.5}
+                fill="url(#areaGradient)"
+                dot={{ r: 4, fill: "hsl(var(--primary))", strokeWidth: 2, stroke: "hsl(var(--card))" }}
+                activeDot={{ r: 6, fill: "hsl(var(--primary))", stroke: "hsl(var(--card))", strokeWidth: 2 }}
               />
-            </LineChart>
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={chartData} margin={{ top: 8, right: 16, left: -20, bottom: 0 }} barCategoryGap="30%">
+              <defs>
+                <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={1} />
+                  <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                tickLine={false}
+                axisLine={false}
+                interval={4}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                tickLine={false}
+                axisLine={false}
+                allowDecimals={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: 10,
+                  fontSize: 12,
+                  boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
+                }}
+                labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 700, marginBottom: 2 }}
+                itemStyle={{ color: "hsl(var(--primary))" }}
+                cursor={{ fill: "hsl(var(--muted))", opacity: 0.4 }}
+              />
+              <Bar
+                dataKey="count"
+                name="Messages"
+                fill="url(#barGradient)"
+                radius={[4, 4, 0, 0]}
+                maxBarSize={48}
+              />
+            </BarChart>
           </ResponsiveContainer>
         )}
       </div>
