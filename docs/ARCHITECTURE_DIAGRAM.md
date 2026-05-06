@@ -153,7 +153,7 @@
 │ 2. For each rule_id:      │
 │    ├─ Load rule config    │
 │    ├─ Get prompt template │
-│    └─ Send to Groq LLM    │
+│    └─ Send to OpenRouter  │
 │ 3. Collect results        │
 │ 4. Log validation_runs    │
 │ 5. Update submission:     │
