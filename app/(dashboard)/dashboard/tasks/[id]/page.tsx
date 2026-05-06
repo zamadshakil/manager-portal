@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/dashboard/page-header"
 import { TaskSubmissionForm } from "@/components/dashboard/task-submission-form"
 import { StatusBadge } from "@/components/dashboard/status-badge"
 import { DeleteTaskButton } from "@/components/dashboard/delete-task-button"
+import { AssignmentsRealtimeListener } from "@/components/dashboard/assignments-realtime-listener"
 import { formatRelative } from "@/lib/format"
 import {
   Table,
@@ -42,35 +43,47 @@ export default async function TaskDetailPage({
   const allTeamMembers = isManager ? await listTeamMembers(profile) : []
   
   // Filter members belonging to this task's team and merge with assignments
-  const assignments = isManager ? allTeamMembers
-    .filter(m => m.team_id === task.team_id && m.role === "member")
-    .map(member => {
-      const existing = rawAssignments.find(a => a.assignee_id === member.id)
-      if (existing) {
-        // If assigned but no submission, show as pending in the ledger for better visibility
-        if (existing.status === "assigned" && !existing.submission_id) {
-          return { ...existing, status: "pending" as any }
+  const assignments = (() => {
+    if (!isManager) return []
+    
+    // Start with all explicit assignments
+    const merged = [...rawAssignments].map(a => {
+      // If assigned but no submission, show as pending in the ledger for better visibility
+      if (a.status === "assigned" && !a.submission_id) {
+        return { ...a, status: "pending" as any }
+      }
+      return a
+    })
+
+    // Add any team members who don't have an assignment yet
+    const assignedIds = new Set(merged.map(a => a.assignee_id))
+    
+    allTeamMembers
+      .filter(m => m.team_id === task.team_id && m.role === "member")
+      .forEach(member => {
+        if (!assignedIds.has(member.id)) {
+          merged.push({
+            id: `virtual-${member.id}`,
+            task_id: id,
+            assignee_id: member.id,
+            status: "pending" as any,
+            submission_id: null,
+            late_reason: null,
+            submitted_at: null,
+            created_at: member.created_at,
+            updated_at: member.created_at,
+            assignee: {
+              full_name: member.full_name,
+              email: member.email,
+              avatar_url: member.avatar_url
+            },
+            submission: null
+          })
         }
-        return existing
-      }
-      return {
-        id: `virtual-${member.id}`,
-        task_id: id,
-        assignee_id: member.id,
-        status: "pending" as any,
-        submission_id: null,
-        late_reason: null,
-        submitted_at: null,
-        created_at: member.created_at,
-        updated_at: member.created_at,
-        assignee: {
-          full_name: member.full_name,
-          email: member.email,
-          avatar_url: member.avatar_url
-        },
-        submission: null
-      }
-    }) : []
+      })
+      
+    return merged
+  })()
 
   const due = task.due_at ? new Date(task.due_at) : null
   const overdue = due ? due.getTime() < Date.now() : false
@@ -212,6 +225,7 @@ export default async function TaskDetailPage({
       {/* Manager assignment table */}
       {isManager ? (
         <section className="rounded-xl border border-border bg-card shadow-card">
+          <AssignmentsRealtimeListener taskId={task.id} />
           <header className="px-4 py-3.5 lg:px-5 border-b border-border">
             <h2 className="text-[15px] font-semibold tracking-tight">Assignments</h2>
             <p className="text-[12px] text-muted-foreground">
@@ -222,6 +236,7 @@ export default async function TaskDetailPage({
             <p className="px-4 lg:px-5 py-8 text-[13px] text-muted-foreground text-center">
               No one is assigned to this task yet.
             </p>
+
           ) : (
             <Table>
               <TableHeader>
