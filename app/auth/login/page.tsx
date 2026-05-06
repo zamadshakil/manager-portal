@@ -9,19 +9,16 @@ export default function LoginPage() {
       {/* Background Hero Image */}
       <div className="absolute inset-0 z-0">
         <img 
-          src="/digital_globe_hero_1777914645138.png" 
-          alt="Hierarchia World" 
+          src="/professional_dark_bg.png" 
+          alt="Hierarchia Portal" 
           className="absolute inset-0 w-full h-full object-cover opacity-60 mix-blend-screen"
         />
         {/* Overlay gradients for better readability */}
         <div className="absolute inset-0 bg-gradient-to-b from-[#030712]/80 via-[#030712]/40 to-[#030712]/90" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.1)_0%,transparent_70%)]" />
       </div>
 
       {/* Centered Glassmorphism Card */}
       <div className="relative z-10 w-full max-w-[440px] animate-in fade-in zoom-in-95 duration-700">
-        {/* Top Glow Accent */}
-        <div className="absolute -top-px left-10 right-10 h-px bg-gradient-to-r from-transparent via-blue-500/50 to-transparent shadow-[0_0_20px_rgba(59,130,246,0.8)]" />
         
         {/* Glassmorphism Container */}
         <div className="backdrop-blur-2xl bg-[#111827]/95 border border-white/10 rounded-2xl shadow-[0_20px_40px_-10px_rgba(0,0,0,0.7)] overflow-hidden">
@@ -50,9 +47,6 @@ export default function LoginPage() {
             </span>
           </div>
         </div>
-        
-        {/* Subtle Bottom Glow Accent */}
-        <div className="absolute -bottom-px left-20 right-20 h-px bg-gradient-to-r from-transparent via-blue-500/30 to-transparent" />
       </div>
     </main>
   )

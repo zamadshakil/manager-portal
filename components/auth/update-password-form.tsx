@@ -194,16 +194,31 @@ export default function UpdatePasswordForm() {
           <Label htmlFor="confirmPassword" className="text-sm font-medium text-slate-300">
             Confirm password
           </Label>
-          <Input
-            id="confirmPassword"
-            type={showPassword ? "text" : "password"}
-            required
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            disabled={loading || sessionValid === null}
-            placeholder="Re-enter your new password"
-            className="h-11 pr-10 bg-black/50 border-white/10 text-white placeholder:text-slate-500 focus-visible:ring-blue-500/20 focus-visible:border-blue-500/50 transition-all"
-          />
+          <div className="relative">
+            <Input
+              id="confirmPassword"
+              type={showPassword ? "text" : "password"}
+              required
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              disabled={loading || sessionValid === null}
+              placeholder="Re-enter your new password"
+              className="h-11 pr-10 bg-black/50 border-white/10 text-white placeholder:text-slate-500 focus-visible:ring-blue-500/20 focus-visible:border-blue-500/50 transition-all"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              tabIndex={-1}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors focus:outline-none"
+            >
+              {showPassword ? (
+                <EyeOff className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <Eye className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+          </div>
         </div>
 
         {error ? (
