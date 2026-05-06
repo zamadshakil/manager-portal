@@ -1,5 +1,5 @@
-import { FolderOpen, Download } from "lucide-react"
-import { fileIconLabel, formatBytes, formatRelative } from "@/lib/format"
+import { FolderOpen, Download, Clock, Users } from "lucide-react"
+import { fileIconLabel, formatBytes, formatRelative, formatDate } from "@/lib/format"
 import { DeleteIconButton } from "@/components/dashboard/delete-icon-button"
 import { deleteMaterial } from "@/app/actions/materials"
 import type { Material } from "@/lib/types"
@@ -49,22 +49,34 @@ export function Materials({ rows, emptyHint, canDelete = false }: MaterialsProps
                   {fileIconLabel(m.file_type)}
                 </span>
                 <div className="min-w-0 flex-1">
-                  {m.tags.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {m.tags.slice(0, 3).map((t) => (
-                        <span
-                          key={t}
-                          className="inline-flex items-center rounded-full bg-warm-white px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground"
-                        >
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {m.tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {m.tags.slice(0, 2).map((t) => (
+                          <span
+                            key={t}
+                            className="inline-flex items-center rounded-full bg-warm-white px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] font-semibold text-slate-600">
+                      <Users className="h-3 w-3" />
+                      {m.teams?.name ?? "Global"}
+                    </span>
+                  </div>
                   <h3 className="mt-1.5 text-[13.5px] font-semibold leading-snug truncate">{m.title}</h3>
                   <p className="mt-0.5 text-[11.5px] text-muted-foreground">
                     {formatBytes(m.size_bytes)} · {formatRelative(m.created_at)}
                   </p>
+                  {m.expires_at ? (
+                    <div className="mt-1.5 flex items-center gap-1 text-[10.5px] font-medium text-destructive/85">
+                      <Clock className="h-3 w-3" />
+                      <span>Expires {formatDate(m.expires_at)}</span>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-1">
                   <a

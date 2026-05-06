@@ -22,11 +22,25 @@ export function formatRelative(iso: string | Date | null | undefined): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
+export function formatDate(iso: string | Date | null | undefined): string {
+  if (!iso) return "—"
+  const date = typeof iso === "string" ? new Date(iso) : iso
+  return date.toLocaleDateString(undefined, { 
+    month: "short", 
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  })
+}
+
 export function fileIconLabel(mime: string | null | undefined): string {
   if (!mime) return "FILE"
   if (mime.includes("pdf")) return "PDF"
   if (mime.includes("word") || mime.includes("document")) return "DOC"
   if (mime.includes("presentation") || mime.includes("powerpoint")) return "PPT"
+  if (mime.includes("spreadsheet") || mime.includes("excel")) return "XLS"
   if (mime.startsWith("image/")) return "IMG"
+  if (mime.startsWith("text/")) return "TXT"
   return "FILE"
 }

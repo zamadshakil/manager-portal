@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useEffect } from "react"
 import Link from "next/link"
 import {
   FileText,
@@ -10,6 +10,8 @@ import {
   Filter,
   ExternalLink,
   X,
+  Download,
+  Loader2,
 } from "lucide-react"
 import { StatusBadge } from "@/components/dashboard/status-badge"
 import { fileIconLabel, formatBytes, formatRelative } from "@/lib/format"
@@ -181,6 +183,39 @@ function PreviewPane({
 }) {
   const isImage = submission.mime_type.startsWith("image/")
   const isPdf = submission.mime_type.includes("pdf")
+  const isText = submission.mime_type.startsWith("text/")
+  const isOffice =
+    submission.mime_type.includes("word") ||
+    submission.mime_type.includes("officedocument") ||
+    submission.mime_type.includes("excel") ||
+    submission.mime_type.includes("spreadsheet") ||
+    submission.mime_type.includes("powerpoint") ||
+    submission.mime_type.includes("presentation")
+
+  const [textContent, setTextContent] = useState<string | null>(null)
+  const [isTextLoading, setIsTextLoading] = useState(false)
+
+  useEffect(() => {
+    if (isText) {
+      setTextContent(null)
+      setIsTextLoading(true)
+      // Fetch text content via the proxy to ensure auth and correct headers
+      fetch(`/api/download/${submission.id}?type=submission`)
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed to fetch")
+          return res.text()
+        })
+        .then((text) => {
+          setTextContent(text)
+          setIsTextLoading(false)
+        })
+        .catch((err) => {
+          console.error("[preview] text fetch failed", err)
+          setTextContent("Error loading text content.")
+          setIsTextLoading(false)
+        })
+    }
+  }, [isText, submission.id])
 
   return (
     <>
@@ -221,7 +256,7 @@ function PreviewPane({
       </header>
 
       {/* Preview body */}
-      <div className="flex-1 bg-warm-white border-b border-border">
+      <div className="flex-1 bg-warm-white border-b border-border overflow-hidden">
         {isImage ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -235,6 +270,40 @@ function PreviewPane({
             title={submission.title}
             className="w-full h-[60vh] bg-warm-white"
           />
+        ) : isText ? (
+          <div className="h-[60vh] w-full overflow-auto p-4 bg-background">
+            {isTextLoading ? (
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                <span className="text-[13px]">Loading text content…</span>
+              </div>
+            ) : (
+              <pre className="text-[12.5px] leading-relaxed font-mono whitespace-pre-wrap text-foreground">
+                {textContent}
+              </pre>
+            )}
+          </div>
+        ) : isOffice ? (
+          <div className="flex flex-col items-center justify-center h-[60vh] text-center px-6">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-warm-white text-primary mb-4">
+              <FileText className="h-6 w-6" aria-hidden="true" />
+            </div>
+            <p className="text-[14px] font-semibold text-foreground">
+              Inline preview not available for Word/Office documents
+            </p>
+            <p className="mt-1 text-[12.5px] text-muted-foreground max-w-sm">
+              {fileIconLabel(submission.mime_type)} files are best viewed in their native applications.
+            </p>
+            <a
+              href={`/api/download/${submission.id}?type=submission`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-5 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground hover:bg-[#005bab] transition-all"
+            >
+              <Download className="h-4 w-4" aria-hidden="true" />
+              Download to View
+            </a>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-[60vh] text-center px-6">
             <ImageIcon className="h-10 w-10 text-muted-foreground/30 mb-3" aria-hidden="true" />

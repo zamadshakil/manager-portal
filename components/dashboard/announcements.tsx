@@ -1,6 +1,6 @@
-import { Megaphone } from "lucide-react"
+import { Megaphone, Clock, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { formatRelative } from "@/lib/format"
+import { formatRelative, formatDate } from "@/lib/format"
 import { DeleteIconButton } from "@/components/dashboard/delete-icon-button"
 import { deleteAnnouncement } from "@/app/actions/announcements"
 import type { Announcement, AnnouncementPriority } from "@/lib/types"
@@ -57,6 +57,10 @@ export function Announcements({ rows, emptyHint, canDelete = false }: Announceme
                 >
                   {a.priority}
                 </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                  <Users className="h-3 w-3" />
+                  {a.teams?.name ?? "Global"}
+                </span>
                 <span className="ml-auto text-[11px] text-muted-foreground">
                   {formatRelative(a.created_at)}
                 </span>
@@ -73,6 +77,12 @@ export function Announcements({ rows, emptyHint, canDelete = false }: Announceme
               <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground whitespace-pre-line">
                 {a.body}
               </p>
+              {a.expires_at ? (
+                <div className="mt-2.5 flex items-center gap-1.5 text-[11px] font-medium text-destructive/90">
+                  <Clock className="h-3.5 w-3.5" />
+                  <span>Expires {formatDate(a.expires_at)}</span>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>
