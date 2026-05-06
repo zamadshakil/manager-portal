@@ -103,14 +103,14 @@ export default function UpdatePasswordForm() {
   if (success) {
     return (
       <div className="space-y-6 text-center">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
-          <CheckCircle2 className="h-7 w-7 text-primary" aria-hidden="true" />
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-blue-500/10 shadow-[0_0_20px_rgba(59,130,246,0.2)]">
+          <CheckCircle2 className="h-7 w-7 text-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)] rounded-full" aria-hidden="true" />
         </div>
         <div className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-2xl font-semibold tracking-tight text-white">
             Password updated
           </h1>
-          <p className="text-sm text-muted-foreground leading-relaxed">
+          <p className="text-sm text-slate-400 leading-relaxed">
             You&apos;re all set. Redirecting to your dashboard&hellip;
           </p>
         </div>
@@ -126,10 +126,10 @@ export default function UpdatePasswordForm() {
           <XCircle className="h-7 w-7 text-destructive" aria-hidden="true" />
         </div>
         <div className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-2xl font-semibold tracking-tight text-white">
             This link has expired
           </h1>
-          <p className="text-sm text-muted-foreground leading-relaxed">
+          <p className="text-sm text-slate-400 leading-relaxed">
             Your password reset link is invalid or has expired. Request a
             fresh one and try again.
           </p>
@@ -137,7 +137,7 @@ export default function UpdatePasswordForm() {
         <div className="pt-2">
           <Link
             href="/auth/forgot-password"
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline underline-offset-4"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-400 hover:text-blue-300 hover:underline underline-offset-4 transition-colors"
           >
             Request new reset link
           </Link>
@@ -147,12 +147,12 @@ export default function UpdatePasswordForm() {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="space-y-2">
-        <h1 className="text-3xl sm:text-[34px] font-semibold tracking-tight text-balance">
+    <div className="space-y-6">
+      <div className="space-y-2 text-center">
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white">
           Choose a new password
         </h1>
-        <p className="text-sm text-muted-foreground leading-relaxed text-pretty">
+        <p className="text-sm text-slate-400 leading-relaxed text-pretty">
           Pick something memorable but hard to guess. Use at least 6
           characters.
         </p>
@@ -160,7 +160,7 @@ export default function UpdatePasswordForm() {
 
       <form onSubmit={onSubmit} className="space-y-5" noValidate>
         <div className="space-y-2">
-          <Label htmlFor="password" className="text-sm font-medium">
+          <Label htmlFor="password" className="text-sm font-medium text-slate-300">
             New password
           </Label>
           <div className="relative">
@@ -172,14 +172,14 @@ export default function UpdatePasswordForm() {
               onChange={(e) => setPassword(e.target.value)}
               disabled={loading || sessionValid === null}
               placeholder="Enter your new password"
-              className="h-11 pr-10"
+              className="h-11 pr-10 bg-black/50 border-white/10 text-white placeholder:text-slate-500 focus-visible:ring-blue-500/20 focus-visible:border-blue-500/50 transition-all"
             />
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
               tabIndex={-1}
               aria-label={showPassword ? "Hide password" : "Show password"}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus:outline-none"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors focus:outline-none"
             >
               {showPassword ? (
                 <EyeOff className="h-4 w-4" aria-hidden="true" />
@@ -191,7 +191,7 @@ export default function UpdatePasswordForm() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="confirmPassword" className="text-sm font-medium">
+          <Label htmlFor="confirmPassword" className="text-sm font-medium text-slate-300">
             Confirm password
           </Label>
           <Input
@@ -202,7 +202,7 @@ export default function UpdatePasswordForm() {
             onChange={(e) => setConfirmPassword(e.target.value)}
             disabled={loading || sessionValid === null}
             placeholder="Re-enter your new password"
-            className="h-11"
+            className="h-11 pr-10 bg-black/50 border-white/10 text-white placeholder:text-slate-500 focus-visible:ring-blue-500/20 focus-visible:border-blue-500/50 transition-all"
           />
         </div>
 
@@ -219,7 +219,7 @@ export default function UpdatePasswordForm() {
         <Button
           type="submit"
           disabled={loading || sessionValid === null}
-          className="w-full h-11 text-sm font-semibold"
+          className="w-full h-11 text-sm font-semibold bg-blue-500 hover:bg-blue-600 text-white shadow-[0_0_15px_rgba(59,130,246,0.4)] hover:shadow-[0_0_25px_rgba(59,130,246,0.6)] border-none transition-all duration-300"
         >
           {loading ? (
             <span className="inline-flex items-center justify-center gap-2">
@@ -235,7 +235,7 @@ export default function UpdatePasswordForm() {
       <div className="flex justify-center">
         <Link
           href="/auth/login"
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-400 hover:text-white transition-colors"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           Back to sign in
