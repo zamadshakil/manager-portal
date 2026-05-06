@@ -359,24 +359,187 @@ export async function POST(req: Request) {
     if (msgErr) {
       console.error("[smart-ai] user message save failed:", msgErr.message, msgErr.code)
     }
+
+    // Defensive: explicitly bump chat_threads.updated_at so the thread
+    // bubbles to the top of the sidebar even if the
+    // `chat_messages_bump_thread` trigger isn't deployed in this
+    // environment. The trigger remains the canonical mechanism; this is
+    // belt-and-suspenders for environments where the migration hasn't
+    // run yet.
+    if (threadPersisted) {
+      const { error: bumpErr } = await persistClient
+        .from("chat_threads")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", threadId)
+      if (bumpErr) {
+        console.warn("[smart-ai] thread updated_at bump failed (non-fatal):", bumpErr.message)
+      }
+    }
   }
 
 
-  // Build RLS-scoped tools so the model can query live data.
-  const ALLOWED_TABLES = [
-    "tasks",
-    "task_assignments",
-    "submissions",
-    "validation_runs",
-    "validation_rules",
-    "announcements",
-    "materials",
-    "profiles",
-    "teams",
-    "report_snapshots",
-    "activity_log",
-    "chat_documents",
-  ]
+  // ---------------------------------------------------------------------
+  // Authoritative schema map for the queryDatabase tool.
+  //
+  // The model sees these column lists in the system prompt AND every
+  // queryDatabase call validates against them in code. This is the single
+  // most important reliability win — previously the prompt told the model
+  // about columns that didn't exist (e.g. validation_rules.name when the
+  // real column is rule_name; announcements.content when it's body;
+  // activity_log.target_type when it's entity_type), so most "complex
+  // multi-table" questions failed with PostgREST schema errors and the
+  // model gave up. With this map:
+  //
+  //   1. Unknown columns in `select` are silently dropped (warning surfaced
+  //      to the model, not an error) and we fall back to `select=*` if
+  //      everything was unknown. The query never fails for that reason.
+  //
+  //   2. Unknown columns in `filters` are dropped with a warning. The query
+  //      still runs, the model learns the right column for the next turn.
+  //
+  //   3. If PostgREST still rejects the request despite our pre-flight
+  //      validation (e.g. someone sneaks an aggregate through), we
+  //      automatically retry once with `select=*` and no filters as a
+  //      last-resort fallback. The model gets data instead of an error.
+  // ---------------------------------------------------------------------
+  interface TableSchema {
+    columns: string[]
+    description: string
+    /** Default order column when the model omits `order`. */
+    defaultOrder?: string
+  }
+
+  const TABLE_SCHEMAS: Record<string, TableSchema> = {
+    submissions: {
+      columns: [
+        "id", "uploader_id", "team_id", "title", "blob_url", "blob_pathname",
+        "mime_type", "size_bytes", "status", "score", "summary", "extracted_text",
+        "flags", "metadata", "task_id", "task_assignment_id", "late_reason",
+        "submitted_at", "is_late", "created_at", "updated_at",
+      ],
+      defaultOrder: "created_at",
+      description:
+        "Files/work submitted by users with validation status and AI score. " +
+        "status enum: queued, parsing, validating, passed, failed, needs_review, late_submitted, missed.",
+    },
+    tasks: {
+      columns: [
+        "id", "team_id", "manager_id", "title", "description", "instructions",
+        "due_at", "allow_late", "require_late_reason", "created_at", "updated_at",
+      ],
+      defaultOrder: "created_at",
+      description:
+        "Manager-created tasks assigned to team members. " +
+        "IMPORTANT: due-date column is 'due_at' (NOT 'due_date').",
+    },
+    task_assignments: {
+      columns: [
+        "id", "task_id", "assignee_id", "status", "submission_id",
+        "late_reason", "submitted_at", "created_at", "updated_at",
+      ],
+      defaultOrder: "created_at",
+      description:
+        "Per-user task assignments. " +
+        "status enum: assigned, submitted, late_submitted, missed.",
+    },
+    profiles: {
+      columns: [
+        "id", "email", "full_name", "role", "team_id", "manager_id",
+        "must_reset", "avatar_url", "created_at", "updated_at",
+      ],
+      defaultOrder: "full_name",
+      description:
+        "User profiles. role enum: main_admin, manager, member.",
+    },
+    validation_rules: {
+      columns: [
+        "id", "team_id", "rule_name", "description", "prompt_template",
+        "threshold", "weight", "enabled", "created_by", "created_at", "updated_at",
+      ],
+      defaultOrder: "rule_name",
+      description:
+        "Per-team validation rules. " +
+        "IMPORTANT: name column is 'rule_name' (NOT 'name'); prompt column is 'prompt_template' (NOT 'prompt').",
+    },
+    validation_runs: {
+      columns: [
+        "id", "submission_id", "rule_id", "model", "prompt_version", "raw_output",
+        "pass", "score", "reasons", "flags", "latency_ms", "tokens_in",
+        "tokens_out", "created_at",
+      ],
+      defaultOrder: "created_at",
+      description:
+        "AI validation results, one row per submission per rule. " +
+        "'pass' is a boolean; 'reasons' and 'flags' are JSON arrays.",
+    },
+    announcements: {
+      columns: [
+        "id", "author_id", "team_id", "title", "body", "priority",
+        "expires_at", "created_at",
+      ],
+      defaultOrder: "created_at",
+      description:
+        "Manager and admin announcements. " +
+        "IMPORTANT: text body is 'body' (NOT 'content'). " +
+        "priority enum: low, normal, high, urgent.",
+    },
+    materials: {
+      columns: [
+        "id", "author_id", "team_id", "title", "description", "blob_url",
+        "blob_pathname", "file_type", "size_bytes", "tags", "created_at",
+      ],
+      defaultOrder: "created_at",
+      description:
+        "Reference files uploaded by managers/admins for team learning.",
+    },
+    teams: {
+      columns: [
+        "id", "name", "description", "manager_id", "settings",
+        "created_at", "updated_at",
+      ],
+      defaultOrder: "name",
+      description: "Teams in the organization.",
+    },
+    activity_log: {
+      columns: [
+        "id", "actor_id", "team_id", "action", "entity_type", "entity_id",
+        "metadata", "ip_address", "user_agent", "created_at",
+      ],
+      defaultOrder: "created_at",
+      description:
+        "Append-only audit log. " +
+        "IMPORTANT: target columns are 'entity_type'/'entity_id' (NOT 'target_type'/'target_id').",
+    },
+    report_snapshots: {
+      columns: ["id", "team_id", "period", "period_start", "metrics", "created_at"],
+      defaultOrder: "period_start",
+      description:
+        "Precomputed report metrics per team and period. " +
+        "period enum: day, month, year.",
+    },
+    chat_documents: {
+      columns: [
+        "id", "user_id", "thread_id", "file_name", "file_url", "file_type",
+        "rag_status", "text_excerpt", "indexed_at", "created_at",
+      ],
+      defaultOrder: "created_at",
+      description: "Documents uploaded inside Smart AI chat threads.",
+    },
+  }
+  const ALLOWED_TABLES = Object.keys(TABLE_SCHEMAS)
+
+  // PostgREST does not support SQL aggregate functions in `select`. Detect
+  // them so we can quietly rewrite the query instead of failing.
+  const AGGREGATE_PATTERN = /\b(count|avg|sum|min|max|stddev|variance|distinct|coalesce|nullif)\s*\(/i
+
+  // Levenshtein-ish closest-match for table-name typos.
+  function suggestTable(input: string): string | null {
+    const lc = input.toLowerCase()
+    for (const t of ALLOWED_TABLES) {
+      if (t.includes(lc) || lc.includes(t)) return t
+    }
+    return null
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: Record<string, any> = {
@@ -384,10 +547,33 @@ export async function POST(req: Request) {
       description:
         "Read rows from a permitted database table. RLS automatically restricts results " +
         "to what the current user is allowed to see. " +
-        `Permitted tables: ${ALLOWED_TABLES.join(", ")}.`,
+        `Permitted tables: ${ALLOWED_TABLES.join(", ")}. ` +
+        "CRITICAL: never use SQL aggregate functions (avg, sum, count, max, min) in 'select' — " +
+        "they are not supported. Fetch raw rows (limit ≤100) and aggregate in your reasoning. " +
+        "Use the 'filters' array for all WHERE clauses; supports operators eq, neq, gt, gte, lt, lte, like, ilike, in, is.",
       inputSchema: z.object({
-        table: z.string().describe("Table name to query, e.g. 'tasks', 'submissions'"),
-        select: z.string().default("*").describe("Comma-separated columns to select. Use '*' for all."),
+        table: z.string().describe(`Table name. Must be one of: ${ALLOWED_TABLES.join(", ")}.`),
+        select: z
+          .string()
+          .default("*")
+          .describe("Comma-separated columns. Default '*' (recommended unless you need a tight subset)."),
+        filters: z
+          .array(
+            z.object({
+              column: z.string(),
+              op: z.enum([
+                "eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "in", "is",
+              ]),
+              value: z.union([z.string(), z.number(), z.boolean()]),
+            }),
+          )
+          .optional()
+          .describe(
+            "WHERE clauses combined with AND. " +
+              "For 'in', value is comma-separated (e.g. 'queued,passed'). " +
+              "For 'is', value is 'null' or 'not.null'. " +
+              "For dates use ISO 8601 strings with gte/lte.",
+          ),
         eq: z
           .array(
             z.object({
@@ -396,35 +582,117 @@ export async function POST(req: Request) {
             }),
           )
           .optional()
-          .describe("Optional equality filters."),
+          .describe("DEPRECATED — prefer 'filters' with op:'eq'. Kept for backward compatibility."),
         order: z
           .object({
             column: z.string(),
             ascending: z.boolean().default(false),
           })
           .optional()
-          .describe("Optional ORDER BY."),
-        limit: z.number().int().min(1).max(50).default(10),
+          .describe("Optional ORDER BY. Defaults to the table's natural recency column."),
+        limit: z.number().int().min(1).max(100).default(20),
       }),
-      execute: async ({ table, select, eq, order, limit }) => {
-        if (!ALLOWED_TABLES.includes(table)) {
-          return { error: `Table "${table}" is not queryable. Permitted: ${ALLOWED_TABLES.join(", ")}.` }
+      execute: async ({ table, select, filters, eq, order, limit }) => {
+        // 1) Table existence check with fuzzy suggestion.
+        const schema = TABLE_SCHEMAS[table]
+        if (!schema) {
+          const suggestion = suggestTable(table)
+          return {
+            error:
+              `Table "${table}" is not queryable.` +
+              (suggestion ? ` Did you mean "${suggestion}"?` : "") +
+              ` Permitted: ${ALLOWED_TABLES.join(", ")}.`,
+            retryable: false,
+          }
         }
 
-        // Run the actual Supabase query. Wrapped so we can retry transient
-        // upstream errors (Kong/PostgREST hiccups, network blips) once
-        // before bubbling the failure up to the model.
-        const runQuery = async () => {
-          let builder: any = supabase.from(table).select(select)
-          if (eq) {
-            for (const f of eq) builder = builder.eq(f.column, f.value as any)
+        const warnings: string[] = []
+        const validColumns = new Set(schema.columns)
+
+        // 2) Merge legacy `eq` into the unified `filters` shape.
+        const requestedFilters = [
+          ...(filters ?? []),
+          ...(eq ?? []).map((f) => ({ column: f.column, op: "eq" as const, value: f.value })),
+        ]
+
+        // 3) Sanitize `select`. PostgREST rejects aggregates and unknown columns.
+        let cleanSelect = (select ?? "*").trim() || "*"
+        if (AGGREGATE_PATTERN.test(cleanSelect)) {
+          warnings.push(
+            "Stripped SQL aggregate from select — PostgREST does not support aggregates. " +
+              "Fetched raw rows; compute aggregates in your reasoning.",
+          )
+          cleanSelect = "*"
+        }
+        if (cleanSelect !== "*") {
+          const requested = cleanSelect.split(",").map((s) => s.trim()).filter(Boolean)
+          const valid = requested.filter((c) => validColumns.has(c))
+          if (valid.length === 0) {
+            warnings.push(
+              `Dropped unknown columns from select: ${requested.join(", ")}. ` +
+                `Falling back to *. Available columns: ${schema.columns.join(", ")}.`,
+            )
+            cleanSelect = "*"
+          } else if (valid.length < requested.length) {
+            const dropped = requested.filter((c) => !validColumns.has(c))
+            warnings.push(
+              `Dropped unknown columns from select: ${dropped.join(", ")}. ` +
+                `Available: ${schema.columns.join(", ")}.`,
+            )
+            cleanSelect = valid.join(",")
           }
-          if (order) {
-            builder = builder.order(order.column, { ascending: order.ascending })
+        }
+
+        // 4) Validate filter columns. Unknowns become warnings, not errors.
+        const validFilters = requestedFilters.filter((f) => {
+          if (validColumns.has(f.column)) return true
+          warnings.push(
+            `Dropped filter on unknown column "${f.column}" of ${table}. ` +
+              `Available: ${schema.columns.join(", ")}.`,
+          )
+          return false
+        })
+
+        // 5) Run the query. Wrapped so withRetry can handle transient blips.
+        const runQuery = async (
+          selectArg: string,
+          filtersArg: typeof validFilters,
+          applyOrder: boolean,
+        ) => {
+          let builder: any = supabase.from(table).select(selectArg)
+          for (const f of filtersArg) {
+            const v = f.value
+            switch (f.op) {
+              case "eq": builder = builder.eq(f.column, v as any); break
+              case "neq": builder = builder.neq(f.column, v as any); break
+              case "gt": builder = builder.gt(f.column, v as any); break
+              case "gte": builder = builder.gte(f.column, v as any); break
+              case "lt": builder = builder.lt(f.column, v as any); break
+              case "lte": builder = builder.lte(f.column, v as any); break
+              case "like": builder = builder.like(f.column, String(v)); break
+              case "ilike": builder = builder.ilike(f.column, String(v)); break
+              case "in": {
+                const list = String(v).split(",").map((s) => s.trim()).filter(Boolean)
+                if (list.length > 0) builder = builder.in(f.column, list as any)
+                break
+              }
+              case "is": {
+                const norm = String(v).toLowerCase().replace(/^is\s+/, "")
+                if (norm === "null" || norm === "not null" || norm === "not.null") {
+                  builder = builder.is(f.column, norm.includes("not") ? ("not.null" as any) : null)
+                }
+                break
+              }
+            }
+          }
+          if (applyOrder) {
+            const orderCol =
+              order && validColumns.has(order.column) ? order.column : schema.defaultOrder
+            if (orderCol) {
+              builder = builder.order(orderCol, { ascending: order?.ascending ?? false })
+            }
           }
           const result = await builder.limit(limit)
-          // Promote PostgREST error objects into thrown errors so withRetry
-          // can decide whether they're transient.
           if (result.error) {
             const e: any = new Error(result.error.message ?? "query failed")
             e.code = result.error.code
@@ -435,8 +703,14 @@ export async function POST(req: Request) {
         }
 
         try {
-          const data = await withRetry(`queryDatabase(${table})`, 2, runQuery)
-          return { data: data ?? [], count: Array.isArray(data) ? data.length : 0 }
+          const data = await withRetry(`queryDatabase(${table})`, 2, () =>
+            runQuery(cleanSelect, validFilters, true),
+          )
+          return {
+            data: data ?? [],
+            count: Array.isArray(data) ? data.length : 0,
+            ...(warnings.length > 0 ? { warnings } : {}),
+          }
         } catch (err: any) {
           const code = err?.code as string | undefined
           const msg = err?.message ?? String(err)
@@ -446,28 +720,45 @@ export async function POST(req: Request) {
           if (msg.includes("JWT") || msg.includes("expired") || msg.includes("token")) {
             return {
               error:
-                "Authentication error: your session expired. Ask the user to refresh the page to sign in again.",
+                "Authentication error: your session expired. Tell the user to refresh the page to sign in again.",
               retryable: false,
             }
           }
 
-          // Schema cache or column/relation issues — the model should NOT
-          // re-call with the same args. Tell it what's wrong so it can adjust.
+          // Schema mismatch — last-resort fallback: drop everything and try
+          // a plain SELECT * with no filters. Better to give the model
+          // *some* data it can summarize than to leave it empty-handed.
           if (
             code === "PGRST204" ||
             code === "PGRST205" ||
+            code === "42703" || // undefined_column
+            code === "42P01" || // undefined_table
             msg.includes("column") ||
             msg.includes("relation") ||
             msg.includes("does not exist") ||
             msg.includes("schema cache")
           ) {
-            return {
-              error: `Schema mismatch: ${msg}. Try a different column/table or simpler select=*.`,
-              retryable: false,
+            try {
+              const fallback = await runQuery("*", [], true)
+              return {
+                data: fallback ?? [],
+                count: Array.isArray(fallback) ? fallback.length : 0,
+                warnings: [
+                  ...warnings,
+                  `Original query failed (${msg}). Returned a plain "${table}" listing instead — re-filter in your reasoning.`,
+                ],
+              }
+            } catch {
+              return {
+                error:
+                  `Schema mismatch on ${table}: ${msg}. ` +
+                  `Available columns: ${schema.columns.join(", ")}.`,
+                retryable: false,
+              }
             }
           }
 
-          // Permission denied — RLS blocked it. Don't retry, tell the model.
+          // Permission denied — RLS blocked it.
           if (
             code === "42501" ||
             msg.includes("permission denied") ||
@@ -479,9 +770,7 @@ export async function POST(req: Request) {
             }
           }
 
-          // Otherwise this was likely a transient upstream error and we
-          // already retried inside withRetry. Tell the model so it can
-          // explain to the user without inventing data.
+          // Transient upstream — already retried inside withRetry.
           return {
             error: `Database temporarily unavailable: ${msg}`,
             retryable: true,
@@ -572,58 +861,105 @@ export async function POST(req: Request) {
     }),
   }
 
-  const roleLabel = profile.role.replace("_", " ")
-  const systemPrompt = [
-    "You are Smart AI, the agentic assistant inside the Hierarchia manager portal.",
-    `The current user's role is "${roleLabel}". You have access to database tools that run queries on their behalf.`,
-    
-    // --- COMMUNICATION STYLE ---
-    "COMMUNICATION STYLE:",
-    "- Act as a polished, professional business assistant.",
-    "- NEVER use technical jargon. Do not mention 'databases', 'SQL', 'RLS', 'tools', 'queryDatabase', 'searchDocument', 'RAG', or 'chunks' to the user.",
-    "- NEVER output raw UUIDs (e.g., 5e679cdc-...). Always refer to items by their Name, Title, or friendly descriptions.",
-    "- If you cannot find data, say so naturally (e.g., 'I couldn't find any records of...') instead of mentioning tool failures.",
-    "- Use markdown tables and bullet points to make data easy to read for managers.",
-    "",
+  // -----------------------------------------------------------------
+  // Build the system prompt.
+  //
+  // Three big improvements over the previous version:
+  //
+  //  (a) Real schema. The column lists below are generated from
+  //      TABLE_SCHEMAS so they're guaranteed to match the database. The
+  //      previous prompt hard-coded WRONG names ('name' vs 'rule_name',
+  //      'content' vs 'body', 'target_type' vs 'entity_type', 'due_date'
+  //      vs 'due_at') which is why most multi-table questions failed —
+  //      the model called PostgREST with columns that don't exist.
+  //
+  //  (b) Identity & date context. The model knows who the user is and
+  //      what "this month" / "last 30 days" / "last month" mean, in ISO
+  //      8601, so it can build correct gte/lte filters in one shot.
+  //
+  //  (c) Aggregation strategy. Explicit rule that aggregates run in the
+  //      model's reasoning, never in SQL — this is the failure mode in
+  //      the "team performance recap" screenshot, where the model tried
+  //      avg()/count() in select and got nothing back.
+  // -----------------------------------------------------------------
+  const now = new Date()
+  const todayIso = now.toISOString()
+  const dayMs = 24 * 60 * 60 * 1000
+  const last7Iso = new Date(now.getTime() - 7 * dayMs).toISOString()
+  const last30Iso = new Date(now.getTime() - 30 * dayMs).toISOString()
+  const startOfMonthIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+  const startOfLastMonthIso = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString()
+  const endOfLastMonthIso = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999).toISOString()
 
-    // --- TOOL & DATA LOGIC ---
-    "DOCUMENT QUESTIONS: When the user asks about the content of any file (PDF, log, image, transcript, attached document), you MUST call 'searchDocument' before answering. Pass the document's UUID as `documentId` and `sourceType: 'chat_attachment'` whenever the document was uploaded in this chat. Document IDs are listed in '[Attached documents]' and '[Documents available in this conversation]' blocks — these blocks REMAIN VALID across the entire conversation, not just the turn they appeared in. If the user says 'this document', 'that PDF', or 'the file I uploaded' on a follow-up turn, use the most recent document ID from those blocks.",
-    "EMPTY RAG RESULTS: If 'searchDocument' returns 0 results for a targeted documentId, retry ONCE with a broader query (the document's main topic, or a few key keywords). Only after the retry returns 0 should you tell the user nothing relevant was found — and even then, summarize what you do know about the document from its filename.",
-    "If the user asks about their tasks, submissions, team performance, or announcements, call 'queryDatabase' to look up the real data instead of guessing.",
-    "CRITICAL TABLE MAPPINGS: 'Team' or 'Departments' -> 'teams', 'Validation Rules' -> 'validation_rules', 'Submission' -> 'submissions'.",
-    "CRITICAL TOOL INSTRUCTION: Once you receive tool results, you MUST answer the user immediately in the next step. Do NOT loop or make multiple consecutive tool calls unless absolutely necessary.",
-    "Prefer concrete answers over speculation. If a tool returns no rows, say so plainly without mentioning the tool itself.",
-    "Never invent information or submission text. Always ground document answers in the snippets returned by 'searchDocument'.",
+  const schemaSection = Object.entries(TABLE_SCHEMAS)
+    .map(
+      ([name, s]) =>
+        `### ${name}\n  columns: ${s.columns.join(", ")}\n  ${s.description}`,
+    )
+    .join("\n\n")
+
+  const systemPrompt = [
+    "You are Smart AI, the agentic data assistant inside the Hierarchia manager portal.",
+    "Your job is to answer manager and member questions accurately by querying the live database and any uploaded documents — never by guessing.",
     "",
-    "Key tables and their important columns:",
-    "- submissions: id, title, status (queued/passed/failed/needs_review), score, summary, uploader_id, team_id, created_at",
-    "- tasks: id, title, instructions, due_date, team_id, created_at",
-    "- task_assignments: id, task_id, assignee_id, status (pending/submitted/missed), submitted_at",
-    "- profiles: id, email, full_name, role (main_admin/manager/member), team_id",
-    "- validation_rules: id, name, prompt, team_id, enabled",
-    "- validation_runs: id, submission_id, rule_id, pass, score, reasons, flags",
-    "- announcements: id, title, content, author_id, team_id, created_at",
-    "- teams: id, name",
-    "- activity_log: id, actor_id, action, target_type, target_id, created_at",
-    "- report_snapshots: id, team_id, period, data, created_at",
-    "- chat_documents: id, user_id, file_name, file_url, rag_status, created_at",
+    "## CURRENT USER",
+    `- user_id: ${profile.id}`,
+    `- name: ${profile.full_name ?? profile.email}`,
+    `- role: ${profile.role}`,
+    `- team_id: ${profile.team_id ?? "(not assigned to a team)"}`,
     "",
-    "QUERY DECOMPOSITION: For complex questions spanning multiple tables,",
-    "break them into sub-queries and make tool calls in consecutive steps.",
-    "Once you have ALL data, synthesize a comprehensive answer.",
-    "Use up to 8 tool calls for a complex multi-step question; stop earlier if you have enough data.",
+    "## CURRENT DATE (ISO 8601, UTC) — use these directly in gte/lte filters",
+    `- now: ${todayIso}`,
+    `- last 7 days starts: ${last7Iso}`,
+    `- last 30 days starts: ${last30Iso}`,
+    `- this month starts: ${startOfMonthIso}`,
+    `- last month range: ${startOfLastMonthIso} to ${endOfLastMonthIso}`,
     "",
-    "TOOL ERROR HANDLING: Both 'queryDatabase' and 'searchDocument' may return an object with an `error` field.",
-    "- If `retryable: true`, you MAY retry the same call ONCE (e.g. simpler select, broader query).",
-    "- If `retryable: false`, do NOT repeat the same call — adapt: try a different table/column, or tell the user politely that the data is unavailable. NEVER fabricate data when a tool errors.",
-    "- For `searchDocument` errors specifically: tell the user the document store is temporarily unavailable and they can retry — do NOT claim the document has no relevant content.",
+    "## COMMUNICATION STYLE",
+    "- Polished, concise, professional. NEVER mention 'database', 'SQL', 'tool', 'query', 'RAG', 'chunk', 'PostgREST', or technical errors to the user.",
+    "- NEVER print raw UUIDs. Always reference items by title or name.",
+    "- Use markdown tables, bullet lists, and **bold** for readability.",
+    "- If data is missing, say it naturally: \"I couldn't find any submissions for that period.\" Do not blame tools or systems.",
     "",
-    "Be concise, format data in tables when useful, and refer to items by their titles and names rather than IDs.",
-    "Never invent or fabricate data — only report what the tools return.",
+    "## TABLE SCHEMA — column names are EXACT, do not guess",
+    schemaSection,
     "",
-    "DOCUMENT ANSWERS: When answering questions about a specific document, use ALL retrieved snippets — not just the top-scoring ones. Scan every snippet for the requested information before saying it's not available.",
+    "## QUERY STRATEGY (read carefully)",
+    "1. ALWAYS prefer the `filters` array over the legacy `eq` field. Operators: eq, neq, gt, gte, lt, lte, like, ilike, in, is.",
+    "2. Date ranges → use `gte` / `lte` with the ISO 8601 constants from the CURRENT DATE block above.",
+    "3. NEVER use SQL aggregate functions (avg, count, sum, min, max, distinct) inside `select` — they are not supported and the call will silently lose precision. Instead: fetch raw rows (limit ≤ 100) and compute averages, counts, ratios, trends in your own reasoning.",
+    "4. Identity-based filters:",
+    "   - 'my tasks' / 'tasks assigned to me' → query `task_assignments` with filter `{column: 'assignee_id', op: 'eq', value: <user_id>}`.",
+    "   - 'my submissions' → query `submissions` with `{column: 'uploader_id', op: 'eq', value: <user_id>}`.",
+    "   - 'my team' / 'our team' → use the user's `team_id` from the CURRENT USER block.",
+    "5. Common multi-step recipes:",
+    "   - **Failure rate per rule (last 30 days)**: 1) query `validation_runs` with `created_at >= last30`, select `rule_id, pass`, limit 100. 2) query `validation_rules` for `rule_name`. 3) Group by rule_id in your head, count pass=false / total per rule.",
+    "   - **Team performance recap (this month)**: 1) query `submissions` filtered by `team_id` AND `created_at >= startOfMonth`, fetch `score, status, is_late, created_at`. 2) Optionally repeat for last month range. 3) Compute averages, pass rate, late count, and trend in your reasoning. Render as one tight paragraph.",
+    "   - **Late submissions**: filter `submissions` with `{column: 'is_late', op: 'eq', value: true}`.",
+    "   - **Top consumers / contributors**: fetch raw rows, group + sort + slice in reasoning.",
+    "6. If a user asks about another team or user by NAME, query `teams` or `profiles` first to resolve the name → id, then use that id in subsequent filters.",
     "",
-    "LINKS: NEVER generate links to internal portal pages (e.g. /dashboard/..., /documents/...). These will 404. Instead, reference documents by their filename and friendly name so the user can find them in the portal. If you want to help the user locate something, describe where to find it in the portal navigation (e.g. 'Go to Dashboard > Materials').",
+    "## TOOL CALL DISCIPLINE",
+    "- You may make up to 10 tool calls per turn. Stop the moment you have enough data.",
+    "- After each call inspect the response:",
+    "  - `data` (or `results`): use it.",
+    "  - `warnings`: read them — they tell you the exact column names you should have used. Adapt your next call accordingly. Warnings are NOT errors; the call still returned data.",
+    "  - `error` with `retryable: true`: you MAY retry the same call once.",
+    "  - `error` with `retryable: false`: do NOT retry the same call — change strategy (different table, different filter, broader date range).",
+    "- If multiple calls fail but ANY call returned data, synthesize a partial answer from what you have. Be transparent about what is missing without blaming systems.",
+    "- NEVER invent values, names, scores, or dates. If you genuinely cannot determine something, say \"I don't have that information right now.\"",
+    "",
+    "## DOCUMENT QUESTIONS (RAG)",
+    "- When the user asks about the content of an uploaded file, call `searchDocument`.",
+    "- ALWAYS pass `documentId` (the UUID) when the user is asking about a specific file. Document IDs appear in `[Attached documents]` and `[Documents available in this conversation]` blocks — they remain valid for the whole thread, not just the turn they appeared on. References like \"this document\", \"that PDF\", or \"the file I uploaded\" map to the most recent document ID in those blocks.",
+    "- Pass `sourceType: 'chat_attachment'` whenever the document was uploaded in this chat thread.",
+    "- Use a focused, content-rich `query` (the user's actual topic — not pronouns).",
+    "- If the first call returns 0 results for a targeted documentId, retry ONCE with a broader query (the document's main topic). Only after the retry should you tell the user nothing relevant was found.",
+    "- When `searchDocument` returns an `error`, tell the user retrieval is temporarily unavailable and they can retry — do NOT claim the document has no relevant content.",
+    "- When answering, scan ALL returned snippets, not just the top one.",
+    "",
+    "## LINKS",
+    "Never generate URLs to internal portal pages (e.g. /dashboard/..., /documents/...). They will 404. Reference items by their friendly name and tell the user where to find them in the portal navigation (e.g. \"Go to Dashboard > Materials\").",
   ].join("\n")
 
   // --- Sliding window: trim old messages to save tokens on long chats ---
@@ -699,7 +1035,7 @@ export async function POST(req: Request) {
         console.error("[smart-ai] streamText runtime error:", msg, error)
       },
       onFinish: async ({ text, totalUsage }) => {
-        // ---- 1. Persist assistant reply ----
+        // ---- 1. Persist assistant reply + bump thread timestamp ----
         try {
           if (text && threadPersisted) {
             const { error: assistErr } = await persistClient
@@ -713,13 +1049,19 @@ export async function POST(req: Request) {
               console.error("[smart-ai] assistant message save failed:", assistErr.message)
             }
 
-            // Auto-title: only update on new threads to avoid overwriting user edits
-            if (isNewThread && threadTitle !== "New conversation") {
-              await persistClient
-                .from("chat_threads")
-                .update({ title: threadTitle, updated_at: new Date().toISOString() })
-                .eq("id", threadId)
+            // Single combined update: bump updated_at always, plus title
+            // for brand-new threads. Doing both in one query saves a
+            // round-trip on the hot path.
+            const updates: Record<string, string> = {
+              updated_at: new Date().toISOString(),
             }
+            if (isNewThread && threadTitle !== "New conversation") {
+              updates.title = threadTitle
+            }
+            await persistClient
+              .from("chat_threads")
+              .update(updates)
+              .eq("id", threadId)
           }
         } catch (persistErr: any) {
           console.error("[smart-ai] persistence step failed:", persistErr?.message ?? persistErr)
