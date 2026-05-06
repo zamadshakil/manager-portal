@@ -566,7 +566,7 @@ export async function listAssignmentsForTask(taskId: string): Promise<
   const { data, error } = await supabase
     .from("task_assignments")
     .select(
-      "*, assignee:profiles!task_assignments_assignee_id_fkey(full_name, email), submission:submissions(status, score, title)",
+      "*, assignee:profiles!task_assignments_assignee_id_fkey(full_name, email, avatar_url), submission:submissions(status, score, title)",
     )
     .eq("task_id", taskId)
     .order("created_at", { ascending: true })
