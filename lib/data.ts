@@ -558,22 +558,27 @@ export async function listAssignmentsForTask(taskId: string): Promise<
   Array<
     TaskAssignment & {
       assignee: { full_name: string | null; email: string } | null
-      submission: { status: string; score: number | null; filename: string | null } | null
+      submission: { status: string; score: number | null; title: string | null } | null
     }
   >
 > {
   const supabase = await createClient()
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("task_assignments")
     .select(
-      "*, assignee:profiles!task_assignments_assignee_id_fkey(full_name, email), submission:submissions(status, score, filename)",
+      "*, assignee:profiles!task_assignments_assignee_id_fkey(full_name, email), submission:submissions(status, score, title)",
     )
     .eq("task_id", taskId)
     .order("created_at", { ascending: true })
+
+  if (error) {
+    console.error("Error in listAssignmentsForTask:", error)
+  }
+
   return (data ?? []) as unknown as Array<
     TaskAssignment & {
       assignee: { full_name: string | null; email: string } | null
-      submission: { status: string; score: number | null; filename: string | null } | null
+      submission: { status: string; score: number | null; title: string | null } | null
     }
   >
 }
