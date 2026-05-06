@@ -96,9 +96,9 @@ export async function provisionUser(formData: FormData) {
     metadata: { email: parsed.data.email, role: parsed.data.role },
   })
 
-  // Send the welcome email with their credentials asynchronously
-  // We don't await this so it doesn't block the UI response
-  sendWelcomeEmail({
+  // Send the welcome email with their credentials.
+  // We await this to ensure Next.js does not abort the background fetch.
+  await sendWelcomeEmail({
     email: parsed.data.email,
     fullName: parsed.data.full_name,
     role: parsed.data.role || "member",
