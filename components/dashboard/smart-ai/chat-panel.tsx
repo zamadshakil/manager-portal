@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { useChat } from "@ai-sdk/react"
+import { useSWRConfig } from "swr"
 import { DefaultChatTransport, type UIMessage } from "ai"
 import {
   ArrowUp,
@@ -114,6 +115,7 @@ export function ChatPanel({
   onSeedConsumed,
   initialThreadId,
 }: ChatPanelProps) {
+  const { mutate } = useSWRConfig()
   const router = useRouter()
   const pathname = usePathname()
   const [input, setInput] = useState("")
@@ -223,6 +225,11 @@ export function ChatPanel({
   const { messages, sendMessage, setMessages, status, error, regenerate, stop } =
     useChat<PortalUIMessage>({
       transport: transportRef.current,
+      onFinish: () => {
+        // Refresh the sidebar when the assistant finishes its response
+        // so the last message preview and timestamp are updated.
+        mutate("/api/smart-ai/threads")
+      },
     })
 
   // Load messages from a persisted thread (used by thread drawer)
@@ -247,6 +254,26 @@ export function ChatPanel({
     },
     [profile.id, setMessages, updateUrlThread],
   )
+  
+  // Consolidate thread creation + sidebar refresh so all entry points
+  // (composer, suggestions, seed prompts) behave identically.
+  const dispatchMessage = useCallback(
+    (text: string, metadata?: PortalUIMessageMetadata) => {
+      let activeThreadId = threadIdRef.current
+      if (!activeThreadId) {
+        activeThreadId = crypto.randomUUID()
+        setThreadId(activeThreadId)
+        threadIdRef.current = activeThreadId
+        localStorage.setItem(threadIdKey(profile.id), activeThreadId)
+        updateUrlThread(activeThreadId)
+      }
+
+      sendMessage({ text, metadata })
+      // Refresh the sidebar immediately
+      mutate("/api/smart-ai/threads")
+    },
+    [profile.id, sendMessage, updateUrlThread, mutate],
+  )
 
   // Auto-stick to the bottom whenever new tokens arrive.
   useEffect(() => {
@@ -258,9 +285,9 @@ export function ChatPanel({
   // Honor a seed prompt jumped in from another tab.
   useEffect(() => {
     if (!seedPrompt) return
-    sendMessage({ text: seedPrompt })
+    dispatchMessage(seedPrompt)
     onSeedConsumed()
-  }, [seedPrompt, sendMessage, onSeedConsumed])
+  }, [seedPrompt, dispatchMessage, onSeedConsumed])
 
   const visibleSuggestions = SUGGESTIONS.filter((s) =>
     s.roles.includes(profile.role),
@@ -381,19 +408,6 @@ export function ChatPanel({
 
     if ((!trimmed && readyAttachments.length === 0) || isStreaming) return
 
-    // Lazy thread creation: mint a new thread ID on the very first message
-    // instead of on page load. This prevents empty orphan threads.
-    let activeThreadId = threadId
-    if (!activeThreadId) {
-      activeThreadId = crypto.randomUUID()
-      setThreadId(activeThreadId)
-      localStorage.setItem(threadIdKey(profile.id), activeThreadId)
-      // Immediately update the ref so the transport picks it up for this send
-      threadIdRef.current = activeThreadId
-      // Set the thread in the URL so a reload reopens this conversation
-      updateUrlThread(activeThreadId)
-    }
-
     const metadata: PortalUIMessageMetadata | undefined =
       readyAttachments.length > 0
         ? {
@@ -404,10 +418,10 @@ export function ChatPanel({
         }
         : undefined
 
-    sendMessage({
-      text: trimmed || `[Attached ${readyAttachments.length} file(s)]`,
-      metadata,
-    })
+    dispatchMessage(
+      trimmed || `[Attached ${readyAttachments.length} file(s)]`,
+      metadata
+    )
 
     setInput("")
     setAttachments([])
@@ -416,7 +430,7 @@ export function ChatPanel({
 
   function handleSuggestion(p: SuggestedPrompt) {
     if (isStreaming) return
-    sendMessage({ text: p.prompt })
+    dispatchMessage(p.prompt)
   }
 
   return (

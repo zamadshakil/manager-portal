@@ -54,7 +54,9 @@ export async function createAnnouncement(formData: FormData): Promise<ActionResu
       title: parsed.data.title,
       body: parsed.data.body,
       priority: parsed.data.priority,
-      expires_at: parsed.data.expiresAt ? new Date(parsed.data.expiresAt).toISOString() : null,
+      ...(parsed.data.expiresAt && {
+        expires_at: new Date(parsed.data.expiresAt).toISOString(),
+      }),
     })
     .select("id")
     .single()

@@ -349,23 +349,38 @@ export async function POST(req: Request) {
           return { error: `Table "${table}" is not queryable. Permitted: ${ALLOWED_TABLES.join(", ")}.` }
         }
 
-        let builder: any = supabase.from(table).select(select)
+        try {
+          let builder: any = supabase.from(table).select(select)
 
-        if (eq) {
-          for (const f of eq) builder = builder.eq(f.column, f.value as any)
+          if (eq) {
+            for (const f of eq) builder = builder.eq(f.column, f.value as any)
+          }
+
+          if (order) {
+            builder = builder.order(order.column, { ascending: order.ascending })
+          }
+
+          const { data, error: qErr } = await builder.limit(limit)
+
+          if (qErr) {
+            console.error(`[smart-ai] queryDatabase(${table}) error: ${qErr.message}`, qErr)
+            
+            // Targeted error messages for the LLM to explain to the user
+            if (qErr.message.includes("JWT") || qErr.message.includes("expired") || qErr.message.includes("token")) {
+              return { error: "Authentication error: Your session may have expired. Please refresh the page to sign in again." }
+            }
+            
+            if (qErr.code === "PGRST204" || qErr.message.includes("column") || qErr.message.includes("relation")) {
+              return { error: `Database schema mismatch: ${qErr.message}. The system cache might be stale. If this persists, contact an administrator.` }
+            }
+
+            return { error: `Query failed: ${qErr.message}` }
+          }
+          return { data: data ?? [], count: Array.isArray(data) ? data.length : 0 }
+        } catch (err: any) {
+          console.error(`[smart-ai] queryDatabase(${table}) exception:`, err)
+          return { error: `Internal execution error: ${err.message}` }
         }
-
-        if (order) {
-          builder = builder.order(order.column, { ascending: order.ascending })
-        }
-
-        const { data, error: qErr } = await builder.limit(limit)
-
-        if (qErr) {
-          console.error(`[smart-ai] queryDatabase(${table}) error: ${qErr.message}`)
-          return { error: qErr.message }
-        }
-        return { data: data ?? [], count: Array.isArray(data) ? data.length : 0 }
       },
     }),
 

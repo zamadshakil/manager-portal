@@ -82,7 +82,9 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
       file_type: file.type,
       size_bytes: file.size,
       tags,
-      expires_at: parsed.data.expiresAt ? new Date(parsed.data.expiresAt).toISOString() : null,
+      ...(parsed.data.expiresAt && {
+        expires_at: new Date(parsed.data.expiresAt).toISOString(),
+      }),
     })
     .select("id")
     .single()
