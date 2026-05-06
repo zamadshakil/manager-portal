@@ -1,0 +1,64 @@
+# Keep the build context small so the upload to the Railway/Metal builder
+# doesn't stall during "scheduling build". Anything not needed to run
+# `next build` should live here.
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Local development artifacts
+node_modules
+.next
+.turbo
+.cache
+.vercel
+.snowflake
+.v0-trash
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Editor / OS noise
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Environment + secrets (Railway injects these via env vars)
+.env
+.env.*
+!.env.local.example
+
+# Documentation that doesn't ship to the runtime
+*.md
+docs
+DEPLOYMENT_CHECKLIST.md
+DOCUMENTATION.md
+FIXES_COMPLETED.md
+QUICK_START.md
+README.md
+implementation_plan.md
+task.md
+
+# Debug / scratch utilities — not part of the production build
+scratch
+schema.sql
+old_schema.sql
+*.backup
+*_dump.*
+
+# Test artefacts (none configured today, but pre-empt accidental copies)
+coverage
+.nyc_output
+playwright-report
+test-results
+
+# Misc
+.npmrc.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+bun.lockb

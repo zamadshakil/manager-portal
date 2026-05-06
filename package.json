@@ -5,10 +5,12 @@
   "engines": {
     "node": ">=22.0.0"
   },
+  "packageManager": "pnpm@9.15.4",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "postbuild": "node scripts/postbuild-standalone.mjs",
+    "start": "node .next/standalone/server.js",
     "lint": "eslint ."
   },
   "dependencies": {
