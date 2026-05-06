@@ -727,39 +727,26 @@ export async function POST(req: Request) {
 
         // ---- 2. Credit increment ----
         try {
+          // Determine if this user is unlimited (avoid stale closure reads)
+          const isUnlimited = creditRow?.is_unlimited ?? (profile.role === "main_admin")
+
+          // Atomic increment — avoids race conditions from concurrent requests
+          // that would all read the same stale `used_this_period` from the closure.
+          // We increment usage for EVERYONE, including unlimited admins, so we have
+          // accurate system-wide usage metrics and top consumer track records.
+          // Atomic increment + logging — avoids race conditions from concurrent requests.
+          // We increment usage for EVERYONE, including unlimited admins, so we have
+          // accurate system-wide usage metrics and top consumer track records.
           const { error: incErr } = await persistClient.rpc("increment_ai_usage", {
             p_user_id: profile.id,
             p_credits: 1,
+            p_event_type: "smart_ai_query",
+            p_model: SMART_AI_MODEL,
+            p_thread_id: threadPersisted ? threadId : null,
           })
+          
           if (incErr) {
-            console.warn("[smart-ai] atomic increment RPC failed, using fallback:", incErr.message)
-            await persistClient
-              .from("ai_credit_limits")
-              .update({
-                used_this_period: (creditRow?.used_this_period ?? 0) + 1,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("user_id", profile.id)
-          }
-        } catch (creditErr: any) {
-          console.error("[smart-ai] credit increment failed:", creditErr?.message ?? creditErr)
-        }
-
-        // ---- 3. Usage log row ----
-        try {
-          const { error: logErr } = await persistClient.from("ai_usage_log").insert({
-            user_id: profile.id,
-            thread_id: threadPersisted ? threadId : null,
-            model: SMART_AI_MODEL,
-            tokens_in: totalUsage?.inputTokens ?? null,
-            tokens_out: totalUsage?.outputTokens ?? null,
-            period_type: creditRow?.period_type ?? "monthly",
-            event_type: "smart_ai_query",
-            status: "success",
-            credits_deducted: 1,
-          })
-          if (logErr) {
-            console.error("[smart-ai] usage log insert failed:", logErr.message)
+            console.error("[smart-ai] credit accounting failed:", incErr.message)
           }
         } catch (logErr: any) {
           console.error("[smart-ai] usage log step failed:", logErr?.message ?? logErr)

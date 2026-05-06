@@ -145,13 +145,21 @@ export function UsageOverviewPanel({ creditLimits: initialCreditLimits, usageTre
   )
 
   // Format date labels for chart
-  const chartData = usageTrend.map((d) => ({
-    ...d,
-    label: new Date(d.day + "T00:00:00").toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    }),
-  }))
+  const chartData = useMemo(() => {
+    return usageTrend.map((d) => {
+      // Use explicit UTC components to avoid timezone shifts in labels
+      const [y, m, day] = d.day.split("-").map(Number)
+      const date = new Date(Date.UTC(y, m - 1, day))
+      return {
+        ...d,
+        label: date.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          timeZone: "UTC",
+        }),
+      }
+    })
+  }, [usageTrend])
 
   return (
     <div className="space-y-6">

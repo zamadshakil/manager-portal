@@ -581,23 +581,17 @@ async function runPipeline(submissionId: string) {
       if (creditRow) {
         // Track usage for everyone, even unlimited admins, so we have accurate
         // system-wide usage metrics and top consumer track records.
-        await admin.rpc("increment_ai_usage", {
+        const { error: incErr } = await admin.rpc("increment_ai_usage", {
           p_user_id: uploaderId,
           p_credits: creditsToDeduct,
+          p_event_type: "llm_validation",
+          p_model: successful.length > 0 ? successful[0].model : "pipeline",
         });
+        
+        if (incErr) {
+          console.error("[pipeline] credit accounting RPC failed:", incErr.message);
+        }
       }
-
-      await admin.from("ai_usage_log").insert({
-        user_id: uploaderId,
-        thread_id: null,
-        model: successful.length > 0 ? successful[0].model : "pipeline",
-        tokens_in: null, 
-        tokens_out: null,
-        period_type: creditRow?.period_type ?? "monthly",
-        event_type: "llm_validation",
-        status: finalStatus === "failed" ? "failure" : "success",
-        credits_deducted: creditsToDeduct,
-      });
     } catch (acctErr: any) {
       console.error("[pipeline] credit accounting failed:", acctErr.message);
     }
