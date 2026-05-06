@@ -578,7 +578,9 @@ async function runPipeline(submissionId: string) {
       const isUnlimited = creditRow?.is_unlimited ?? false;
       const creditsToDeduct = 1; // 1 credit per submission validation
 
-      if (!isUnlimited && creditRow) {
+      if (creditRow) {
+        // Track usage for everyone, even unlimited admins, so we have accurate
+        // system-wide usage metrics and top consumer track records.
         await admin.rpc("increment_ai_usage", {
           p_user_id: uploaderId,
           p_credits: creditsToDeduct,
@@ -594,7 +596,7 @@ async function runPipeline(submissionId: string) {
         period_type: creditRow?.period_type ?? "monthly",
         event_type: "llm_validation",
         status: finalStatus === "failed" ? "failure" : "success",
-        credits_deducted: isUnlimited ? 0 : creditsToDeduct,
+        credits_deducted: creditsToDeduct,
       });
     } catch (acctErr: any) {
       console.error("[pipeline] credit accounting failed:", acctErr.message);

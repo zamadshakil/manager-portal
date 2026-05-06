@@ -577,22 +577,22 @@ export async function POST(req: Request) {
 
           // Atomic increment — avoids race conditions from concurrent requests
           // that would all read the same stale `used_this_period` from the closure.
-          if (!isUnlimited) {
-            const { error: incErr } = await persistClient.rpc("increment_ai_usage", {
-              p_user_id: profile.id,
-              p_credits: 1,
-            })
-            if (incErr) {
-              // Fallback: direct update if RPC doesn't exist yet
-              console.warn("[smart-ai] atomic increment RPC failed, using fallback:", incErr.message)
-              await persistClient
-                .from("ai_credit_limits")
-                .update({
-                  used_this_period: (creditRow?.used_this_period ?? 0) + 1,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("user_id", profile.id)
-            }
+          // We increment usage for EVERYONE, including unlimited admins, so we have
+          // accurate system-wide usage metrics and top consumer track records.
+          const { error: incErr } = await persistClient.rpc("increment_ai_usage", {
+            p_user_id: profile.id,
+            p_credits: 1,
+          })
+          if (incErr) {
+            // Fallback: direct update if RPC doesn't exist yet
+            console.warn("[smart-ai] atomic increment RPC failed, using fallback:", incErr.message)
+            await persistClient
+              .from("ai_credit_limits")
+              .update({
+                used_this_period: (creditRow?.used_this_period ?? 0) + 1,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("user_id", profile.id)
           }
 
           // Always log usage (even for unlimited users — for track record)
@@ -606,7 +606,7 @@ export async function POST(req: Request) {
             period_type: creditRow?.period_type ?? "monthly",
             event_type: "smart_ai_query",
             status: "success",
-            credits_deducted: isUnlimited ? 0 : 1,
+            credits_deducted: 1,
           })
 
           if (logErr) {

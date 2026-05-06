@@ -475,12 +475,14 @@ export async function getMyCredits(): Promise<{
   const row = data as any
   const used = row.used_this_period ?? 0
   const limit = row.monthly_limit ?? 100
+  const isUnlimited = row.is_unlimited ?? false
+
   return {
     used,
     limit,
-    remaining: Math.max(0, limit - used),
+    remaining: isUnlimited ? Infinity : Math.max(0, limit - used),
     periodType: row.period_type as AiCreditPeriod,
     periodEnd: row.period_end,
-    isUnlimited: row.is_unlimited ?? false,
+    isUnlimited,
   }
 }
