@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import {
   AlertCircle,
@@ -19,6 +19,7 @@ import { createClient } from "@/lib/supabase/client"
 
 export default function UpdatePasswordForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
@@ -31,15 +32,33 @@ export default function UpdatePasswordForm() {
   // Wait for Supabase session to initialize after redirect
   useEffect(() => {
     const supabase = createClient()
+    
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
+      if (session) {
+        setSessionValid(true)
+        return
+      }
+
+      const token_hash = searchParams.get("token_hash")
+      const type = searchParams.get("type")
+
+      if (token_hash && type === "recovery") {
+        supabase.auth.verifyOtp({ token_hash, type: "recovery" }).then(({ data, error }) => {
+          if (error || !data.session) {
+            setSessionValid(false)
+            setError(error?.message || "Your reset link is invalid or has expired.")
+          } else {
+            // Remove the token from the URL so it doesn't cause issues on refresh
+            router.replace("/auth/update-password")
+            setSessionValid(true)
+          }
+        })
+      } else {
         setSessionValid(false)
         setError("Your reset link is invalid or has expired.")
-      } else {
-        setSessionValid(true)
       }
     })
-  }, [])
+  }, [searchParams, router])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()

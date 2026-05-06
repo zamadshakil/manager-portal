@@ -26,7 +26,21 @@ export async function requestPasswordReset(email: string) {
       return { success: false, error: "Failed to generate recovery link" }
     }
 
-    const resetLink = data.properties.action_link
+    let resetLink = data.properties.action_link
+    
+    try {
+      const url = new URL(resetLink)
+      const token = url.searchParams.get("token")
+      const type = url.searchParams.get("type")
+      
+      if (token && type === "recovery") {
+        const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
+        resetLink = `${siteUrl}/auth/update-password?token_hash=${token}&type=recovery`
+      }
+    } catch (e) {
+      console.error("[auth] Failed to parse action link:", e)
+    }
+
     const emailSent = await sendPasswordResetEmail(email, resetLink)
 
     if (!emailSent) {
