@@ -35,7 +35,35 @@ export default async function TaskDetailPage({
 
   const isManager = canManageTeam(profile, task.team_id)
   const myAssignment = await getMyAssignmentForTask(profile, id)
-  const assignments = isManager ? await listAssignmentsForTask(id) : []
+  
+  // Fetch assignments and team members for managers to populate the ledger
+  const rawAssignments = isManager ? await listAssignmentsForTask(id) : []
+  const allTeamMembers = isManager ? await listTeamMembers(profile) : []
+  
+  // Filter members belonging to this task's team and merge with assignments
+  const assignments = isManager ? allTeamMembers
+    .filter(m => m.team_id === task.team_id && m.role === "member")
+    .map(member => {
+      const existing = rawAssignments.find(a => a.assignee_id === member.id)
+      if (existing) return existing
+      return {
+        id: `virtual-${member.id}`,
+        task_id: id,
+        assignee_id: member.id,
+        status: "assigned" as const,
+        submission_id: null,
+        late_reason: null,
+        submitted_at: null,
+        created_at: member.created_at,
+        updated_at: member.created_at,
+        assignee: {
+          full_name: member.full_name,
+          email: member.email,
+          avatar_url: member.avatar_url
+        },
+        submission: null
+      }
+    }) : []
 
   const due = task.due_at ? new Date(task.due_at) : null
   const overdue = due ? due.getTime() < Date.now() : false
@@ -191,9 +219,10 @@ export default async function TaskDetailPage({
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-[250px] pl-4 lg:pl-5">User</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Submitted</TableHead>
+                  <TableHead className="w-[280px] pl-4 lg:pl-5">Team Member Name</TableHead>
+                  <TableHead>Current Status</TableHead>
+                  <TableHead>Submission Timestamp</TableHead>
+                  <TableHead>AI Validation</TableHead>
                   <TableHead className="text-right pr-4 lg:pr-5">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -202,18 +231,18 @@ export default async function TaskDetailPage({
                   <TableRow key={a.id}>
                     <TableCell className="pl-4 lg:pl-5">
                       <div className="flex items-center gap-3">
-                        <Avatar className="h-8 w-8">
+                        <Avatar className="h-9 w-9 border border-border/50">
                           {a.assignee?.avatar_url ? (
                             <AvatarImage src={a.assignee.avatar_url} alt={a.assignee.full_name ?? ""} />
                           ) : null}
-                          <AvatarFallback className="text-[10px]">
+                          <AvatarFallback className="text-[11px] font-bold bg-muted">
                             {(a.assignee?.full_name ?? a.assignee?.email ?? "U")
                               .slice(0, 2)
                               .toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
                         <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-semibold truncate leading-tight">
+                          <p className="text-[13.5px] font-semibold truncate leading-tight">
                             {a.assignee?.full_name ?? "Unknown User"}
                           </p>
                           <p className="text-[11.5px] text-muted-foreground truncate leading-tight mt-0.5">
@@ -232,7 +261,7 @@ export default async function TaskDetailPage({
                         </div>
                         {a.late_reason ? (
                           <p className="text-[11px] text-amber-700 font-medium">
-                            Reason: {a.late_reason}
+                            Late: {a.late_reason}
                           </p>
                         ) : null}
                       </div>
@@ -240,44 +269,56 @@ export default async function TaskDetailPage({
                     <TableCell>
                       <div className="flex flex-col gap-0.5">
                         {a.submitted_at ? (
-                          <span className="text-[12.5px] font-medium text-foreground">
-                            {new Date(a.submitted_at).toLocaleDateString([], {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            })}
-                          </span>
+                          <>
+                            <span className="text-[12.5px] font-medium text-foreground">
+                              {new Date(a.submitted_at).toLocaleDateString([], {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })}
+                            </span>
+                            <span className="text-[11.5px] text-muted-foreground">
+                              {new Date(a.submitted_at).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                          </>
                         ) : (
-                          <span className="text-[12px] text-muted-foreground">—</span>
+                          <span className="text-[12px] text-muted-foreground italic">Pending</span>
                         )}
-                        {a.submitted_at ? (
-                          <span className="text-[11.5px] text-muted-foreground">
-                            {new Date(a.submitted_at).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        ) : null}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {a.submission ? (
+                        <div className="flex flex-col gap-1 max-w-[200px]">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[12px] font-bold text-primary">
+                              Score: {a.submission.score ?? "—"}
+                            </span>
+                          </div>
+                          {a.submission.summary ? (
+                            <p className="text-[11px] text-muted-foreground line-clamp-2 leading-tight">
+                              {a.submission.summary}
+                            </p>
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground italic">No summary available</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground italic">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right pr-4 lg:pr-5">
                       <div className="flex items-center justify-end gap-3">
-                        {a.submission?.score !== null && a.submission?.score !== undefined ? (
-                          <div className="flex flex-col items-end">
-                            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Score</span>
-                            <span className="text-[14px] font-bold text-primary">{a.submission.score}</span>
-                          </div>
-                        ) : null}
                         {a.submission_id ? (
                           <Link
                             href={`/dashboard/submissions/${a.submission_id}`}
-                            className="inline-flex h-8 items-center justify-center rounded-md bg-primary px-3 text-[12px] font-semibold text-primary-foreground shadow transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                            className="inline-flex h-8 items-center justify-center rounded-md bg-primary/10 px-3 text-[12px] font-semibold text-primary transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                           >
                             Open
                           </Link>
-                        ) : (
-                          <div className="h-8 w-[58px]" /> /* spacer to align rows */
-                        )}
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
