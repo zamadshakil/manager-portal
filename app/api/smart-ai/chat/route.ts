@@ -4,11 +4,75 @@ import { createOpenAI, openai } from "@ai-sdk/openai"
 import { z } from "zod"
 import { requireProfile } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { scopeForProfile } from "@/lib/smart-ai/client"
 import { retrieveChunks } from "@/lib/smart-ai/retriever"
 import { applySlidingWindow, type SimpleMessage } from "@/lib/smart-ai/sliding-window"
 import { chatLimiter } from "@/lib/redis"
 import { logActivity } from "@/lib/activity"
+
+// ---------------------------------------------------------------------------
+// Resilience helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Heuristic: is this error worth retrying once?
+ * Catches the classes of failures we routinely see on the Railway-hosted
+ * Supabase/Kong stack: 5xx upstream, fetch network blips, request timeouts,
+ * and PostgREST schema-cache flutters.
+ */
+function isTransientError(err: unknown): boolean {
+  if (!err) return false
+  const msg =
+    (err as any)?.message?.toLowerCase?.() ??
+    String(err).toLowerCase()
+  if (!msg) return false
+  return (
+    msg.includes("fetch failed") ||
+    msg.includes("network") ||
+    msg.includes("timeout") ||
+    msg.includes("timed out") ||
+    msg.includes("aborted") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("etimedout") ||
+    msg.includes("socket hang up") ||
+    msg.includes("503") ||
+    msg.includes("502") ||
+    msg.includes("504") ||
+    msg.includes("upstream") ||
+    msg.includes("schema cache")
+  )
+}
+
+/**
+ * Retry an async operation up to `attempts` times when the failure looks
+ * transient. Adds linear backoff so we don't hammer a flaky upstream.
+ * Permanent errors (4xx auth, validation, etc.) are re-thrown immediately
+ * so we don't waste latency on something that will never succeed.
+ */
+async function withRetry<T>(
+  label: string,
+  attempts: number,
+  fn: () => Promise<T>,
+): Promise<T> {
+  let lastErr: unknown
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastErr = err
+      if (i === attempts - 1 || !isTransientError(err)) throw err
+      const delay = 200 * (i + 1)
+      console.warn(
+        `[smart-ai] ${label} attempt ${i + 1}/${attempts} failed (transient), retrying in ${delay}ms:`,
+        (err as any)?.message ?? err,
+      )
+      await new Promise((r) => setTimeout(r, delay))
+    }
+  }
+  throw lastErr
+}
 
 // ---------------------------------------------------------------------------
 // Provider resolution
@@ -84,9 +148,8 @@ export async function POST(req: Request) {
   // the period window before reading the usage counter.
   let creditRow: Record<string, any> | null = null
   try {
-    const { createAdminClient } = await import("@/lib/supabase/admin")
     const srClient = createAdminClient()
-    
+
     // Auto-advance period if expired
     await srClient.rpc("maybe_reset_period", { p_user_id: profile.id }).maybeSingle()
 
@@ -254,7 +317,6 @@ export async function POST(req: Request) {
   const threadTitle = generateTitle(lastUserMsg?.content ?? "")
 
   // Use service-role client for persistence so RLS doesn't block the insert
-  const { createAdminClient } = await import("@/lib/supabase/admin")
   const persistClient = createAdminClient()
 
   // Check if thread exists; create if not.
@@ -349,37 +411,81 @@ export async function POST(req: Request) {
           return { error: `Table "${table}" is not queryable. Permitted: ${ALLOWED_TABLES.join(", ")}.` }
         }
 
-        try {
+        // Run the actual Supabase query. Wrapped so we can retry transient
+        // upstream errors (Kong/PostgREST hiccups, network blips) once
+        // before bubbling the failure up to the model.
+        const runQuery = async () => {
           let builder: any = supabase.from(table).select(select)
-
           if (eq) {
             for (const f of eq) builder = builder.eq(f.column, f.value as any)
           }
-
           if (order) {
             builder = builder.order(order.column, { ascending: order.ascending })
           }
-
-          const { data, error: qErr } = await builder.limit(limit)
-
-          if (qErr) {
-            console.error(`[smart-ai] queryDatabase(${table}) error: ${qErr.message}`, qErr)
-            
-            // Targeted error messages for the LLM to explain to the user
-            if (qErr.message.includes("JWT") || qErr.message.includes("expired") || qErr.message.includes("token")) {
-              return { error: "Authentication error: Your session may have expired. Please refresh the page to sign in again." }
-            }
-            
-            if (qErr.code === "PGRST204" || qErr.message.includes("column") || qErr.message.includes("relation")) {
-              return { error: `Database schema mismatch: ${qErr.message}. The system cache might be stale. If this persists, contact an administrator.` }
-            }
-
-            return { error: `Query failed: ${qErr.message}` }
+          const result = await builder.limit(limit)
+          // Promote PostgREST error objects into thrown errors so withRetry
+          // can decide whether they're transient.
+          if (result.error) {
+            const e: any = new Error(result.error.message ?? "query failed")
+            e.code = result.error.code
+            e.details = result.error.details
+            throw e
           }
+          return result.data
+        }
+
+        try {
+          const data = await withRetry(`queryDatabase(${table})`, 2, runQuery)
           return { data: data ?? [], count: Array.isArray(data) ? data.length : 0 }
         } catch (err: any) {
-          console.error(`[smart-ai] queryDatabase(${table}) exception:`, err)
-          return { error: `Internal execution error: ${err.message}` }
+          const code = err?.code as string | undefined
+          const msg = err?.message ?? String(err)
+          console.error(`[smart-ai] queryDatabase(${table}) failed:`, msg, code ?? "")
+
+          // Auth / session expiry — user needs to re-login.
+          if (msg.includes("JWT") || msg.includes("expired") || msg.includes("token")) {
+            return {
+              error:
+                "Authentication error: your session expired. Ask the user to refresh the page to sign in again.",
+              retryable: false,
+            }
+          }
+
+          // Schema cache or column/relation issues — the model should NOT
+          // re-call with the same args. Tell it what's wrong so it can adjust.
+          if (
+            code === "PGRST204" ||
+            code === "PGRST205" ||
+            msg.includes("column") ||
+            msg.includes("relation") ||
+            msg.includes("does not exist") ||
+            msg.includes("schema cache")
+          ) {
+            return {
+              error: `Schema mismatch: ${msg}. Try a different column/table or simpler select=*.`,
+              retryable: false,
+            }
+          }
+
+          // Permission denied — RLS blocked it. Don't retry, tell the model.
+          if (
+            code === "42501" ||
+            msg.includes("permission denied") ||
+            msg.includes("not authorized")
+          ) {
+            return {
+              error: `Permission denied for ${table}. The current user's role cannot read this data.`,
+              retryable: false,
+            }
+          }
+
+          // Otherwise this was likely a transient upstream error and we
+          // already retried inside withRetry. Tell the model so it can
+          // explain to the user without inventing data.
+          return {
+            error: `Database temporarily unavailable: ${msg}`,
+            retryable: true,
+          }
         }
       },
     }),
@@ -434,20 +540,33 @@ export async function POST(req: Request) {
           ),
       }),
       execute: async ({ documentId, sourceType, query }) => {
+        // Use higher topK for targeted doc searches to get full context.
+        const effectiveTopK = documentId ? 20 : 12
         try {
-          // Use higher topK for targeted doc searches to get full context.
-          const effectiveTopK = documentId ? 20 : 12
-          const chunks = await retrieveChunks({
-            scope,
-            query,
-            documentId: documentId ?? null,
-            sourceType: sourceType ?? null,
-            topK: effectiveTopK,
-          })
+          const chunks = await withRetry("searchDocument", 2, () =>
+            retrieveChunks({
+              scope,
+              query,
+              documentId: documentId ?? null,
+              sourceType: sourceType ?? null,
+              topK: effectiveTopK,
+            }),
+          )
           return { results: chunks, count: chunks.length }
         } catch (err: any) {
-          console.error("[smart-ai] searchDocument error:", err.message)
-          return { results: [], count: 0 }
+          const msg = err?.message ?? String(err)
+          console.error("[smart-ai] searchDocument error:", msg)
+          // CRITICAL: surface a structured error so the model can tell the
+          // user "the document store is temporarily unavailable" instead
+          // of "I couldn't find anything". The previous code returned
+          // empty results, which the model treated as a successful "no
+          // matches" answer — exactly the failure mode the user reported.
+          return {
+            results: [],
+            count: 0,
+            error: `Document search temporarily unavailable: ${msg}. Tell the user retrieval failed and they can retry — do NOT claim the document has no relevant content.`,
+            retryable: isTransientError(err),
+          }
         }
       },
     }),
@@ -492,7 +611,12 @@ export async function POST(req: Request) {
     "QUERY DECOMPOSITION: For complex questions spanning multiple tables,",
     "break them into sub-queries and make tool calls in consecutive steps.",
     "Once you have ALL data, synthesize a comprehensive answer.",
-    "Use at most 3-4 tool calls per question.",
+    "Use up to 8 tool calls for a complex multi-step question; stop earlier if you have enough data.",
+    "",
+    "TOOL ERROR HANDLING: Both 'queryDatabase' and 'searchDocument' may return an object with an `error` field.",
+    "- If `retryable: true`, you MAY retry the same call ONCE (e.g. simpler select, broader query).",
+    "- If `retryable: false`, do NOT repeat the same call — adapt: try a different table/column, or tell the user politely that the data is unavailable. NEVER fabricate data when a tool errors.",
+    "- For `searchDocument` errors specifically: tell the user the document store is temporarily unavailable and they can retry — do NOT claim the document has no relevant content.",
     "",
     "Be concise, format data in tables when useful, and refer to items by their titles and names rather than IDs.",
     "Never invent or fabricate data — only report what the tools return.",
@@ -516,13 +640,17 @@ export async function POST(req: Request) {
   // `flat` already contains: extracted text, injected attachment
   // metadata for the latest user turn, and only the user/assistant/system
   // roles. That's the canonical shape to send to the model.
+  // Sliding window: increased budget + recent-keep so we don't drop the
+  // attached document IDs ("[Documents available in this conversation]")
+  // partway through a long thread. With heavy tool-result turns, 6 was
+  // collapsing context too aggressively.
   const trimmedMessages = applySlidingWindow(
     flat.map((m) => ({
       role: m.role,
       content: m.content,
       metadata: m.metadata,
     })) as SimpleMessage[],
-    { maxTokens: 12_000, recentKeepCount: 6 },
+    { maxTokens: 16_000, recentKeepCount: 10 },
   )
 
   if (process.env.NODE_ENV !== "production") {
@@ -540,37 +668,64 @@ export async function POST(req: Request) {
     parts: [{ type: "text" as const, text: m.content }],
   }))
 
+  // Compose an abort signal that fires on either client disconnect or our
+  // own hard timeout — prevents the route from hanging forever when the
+  // upstream model call stalls.
+  const requestSignal: AbortSignal | undefined = (req as any).signal
+  const timeoutSignal = AbortSignal.timeout(120_000) // 2 min hard cap
+  const abortSignal: AbortSignal = requestSignal
+    ? AbortSignal.any([requestSignal, timeoutSignal])
+    : timeoutSignal
+
   try {
     const result = streamText({
       model: resolveModel(),
       system: systemPrompt,
       messages: await convertToModelMessages(trimmedUIMessages as any),
       tools,
-      stopWhen: stepCountIs(5),
+      // Bumped from 5 → 10. Complex multi-table queries (e.g. "compare
+      // pass rates across teams + show top failing rules") plan 6–8 tool
+      // calls before synthesizing the answer; the previous cap silently
+      // truncated the agent mid-plan and the user saw a half-baked reply
+      // (or nothing at all).
+      stopWhen: stepCountIs(10),
+      abortSignal,
+      // Surface mid-stream errors instead of letting the SSE close with
+      // zero chunks. Without this, model API 5xx / rate-limit / malformed
+      // tool-call errors disappear into the void and the chat UI sits
+      // forever at "Thinking…" — which is exactly the breakage reported.
+      onError: ({ error }) => {
+        const msg = (error as any)?.message ?? String(error)
+        console.error("[smart-ai] streamText runtime error:", msg, error)
+      },
       onFinish: async ({ text, totalUsage }) => {
-        // ---- Persistence: save assistant reply ----
-        if (text && threadPersisted) {
-          const { error: assistErr } = await persistClient
-            .from("chat_messages")
-            .insert({
-              thread_id: threadId,
-              role: "assistant",
-              content: text,
-            })
-          if (assistErr) {
-            console.error("[smart-ai] assistant message save failed:", assistErr.message)
-          }
+        // ---- 1. Persist assistant reply ----
+        try {
+          if (text && threadPersisted) {
+            const { error: assistErr } = await persistClient
+              .from("chat_messages")
+              .insert({
+                thread_id: threadId,
+                role: "assistant",
+                content: text,
+              })
+            if (assistErr) {
+              console.error("[smart-ai] assistant message save failed:", assistErr.message)
+            }
 
-          // Auto-title: only update on new threads to avoid overwriting user edits
-          if (isNewThread && threadTitle !== "New conversation") {
-            await persistClient
-              .from("chat_threads")
-              .update({ title: threadTitle, updated_at: new Date().toISOString() })
-              .eq("id", threadId)
+            // Auto-title: only update on new threads to avoid overwriting user edits
+            if (isNewThread && threadTitle !== "New conversation") {
+              await persistClient
+                .from("chat_threads")
+                .update({ title: threadTitle, updated_at: new Date().toISOString() })
+                .eq("id", threadId)
+            }
           }
+        } catch (persistErr: any) {
+          console.error("[smart-ai] persistence step failed:", persistErr?.message ?? persistErr)
         }
 
-        // ---- Credit accounting: increment usage + log entry ----
+        // ---- 2. Credit increment ----
         try {
           // Determine if this user is unlimited (avoid stale closure reads)
           const isUnlimited = creditRow?.is_unlimited ?? (profile.role === "main_admin")
@@ -593,14 +748,26 @@ export async function POST(req: Request) {
           if (incErr) {
             console.error("[smart-ai] credit accounting failed:", incErr.message)
           }
+        } catch (logErr: any) {
+          console.error("[smart-ai] usage log step failed:", logErr?.message ?? logErr)
+        }
 
-          // Trigger instant refresh of the dashboard
+        // ---- 4. Revalidate dashboards (best-effort) ----
+        try {
           const { revalidatePath } = await import("next/cache")
           revalidatePath("/dashboard/ai-usage")
           revalidatePath("/dashboard/admin/users")
           revalidatePath("/dashboard/activity")
+        } catch (revalErr: any) {
+          console.warn("[smart-ai] revalidate failed (non-fatal):", revalErr?.message ?? revalErr)
+        }
 
-          // Log to activity_log for the main dashboard audit trail
+        // ---- 5. Activity log (defensive: lastUserMsg may be undefined) ----
+        try {
+          const promptPreview = lastUserMsg?.content
+            ? lastUserMsg.content.slice(0, 100) +
+              (lastUserMsg.content.length > 100 ? "..." : "")
+            : ""
           await logActivity({
             actorId: profile.id,
             teamId: profile.team_id,
@@ -608,26 +775,53 @@ export async function POST(req: Request) {
             entityType: "chat_thread",
             entityId: threadId,
             metadata: {
-              prompt: lastUserMsg.content.slice(0, 100) + (lastUserMsg.content.length > 100 ? "..." : ""),
+              prompt: promptPreview,
               model: SMART_AI_MODEL,
               tokens_in: totalUsage?.inputTokens,
               tokens_out: totalUsage?.outputTokens,
             },
           })
-        } catch (acctErr: any) {
-          console.error("[smart-ai] credit accounting failed:", acctErr.message)
+        } catch (activityErr: any) {
+          console.warn(
+            "[smart-ai] activity log failed (non-fatal):",
+            activityErr?.message ?? activityErr,
+          )
         }
       },
     })
 
-    const res = result.toUIMessageStreamResponse()
+    // CRITICAL: route stream-time errors back to the client so the chat
+    // UI can render a useful message instead of just hanging. Without
+    // `onError` here, the AI SDK closes the SSE on error and `useChat`
+    // sees a successful-but-empty stream — exactly the "no chunk output"
+    // failure mode the user reported.
+    const res = result.toUIMessageStreamResponse({
+      onError: (error) => {
+        const msg =
+          error instanceof Error
+            ? error.message
+            : typeof error === "string"
+              ? error
+              : "An unexpected error occurred while generating a response."
+        console.error("[smart-ai] stream emit error:", msg)
+        // Trim noise like provider auth keys before sending to client.
+        if (msg.length > 500) return msg.slice(0, 500) + "…"
+        return msg
+      },
+    })
     res.headers.set("x-smart-ai-source", "native")
     return res
   } catch (fallbackError: any) {
-    console.error("[smart-ai] streamText failed:", fallbackError.message)
-    return new Response(
-      `Smart AI is currently unavailable (Error: ${fallbackError.message}). Please try again later or check API key configurations.`,
-      { status: 503, headers: { "Content-Type": "text/plain" } }
+    // This catches ONLY synchronous setup errors (bad model id, missing
+    // API key surfaced before the first chunk, etc.). Stream-time errors
+    // are handled by the `onError` callbacks above.
+    const msg = fallbackError?.message ?? String(fallbackError)
+    console.error("[smart-ai] streamText setup failed:", msg)
+    return NextResponse.json(
+      {
+        error: `Smart AI is currently unavailable: ${msg}. Please try again later or contact your administrator if this persists.`,
+      },
+      { status: 503 },
     )
   }
 }

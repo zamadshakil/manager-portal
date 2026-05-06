@@ -62,21 +62,15 @@ function modelForProvider(provider: "openai" | "openrouter"): string {
   return EMBEDDING_MODEL.includes("/") ? EMBEDDING_MODEL : `openai/${EMBEDDING_MODEL}`
 }
 
-async function embedQuery(text: string): Promise<number[]> {
-  const provider: "openai" | "openrouter" | null = OPENAI_API_KEY
-    ? "openai"
-    : OPENROUTER_API_KEY
-    ? "openrouter"
-    : null
-
-  if (!provider) throw new Error("no embedding API key configured")
-
+async function embedQueryOnce(
+  text: string,
+  provider: "openai" | "openrouter",
+  apiKey: string,
+): Promise<number[]> {
   const url =
     provider === "openai"
       ? "https://api.openai.com/v1/embeddings"
       : "https://openrouter.ai/api/v1/embeddings"
-
-  const apiKey = provider === "openai" ? OPENAI_API_KEY : OPENROUTER_API_KEY
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -96,9 +90,12 @@ async function embedQuery(text: string): Promise<number[]> {
 
   if (!res.ok) {
     const body = await res.text().catch(() => "")
-    throw new Error(
+    const err: any = new Error(
       `embedding API ${res.status} ${res.statusText}: ${body.slice(0, 200)}`,
     )
+    err.status = res.status
+    err.transient = res.status >= 500 || res.status === 408 || res.status === 429
+    throw err
   }
 
   const json = (await res.json()) as { data: Array<{ embedding: number[] }> }
@@ -106,6 +103,46 @@ async function embedQuery(text: string): Promise<number[]> {
     throw new Error("embedding API returned empty data")
   }
   return json.data[0].embedding
+}
+
+/**
+ * Embed a query with one automatic retry on transient failures (5xx, 408,
+ * 429, network errors, timeouts). Permanent errors (4xx auth/validation)
+ * fail fast so we don't waste latency.
+ */
+async function embedQuery(text: string): Promise<number[]> {
+  const provider: "openai" | "openrouter" | null = OPENAI_API_KEY
+    ? "openai"
+    : OPENROUTER_API_KEY
+    ? "openrouter"
+    : null
+
+  if (!provider) throw new Error("no embedding API key configured")
+  const apiKey = provider === "openai" ? OPENAI_API_KEY : OPENROUTER_API_KEY
+
+  const ATTEMPTS = 2
+  let lastErr: unknown
+  for (let i = 0; i < ATTEMPTS; i++) {
+    try {
+      return await embedQueryOnce(text, provider, apiKey)
+    } catch (err: any) {
+      lastErr = err
+      const isLast = i === ATTEMPTS - 1
+      const transient =
+        err?.transient === true ||
+        err?.name === "AbortError" ||
+        err?.name === "TimeoutError" ||
+        /fetch failed|network|econn|timeout|timed out/i.test(err?.message ?? "")
+      if (isLast || !transient) throw err
+      const delay = 250 * (i + 1)
+      console.warn(
+        `[rag] embedQuery attempt ${i + 1}/${ATTEMPTS} failed (transient), retrying in ${delay}ms:`,
+        err?.message ?? err,
+      )
+      await new Promise((r) => setTimeout(r, delay))
+    }
+  }
+  throw lastErr
 }
 
 // ---------------------------------------------------------------------------
@@ -528,8 +565,16 @@ export async function retrieveChunks(
 
     return deduplicated
   } catch (err: any) {
+    // Re-throw hard failures so the caller (the searchDocument tool in the
+    // chat route) can distinguish "no matches" from "retrieval system
+    // failed" and tell the user accordingly. Previously we swallowed the
+    // error and returned [], which caused the model to confidently tell
+    // users "no relevant content found" when the embedding API or
+    // pgvector was actually down.
     console.error("[rag] retrieve failed:", err?.message ?? err)
-    return []
+    const wrapped: any = new Error(`retrieve failed: ${err?.message ?? String(err)}`)
+    wrapped.cause = err
+    throw wrapped
   }
 }
 
