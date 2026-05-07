@@ -180,11 +180,9 @@ async function runPipeline(submissionId: string) {
 
       // Step 2: Read the stream into a Buffer for the parsers.
       const chunks: Uint8Array[] = []
-      const reader = blobResult.stream.getReader()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        chunks.push(value)
+      // @ts-ignore - blobResult.stream is a Node.js Readable in this environment
+      for await (const chunk of blobResult.stream) {
+        chunks.push(chunk)
       }
       const buf = Buffer.concat(chunks)
       console.log("[pipeline] downloaded", buf.length, "bytes")
