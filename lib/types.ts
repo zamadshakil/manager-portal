@@ -247,6 +247,80 @@ export interface AiCreditLimit {
   user_team_id?: string | null
 }
 
+// ---------------------------------------------------------------------------
+// Messaging
+// ---------------------------------------------------------------------------
+
+export type ConversationType = "dm" | "group"
+export type MessageType = "text" | "image" | "file" | "audio" | "video"
+export type MemberRole = "admin" | "member"
+
+export interface Conversation {
+  id: string
+  type: ConversationType
+  name: string | null
+  created_by: string
+  avatar_url: string | null
+  created_at: string
+  updated_at: string
+  // joined via conversation_members
+  members?: ConversationMember[]
+  unread_count?: number
+  last_message?: Message | null
+}
+
+export interface ConversationMember {
+  conversation_id: string
+  user_id: string
+  role: MemberRole
+  joined_at: string
+  last_read_at: string
+  // joined from profiles
+  profile?: {
+    id: string
+    full_name: string | null
+    email: string
+    avatar_url: string | null
+  }
+}
+
+export interface Message {
+  id: string
+  conversation_id: string
+  sender_id: string
+  content: string | null
+  type: MessageType
+  media_url: string | null
+  media_metadata: Record<string, unknown> | null
+  reply_to_id: string | null
+  edited_at: string | null
+  deleted_at: string | null
+  created_at: string
+  // client-side only
+  status?: "sending" | "sent" | "failed"
+  // joined from profiles
+  sender?: {
+    id: string
+    full_name: string | null
+    email: string
+    avatar_url: string | null
+  }
+  reactions?: MessageReaction[]
+  reply_to?: Message | null
+}
+
+export interface MessageReaction {
+  message_id: string
+  user_id: string
+  emoji: string
+  created_at: string
+}
+
+export interface TypingUser {
+  userId: string
+  name: string
+}
+
 export interface AiUsageLogEntry {
   id: string
   user_id: string

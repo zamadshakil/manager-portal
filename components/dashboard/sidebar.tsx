@@ -16,6 +16,7 @@ import {
   ListChecks,
   Sparkles,
   BrainCircuit,
+  MessageSquare,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { roleLabel } from "@/lib/auth-shared"
@@ -53,6 +54,12 @@ const NAV: NavGroup[] = [
         label: "Submissions",
         icon: Upload,
         href: "/dashboard/submissions",
+        roles: ["main_admin", "manager", "member"],
+      },
+      {
+        label: "Messages",
+        icon: MessageSquare,
+        href: "/dashboard/messages",
         roles: ["main_admin", "manager", "member"],
       },
       {
