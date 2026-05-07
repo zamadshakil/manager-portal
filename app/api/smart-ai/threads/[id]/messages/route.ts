@@ -57,8 +57,10 @@ export async function GET(
     .limit(200)
 
   if (error) {
+    // H-9: Log the raw error server-side but never surface PostgREST/PG
+    // internals to the client (column names, RLS hints, etc.).
     console.error("[threads] messages fetch failed:", error.message)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: "Failed to load messages" }, { status: 500 })
   }
 
   // Transform DB rows into AI SDK UIMessage-compatible shape.

@@ -68,8 +68,23 @@ export default function UpdatePasswordForm() {
       return
     }
 
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.")
+    // M-5: Enforce a minimum-strength policy before talking to GoTrue.
+    // Server-side GoTrue should also be configured with
+    //   GOTRUE_PASSWORD_MIN_LENGTH=12 and GOTRUE_PASSWORD_HIBP=true
+    // so the same rules are enforced regardless of the client used.
+    if (password.length < 12) {
+      setError("Password must be at least 12 characters.")
+      return
+    }
+    const hasLower = /[a-z]/.test(password)
+    const hasUpper = /[A-Z]/.test(password)
+    const hasDigit = /\d/.test(password)
+    const hasSymbol = /[^A-Za-z0-9]/.test(password)
+    const variety = [hasLower, hasUpper, hasDigit, hasSymbol].filter(Boolean).length
+    if (variety < 3) {
+      setError(
+        "Password must include at least three of: lowercase, uppercase, digit, symbol.",
+      )
       return
     }
 
@@ -82,7 +97,9 @@ export default function UpdatePasswordForm() {
       })
 
       if (error) {
-        setError(error.message)
+        // H-9: Avoid leaking GoTrue internal error text — keep it generic.
+        console.error("[update-password] Supabase error:", error.message)
+        setError("Could not update your password. Please try again.")
         return
       }
 

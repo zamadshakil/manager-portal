@@ -70,19 +70,48 @@ export async function GET(
       return NextResponse.json({ error: "Blob not found" }, { status: 404 })
     }
 
+    // H-2: Stored-XSS hardening. The MIME type was originally supplied by the
+    // uploader's browser, so we cannot trust it for inline rendering. We:
+    //   1. Reject/normalise dangerous content types (HTML, SVG, XHTML, XML)
+    //      that browsers will execute scripts from.
+    //   2. Force `attachment` disposition for anything that isn't on the
+    //      narrow inline-safe allow-list (PDFs, plain images). PDFs are kept
+    //      inline so the in-app viewer continues to work.
+    //   3. Always emit `X-Content-Type-Options: nosniff` so browsers can't
+    //      override the declared content type via sniffing.
+    const rawType = (blobResult.blob.contentType || mimeType || "application/octet-stream").toLowerCase()
+    const DANGEROUS = new Set([
+      "text/html",
+      "application/xhtml+xml",
+      "image/svg+xml",
+      "application/xml",
+      "text/xml",
+      "application/javascript",
+      "text/javascript",
+    ])
+    const INLINE_SAFE = new Set([
+      "application/pdf",
+      "image/png",
+      "image/jpeg",
+      "image/gif",
+      "image/webp",
+    ])
+    const safeContentType = DANGEROUS.has(rawType) ? "application/octet-stream" : rawType
+    const disposition = INLINE_SAFE.has(safeContentType) ? "inline" : "attachment"
+
     const safeName = (fileName ?? "download").replace(/[^\w.\-]+/g, "_")
     return new NextResponse(blobResult.stream, {
       headers: {
-        "Content-Type": blobResult.blob.contentType || mimeType || "application/octet-stream",
-        "Content-Disposition": `inline; filename="${safeName}"`,
+        "Content-Type": safeContentType,
+        "Content-Disposition": `${disposition}; filename="${safeName}"`,
         "Cache-Control": "private, max-age=0, no-store",
+        "X-Content-Type-Options": "nosniff",
       },
     })
   } catch (err) {
+    // H-9: Log raw error server-side; return a generic message so the client
+    // doesn't see R2 / S3 internals or signed-URL details.
     console.error("[download] blob fetch failed", blobUrl, err)
-    return NextResponse.json(
-      { error: `Upstream fetch failed: ${err instanceof Error ? err.message : "unknown"}` },
-      { status: 502 },
-    )
+    return NextResponse.json({ error: "Upstream fetch failed" }, { status: 502 })
   }
 }

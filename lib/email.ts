@@ -2,6 +2,20 @@
  * Brevo email integration using native fetch
  */
 
+// M-4: Defensive HTML escaper for any value interpolated into the email body.
+// Even though all current call sites pass admin-controlled data, escaping at
+// the boundary prevents a future regression where a user-supplied string
+// (e.g. full_name from sign-up) lands in an email body and renders as markup
+// for the recipient — including admins reading their own copy.
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
 export interface WelcomeEmailProps {
   email: string
   fullName: string
@@ -26,6 +40,15 @@ export async function sendWelcomeEmail({ email, fullName, role, password }: Welc
       : role === "manager"
       ? "As a Manager, you can create tasks, manage team members, and define AI validation rules."
       : "As a Member, you can view, complete, and submit tasks assigned to your team."
+
+  // M-4: Escape every interpolated value that could carry user-controlled
+  // characters. senderName / siteUrl / roleText are operator-controlled but
+  // we escape them too for defense-in-depth.
+  const safeSenderName = escapeHtml(senderName)
+  const safeFullName = escapeHtml(fullName)
+  const safeEmail = escapeHtml(email)
+  const safeRoleText = escapeHtml(roleText)
+  const safeSiteUrl = encodeURI(siteUrl)
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -125,27 +148,27 @@ export async function sendWelcomeEmail({ email, fullName, role, password }: Welc
       <body>
         <div class="container">
           <div class="header">
-            <h1>Welcome to ${senderName}</h1>
+            <h1>Welcome to ${safeSenderName}</h1>
           </div>
           <div class="content">
-            <h2>Hi ${fullName},</h2>
+            <h2>Hi ${safeFullName},</h2>
             <p>Your account has been successfully created. We're excited to have you on board!</p>
             
-            <p>${roleText}</p>
+            <p>${safeRoleText}</p>
 
             <div class="credentials">
-              <p><strong>Login Email:</strong> ${email}</p>
+              <p><strong>Login Email:</strong> ${safeEmail}</p>
               <p style="font-size: 13px; margin-top: 15px; color: #6b7280;">Your temporary password has been shared with you separately via a secure channel. You will be required to change your password upon your first login.</p>
             </div>
 
             <div class="button-container">
-              <a href="${siteUrl}/auth/login" class="button">Log In to Your Account</a>
+              <a href="${safeSiteUrl}/auth/login" class="button">Log In to Your Account</a>
             </div>
             
             <p style="font-size: 14px;">If you have any questions, feel free to contact your administrator.</p>
           </div>
           <div class="footer">
-            &copy; ${new Date().getFullYear()} ${senderName}. All rights reserved.
+            &copy; ${new Date().getFullYear()} ${safeSenderName}. All rights reserved.
           </div>
         </div>
       </body>
@@ -268,20 +291,20 @@ export async function sendPasswordResetEmail(email: string, resetLink: string) {
       <body>
         <div class="container">
           <div class="header">
-            <h1>${senderName}</h1>
+            <h1>${escapeHtml(senderName)}</h1>
           </div>
           <div class="content">
             <h2>Password Reset Request</h2>
             <p>We received a request to reset your password. Click the button below to choose a new password.</p>
             
             <div class="button-container">
-              <a href="${resetLink}" class="button">Reset Password</a>
+              <a href="${encodeURI(resetLink)}" class="button">Reset Password</a>
             </div>
             
             <p style="font-size: 14px; margin-top: 30px;">If you didn't request a password reset, you can safely ignore this email. The link will expire in 1 hour.</p>
           </div>
           <div class="footer">
-            &copy; ${new Date().getFullYear()} ${senderName}. All rights reserved.
+            &copy; ${new Date().getFullYear()} ${escapeHtml(senderName)}. All rights reserved.
           </div>
         </div>
       </body>

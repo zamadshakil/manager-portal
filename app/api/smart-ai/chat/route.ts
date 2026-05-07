@@ -1379,16 +1379,19 @@ export async function POST(req: Request) {
     // failure mode the user reported.
     const res = result.toUIMessageStreamResponse({
       onError: (error) => {
-        const msg =
+        // H-9: Always log the full error server-side, but never forward
+        // raw provider / DB error text to the browser. Provider errors can
+        // contain API key fragments, model IDs, internal hostnames, and
+        // PostgREST schema hints — all of which help an attacker map the
+        // backend. The user only needs a generic, safe message.
+        const rawMsg =
           error instanceof Error
             ? error.message
             : typeof error === "string"
               ? error
-              : "An unexpected error occurred while generating a response."
-        console.error("[smart-ai] stream emit error:", msg)
-        // Trim noise like provider auth keys before sending to client.
-        if (msg.length > 500) return msg.slice(0, 500) + "…"
-        return msg
+              : ""
+        console.error("[smart-ai] stream emit error:", rawMsg || error)
+        return "An unexpected error occurred while generating a response. Please try again."
       },
     })
     res.headers.set("x-smart-ai-source", "native")
@@ -1397,11 +1400,14 @@ export async function POST(req: Request) {
     // This catches ONLY synchronous setup errors (bad model id, missing
     // API key surfaced before the first chunk, etc.). Stream-time errors
     // are handled by the `onError` callbacks above.
+    // H-9: Log the underlying error but return a generic message to the
+    // client so provider/model identifiers and stack details don't leak.
     const msg = fallbackError?.message ?? String(fallbackError)
     console.error("[smart-ai] streamText setup failed:", msg)
     return NextResponse.json(
       {
-        error: `Smart AI is currently unavailable: ${msg}. Please try again later or contact your administrator if this persists.`,
+        error:
+          "Smart AI is currently unavailable. Please try again later or contact your administrator if this persists.",
       },
       { status: 503 },
     )

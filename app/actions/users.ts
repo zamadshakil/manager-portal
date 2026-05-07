@@ -40,6 +40,24 @@ export async function provisionUser(formData: FormData) {
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
 
   const admin = createAdminClient()
+
+  // M-23: A manager can only own one team. Reject up-front if the chosen
+  // team already has a different manager assigned. This complements the
+  // database-side guard and gives the admin UI a clean error message.
+  if (parsed.data.role === "manager" && parsed.data.team_id) {
+    const { data: existingTeam } = await admin
+      .from("teams")
+      .select("manager_id")
+      .eq("id", parsed.data.team_id)
+      .maybeSingle()
+    if (existingTeam?.manager_id) {
+      return {
+        ok: false,
+        error: "This team already has a manager. Reassign the existing manager first.",
+      }
+    }
+  }
+
   const { data, error } = await admin.auth.admin.createUser({
     email: parsed.data.email,
     password: parsed.data.password,
