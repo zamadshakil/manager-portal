@@ -1,11 +1,43 @@
 "use server"
 
+import { randomBytes, createHash } from "node:crypto"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireRole } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
-import { sendWelcomeEmail } from "@/lib/email"
+import { sendWelcomeEmail, sendEmailChangeVerification } from "@/lib/email"
+
+// ---------------------------------------------------------------------------
+// Email change verification helpers
+// ---------------------------------------------------------------------------
+
+/** Token lifetime for the admin-initiated email-change verification link. */
+const EMAIL_CHANGE_TOKEN_TTL_MS = 24 * 60 * 60 * 1000 // 24h
+
+function generateEmailChangeToken(): { raw: string; hash: string } {
+  // 32 random bytes → 64-char hex token. Hashed with SHA-256 before storage so
+  // a database leak cannot be replayed.
+  const raw = randomBytes(32).toString("hex")
+  const hash = createHash("sha256").update(raw).digest("hex")
+  return { raw, hash }
+}
+
+function hashEmailChangeToken(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex")
+}
+
+function getCanonicalSiteUrl(): string | null {
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (process.env.NODE_ENV === "development" ? "http://localhost:3000" : null)
+  )
+}
+
+function buildVerifyLink(siteUrl: string, userId: string, rawToken: string): string {
+  const params = new URLSearchParams({ uid: userId, token: rawToken })
+  return `${siteUrl}/auth/confirm-email-change?${params.toString()}`
+}
 
 const Schema = z
   .object({
@@ -215,49 +247,413 @@ const UpdateProfileSchema = z.object({
 
 /**
  * Update a user's full name and/or email. Only main_admin can do this.
- * Syncs the change to both Supabase Auth metadata and the profiles table.
+ *
+ * Logical flow:
+ *   1. Full-name only changes are written through immediately (low risk).
+ *   2. Email changes do NOT touch the auth email up front. Instead we:
+ *        - Validate the new address is not already used (auth + profiles).
+ *        - Generate a single-use, hashed verification token (24h TTL).
+ *        - Stash `pending_email`, the token hash, and expiry on the profile.
+ *        - Send a verification link to the NEW mailbox.
+ *      The actual swap only happens once the user clicks the link, which is
+ *      handled by `confirmEmailChange` below. Until then the UI shows the
+ *      account as "Email under verification".
+ *
+ * Returns `pendingEmail` so the caller can adjust UI copy.
  */
 export async function updateUserProfile(
   userId: string,
   fullName: string,
   email: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; pendingEmail?: string }> {
   const actor = await requireRole(["main_admin"])
 
   const parsed = UpdateProfileSchema.safeParse({ userId, full_name: fullName, email })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
 
-  // Prevent updating own email to something invalid (edge guard)
   const admin = createAdminClient()
 
-  // 1. Update Supabase Auth (email + name in metadata)
-  const { error: authError } = await admin.auth.admin.updateUserById(parsed.data.userId, {
-    email: parsed.data.email,
-    user_metadata: { full_name: parsed.data.full_name },
-  })
-
-  if (authError) return { ok: false, error: "Could not update user credentials." }
-
-  // 2. Sync profile row
-  const { error: profileError } = await admin
+  // Load the current profile so we know what changed and what to compare to.
+  const { data: targetProfile, error: targetErr } = await admin
     .from("profiles")
-    .update({ full_name: parsed.data.full_name, email: parsed.data.email })
+    .select("id, email, full_name, pending_email")
+    .eq("id", parsed.data.userId)
+    .maybeSingle()
+
+  if (targetErr || !targetProfile) {
+    return { ok: false, error: "User not found." }
+  }
+
+  const currentEmail = (targetProfile.email ?? "").trim().toLowerCase()
+  const requestedEmail = parsed.data.email.trim().toLowerCase()
+  const currentName = (targetProfile.full_name ?? "").trim()
+  const requestedName = parsed.data.full_name.trim()
+  const emailChanged = requestedEmail !== currentEmail
+
+  // ---------------------------------------------------------------------
+  // 1. Always sync the full name immediately if it changed.
+  // ---------------------------------------------------------------------
+  if (requestedName !== currentName) {
+    const { error: authNameErr } = await admin.auth.admin.updateUserById(parsed.data.userId, {
+      user_metadata: { full_name: requestedName },
+    })
+    if (authNameErr) {
+      console.error("[updateUserProfile] auth metadata update failed:", authNameErr.message)
+      return { ok: false, error: "Could not update user credentials." }
+    }
+    const { error: profileNameErr } = await admin
+      .from("profiles")
+      .update({ full_name: requestedName })
+      .eq("id", parsed.data.userId)
+    if (profileNameErr) {
+      console.error("[updateUserProfile] profile name update failed:", profileNameErr.message)
+      return { ok: false, error: "Could not update profile." }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // 2. If only the name changed, we're done. Optionally clear any stale
+  //    pending email change request from earlier sessions.
+  // ---------------------------------------------------------------------
+  if (!emailChanged) {
+    await logActivity({
+      actorId: actor.id,
+      teamId: null,
+      action: "user.profile_updated",
+      entityType: "profile",
+      entityId: parsed.data.userId,
+      metadata: { full_name: requestedName, email: targetProfile.email },
+    })
+    revalidatePath("/dashboard/team")
+    revalidatePath("/dashboard/admin/users")
+    return { ok: true }
+  }
+
+  // ---------------------------------------------------------------------
+  // 3. Email change → verification flow.
+  // ---------------------------------------------------------------------
+  // 3a. Reject if the new address already belongs to another active profile.
+  const { data: collidingProfile } = await admin
+    .from("profiles")
+    .select("id")
+    .ilike("email", parsed.data.email)
+    .neq("id", parsed.data.userId)
+    .maybeSingle()
+  if (collidingProfile) {
+    return { ok: false, error: "That email is already in use by another account." }
+  }
+
+  // 3b. Reject if another user already has a pending change to that address.
+  const { data: collidingPending } = await admin
+    .from("profiles")
+    .select("id")
+    .ilike("pending_email", parsed.data.email)
+    .neq("id", parsed.data.userId)
+    .maybeSingle()
+  if (collidingPending) {
+    return { ok: false, error: "That email already has a verification pending on another account." }
+  }
+
+  // 3c. We need a valid site URL to build the verification link. Without it
+  //     we cannot safely deliver the user a working confirmation page.
+  const siteUrl = getCanonicalSiteUrl()
+  if (!siteUrl) {
+    console.error("[updateUserProfile] NEXT_PUBLIC_SITE_URL not set — cannot generate verification link.")
+    return { ok: false, error: "Server is not configured to send verification links." }
+  }
+
+  // 3d. Generate token + persist hashed copy on the profile row.
+  const { raw, hash } = generateEmailChangeToken()
+  const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TOKEN_TTL_MS).toISOString()
+
+  const { error: pendingErr } = await admin
+    .from("profiles")
+    .update({
+      pending_email: parsed.data.email,
+      email_change_token_hash: hash,
+      email_change_token_expires_at: expiresAt,
+      email_change_requested_at: new Date().toISOString(),
+      email_change_requested_by: actor.id,
+    })
     .eq("id", parsed.data.userId)
 
-  if (profileError) return { ok: false, error: "Could not update profile." }
+  if (pendingErr) {
+    console.error("[updateUserProfile] could not persist pending email change:", pendingErr.message)
+    return { ok: false, error: "Could not stage the email change. Please try again." }
+  }
+
+  // 3e. Send the verification email to the NEW address.
+  const verifyLink = buildVerifyLink(siteUrl, parsed.data.userId, raw)
+  const sent = await sendEmailChangeVerification({
+    newEmail: parsed.data.email,
+    oldEmail: targetProfile.email ?? "",
+    fullName: requestedName || targetProfile.full_name || parsed.data.email,
+    verifyLink,
+    expiresAt,
+  }).catch((err) => {
+    console.error("[updateUserProfile] sendEmailChangeVerification threw:", err)
+    return false
+  })
+
+  if (!sent) {
+    // Roll back the pending state so the admin can retry without a stuck row.
+    await admin
+      .from("profiles")
+      .update({
+        pending_email: null,
+        email_change_token_hash: null,
+        email_change_token_expires_at: null,
+        email_change_requested_at: null,
+        email_change_requested_by: null,
+      })
+      .eq("id", parsed.data.userId)
+    return { ok: false, error: "Could not send the verification email. Please try again." }
+  }
 
   await logActivity({
     actorId: actor.id,
     teamId: null,
-    action: "user.profile_updated",
+    action: "user.email_change_requested",
     entityType: "profile",
     entityId: parsed.data.userId,
-    metadata: { full_name: parsed.data.full_name, email: parsed.data.email },
+    metadata: {
+      old_email: targetProfile.email ?? null,
+      new_email: parsed.data.email,
+    },
+  })
+
+  revalidatePath("/dashboard/team")
+  revalidatePath("/dashboard/admin/users")
+  return { ok: true, pendingEmail: parsed.data.email }
+}
+
+// ---------------------------------------------------------------------------
+// Cancel / resend / confirm helpers for the email-change verification flow.
+// ---------------------------------------------------------------------------
+
+/**
+ * Cancels a pending admin-initiated email change. The user keeps their
+ * original email. Only main_admin can do this.
+ */
+export async function cancelPendingEmailChange(
+  userId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const actor = await requireRole(["main_admin"])
+  if (!z.string().uuid().safeParse(userId).success) {
+    return { ok: false, error: "Invalid user ID." }
+  }
+  const admin = createAdminClient()
+
+  const { data: target, error: targetErr } = await admin
+    .from("profiles")
+    .select("id, email, pending_email")
+    .eq("id", userId)
+    .maybeSingle()
+
+  if (targetErr || !target) return { ok: false, error: "User not found." }
+  if (!target.pending_email) return { ok: true } // nothing to cancel
+
+  const { error: clearErr } = await admin
+    .from("profiles")
+    .update({
+      pending_email: null,
+      email_change_token_hash: null,
+      email_change_token_expires_at: null,
+      email_change_requested_at: null,
+      email_change_requested_by: null,
+    })
+    .eq("id", userId)
+
+  if (clearErr) return { ok: false, error: "Could not cancel the pending change." }
+
+  await logActivity({
+    actorId: actor.id,
+    teamId: null,
+    action: "user.email_change_cancelled",
+    entityType: "profile",
+    entityId: userId,
+    metadata: { old_email: target.email, cancelled_pending_email: target.pending_email },
   })
 
   revalidatePath("/dashboard/team")
   revalidatePath("/dashboard/admin/users")
   return { ok: true }
+}
+
+/**
+ * Resends the verification email for an existing pending change. Generates
+ * a brand-new token (rotating the old one out so previously-sent links are
+ * invalidated). Only main_admin can do this.
+ */
+export async function resendEmailChangeVerification(
+  userId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const actor = await requireRole(["main_admin"])
+  if (!z.string().uuid().safeParse(userId).success) {
+    return { ok: false, error: "Invalid user ID." }
+  }
+  const admin = createAdminClient()
+
+  const { data: target, error: targetErr } = await admin
+    .from("profiles")
+    .select("id, email, full_name, pending_email")
+    .eq("id", userId)
+    .maybeSingle()
+
+  if (targetErr || !target) return { ok: false, error: "User not found." }
+  if (!target.pending_email) {
+    return { ok: false, error: "No pending email change to resend." }
+  }
+
+  const siteUrl = getCanonicalSiteUrl()
+  if (!siteUrl) return { ok: false, error: "Server is not configured to send verification links." }
+
+  const { raw, hash } = generateEmailChangeToken()
+  const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TOKEN_TTL_MS).toISOString()
+
+  const { error: rotateErr } = await admin
+    .from("profiles")
+    .update({
+      email_change_token_hash: hash,
+      email_change_token_expires_at: expiresAt,
+      email_change_requested_at: new Date().toISOString(),
+      email_change_requested_by: actor.id,
+    })
+    .eq("id", userId)
+
+  if (rotateErr) return { ok: false, error: "Could not rotate the verification token." }
+
+  const verifyLink = buildVerifyLink(siteUrl, userId, raw)
+  const sent = await sendEmailChangeVerification({
+    newEmail: target.pending_email,
+    oldEmail: target.email ?? "",
+    fullName: target.full_name ?? target.pending_email,
+    verifyLink,
+    expiresAt,
+  }).catch((err) => {
+    console.error("[resendEmailChangeVerification] send threw:", err)
+    return false
+  })
+
+  if (!sent) return { ok: false, error: "Could not send the verification email." }
+
+  await logActivity({
+    actorId: actor.id,
+    teamId: null,
+    action: "user.email_change_resent",
+    entityType: "profile",
+    entityId: userId,
+    metadata: { pending_email: target.pending_email },
+  })
+
+  revalidatePath("/dashboard/team")
+  revalidatePath("/dashboard/admin/users")
+  return { ok: true }
+}
+
+/**
+ * Finalize a pending email change. Called by the public confirmation page
+ * (`/auth/confirm-email-change`) after the user clicks the link in their
+ * NEW mailbox. Validates the single-use token, then performs the swap on
+ * both `auth.users.email` and `public.profiles.email` and clears the
+ * pending fields.
+ *
+ * This is intentionally NOT gated by `requireRole` — the token IS the proof
+ * of authorization, since only the owner of the new mailbox can have read it.
+ */
+export async function confirmEmailChange(
+  userId: string,
+  rawToken: string,
+): Promise<{ ok: boolean; error?: string; newEmail?: string }> {
+  if (!z.string().uuid().safeParse(userId).success) {
+    return { ok: false, error: "Invalid confirmation link." }
+  }
+  if (typeof rawToken !== "string" || rawToken.length < 32 || rawToken.length > 256) {
+    return { ok: false, error: "Invalid confirmation link." }
+  }
+
+  const admin = createAdminClient()
+  const expectedHash = hashEmailChangeToken(rawToken)
+
+  const { data: target, error: targetErr } = await admin
+    .from("profiles")
+    .select(
+      "id, email, full_name, pending_email, email_change_token_hash, email_change_token_expires_at",
+    )
+    .eq("id", userId)
+    .maybeSingle()
+
+  if (targetErr || !target) {
+    return { ok: false, error: "Confirmation link is no longer valid." }
+  }
+
+  if (
+    !target.pending_email ||
+    !target.email_change_token_hash ||
+    !target.email_change_token_expires_at
+  ) {
+    return { ok: false, error: "There is no pending email change for this account." }
+  }
+
+  if (target.email_change_token_hash !== expectedHash) {
+    return { ok: false, error: "Confirmation link is invalid or has already been used." }
+  }
+
+  if (new Date(target.email_change_token_expires_at).getTime() < Date.now()) {
+    return { ok: false, error: "Confirmation link has expired. Ask your administrator to resend it." }
+  }
+
+  // Race-guard: re-check that nobody else snatched this email while the link
+  // was sitting in someone's inbox.
+  const { data: collidingProfile } = await admin
+    .from("profiles")
+    .select("id")
+    .ilike("email", target.pending_email)
+    .neq("id", userId)
+    .maybeSingle()
+  if (collidingProfile) {
+    return { ok: false, error: "That email is already in use by another account." }
+  }
+
+  // Perform the actual swap.
+  const { error: authError } = await admin.auth.admin.updateUserById(userId, {
+    email: target.pending_email,
+    email_confirm: true,
+  })
+  if (authError) {
+    console.error("[confirmEmailChange] auth update failed:", authError.message)
+    return { ok: false, error: "Could not finalize the email change." }
+  }
+
+  const { error: profileError } = await admin
+    .from("profiles")
+    .update({
+      email: target.pending_email,
+      pending_email: null,
+      email_change_token_hash: null,
+      email_change_token_expires_at: null,
+      email_change_requested_at: null,
+      email_change_requested_by: null,
+    })
+    .eq("id", userId)
+
+  if (profileError) {
+    console.error("[confirmEmailChange] profile update failed:", profileError.message)
+    return { ok: false, error: "Could not finalize the email change." }
+  }
+
+  await logActivity({
+    actorId: userId,
+    teamId: null,
+    action: "user.email_change_confirmed",
+    entityType: "profile",
+    entityId: userId,
+    metadata: { old_email: target.email, new_email: target.pending_email },
+  })
+
+  revalidatePath("/dashboard/team")
+  revalidatePath("/dashboard/admin/users")
+  return { ok: true, newEmail: target.pending_email }
 }
 
 const RoleTransitionSchema = z.object({

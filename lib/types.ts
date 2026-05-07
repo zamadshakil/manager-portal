@@ -27,6 +27,13 @@ export interface Profile {
   avatar_url: string | null
   created_at: string
   updated_at: string
+  /** Admin-initiated email change pending the user's confirmation (sent to
+   *  the new address). When non-null, the UI shows "Email under verification"
+   *  and the auth email has NOT yet changed. */
+  pending_email?: string | null
+  email_change_token_expires_at?: string | null
+  email_change_requested_at?: string | null
+  email_change_requested_by?: string | null
 }
 
 export interface Team {

@@ -2,8 +2,12 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Pencil, Loader2, XCircle, CheckCircle2 } from "lucide-react"
-import { updateUserProfile } from "@/app/actions/users"
+import { Pencil, Loader2, XCircle, MailCheck, MailWarning, Send, Ban } from "lucide-react"
+import {
+  updateUserProfile,
+  cancelPendingEmailChange,
+  resendEmailChangeVerification,
+} from "@/app/actions/users"
 import type { Profile } from "@/lib/types"
 
 interface Props {
@@ -18,22 +22,65 @@ export function EditUserModal({ user, isOpen, onClose }: Props) {
   const [email, setEmail] = useState(user.email ?? "")
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
   if (!isOpen) return null
 
-  const isDirty = fullName.trim() !== (user.full_name ?? "").trim() || email.trim() !== (user.email ?? "").trim()
+  const hasPending = !!user.pending_email
+  const pendingEmail = user.pending_email ?? null
+  const expiresAt = user.email_change_token_expires_at ?? null
+
+  const isDirty =
+    fullName.trim() !== (user.full_name ?? "").trim() ||
+    email.trim().toLowerCase() !== (user.email ?? "").trim().toLowerCase()
+
+  const isEmailChange =
+    email.trim().toLowerCase() !== (user.email ?? "").trim().toLowerCase() && email.trim().length > 0
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!isDirty) return
     setError(null)
+    setSuccess(null)
     startTransition(async () => {
       const result = await updateUserProfile(user.id, fullName.trim(), email.trim())
       if (result.ok) {
         router.refresh()
-        onClose()
+        if (result.pendingEmail) {
+          setSuccess(`Verification email sent to ${result.pendingEmail}. The change will take effect once they confirm.`)
+        } else {
+          onClose()
+        }
       } else {
         setError(result.error ?? "An unexpected error occurred.")
+      }
+    })
+  }
+
+  function handleCancelPending() {
+    setError(null)
+    setSuccess(null)
+    startTransition(async () => {
+      const res = await cancelPendingEmailChange(user.id)
+      if (res.ok) {
+        router.refresh()
+        setSuccess("Pending email change cancelled.")
+      } else {
+        setError(res.error ?? "Could not cancel the pending change.")
+      }
+    })
+  }
+
+  function handleResendVerification() {
+    setError(null)
+    setSuccess(null)
+    startTransition(async () => {
+      const res = await resendEmailChangeVerification(user.id)
+      if (res.ok) {
+        router.refresh()
+        setSuccess(`Verification email resent${pendingEmail ? ` to ${pendingEmail}` : ""}.`)
+      } else {
+        setError(res.error ?? "Could not resend the verification email.")
       }
     })
   }
@@ -116,19 +163,82 @@ export function EditUserModal({ user, isOpen, onClose }: Props) {
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                 autoComplete="off"
               />
-              {email.trim() !== (user.email ?? "").trim() && (
-                <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                  <CheckCircle2 className="h-3 w-3 shrink-0" />
-                  Email change will take effect immediately. The user's next login must use the new address.
+              {isEmailChange && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
+                  <MailWarning className="h-3.5 w-3.5 shrink-0 mt-[1px]" />
+                  <span>
+                    A verification link will be sent to the <strong>new address</strong>.
+                    The change only takes effect after the user confirms it — until then,
+                    they keep signing in with the current email.
+                  </span>
                 </p>
               )}
             </div>
 
+            {/* Pending verification banner — shown when there is already an
+                outstanding email change request for this user. */}
+            {hasPending && (
+              <div className="rounded-xl border border-amber-300/60 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 p-3.5 space-y-2.5">
+                <div className="flex items-start gap-2">
+                  <MailWarning className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-[2px]" aria-hidden="true" />
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] font-semibold text-amber-900 dark:text-amber-200">
+                      Email under verification
+                    </p>
+                    <p className="text-[11.5px] text-amber-800/80 dark:text-amber-200/80 leading-relaxed">
+                      Pending change to{" "}
+                      <span className="font-mono font-semibold break-all">{pendingEmail}</span>
+                      {expiresAt ? (
+                        <>
+                          {" "}— link expires{" "}
+                          {new Date(expiresAt).toLocaleString(undefined, {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          })}
+                          .
+                        </>
+                      ) : (
+                        "."
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pl-6">
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-amber-300/70 bg-white/70 px-2.5 py-1.5 text-[11.5px] font-semibold text-amber-900 transition-colors hover:bg-white disabled:opacity-50 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/25"
+                  >
+                    <Send className="h-3.5 w-3.5" aria-hidden="true" />
+                    Resend verification
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelPending}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-amber-300/70 bg-white/70 px-2.5 py-1.5 text-[11.5px] font-semibold text-amber-900 transition-colors hover:bg-white disabled:opacity-50 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/25"
+                  >
+                    <Ban className="h-3.5 w-3.5" aria-hidden="true" />
+                    Cancel pending change
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Success banner */}
+            {success && (
+              <p className="text-[12px] font-semibold text-emerald-700 dark:text-emerald-400 flex items-start gap-1.5 animate-in slide-in-from-top-2">
+                <MailCheck className="h-4 w-4 shrink-0 mt-[1px]" aria-hidden="true" />
+                <span>{success}</span>
+              </p>
+            )}
+
             {/* Error */}
             {error && (
-              <p className="text-[12px] font-bold text-destructive flex items-center gap-1.5 animate-in slide-in-from-top-2">
-                <XCircle className="h-4 w-4 shrink-0" />
-                {error}
+              <p className="text-[12px] font-bold text-destructive flex items-start gap-1.5 animate-in slide-in-from-top-2">
+                <XCircle className="h-4 w-4 shrink-0 mt-[1px]" />
+                <span>{error}</span>
               </p>
             )}
           </div>

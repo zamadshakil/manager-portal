@@ -204,6 +204,208 @@ export async function sendWelcomeEmail({ email, fullName, role, password }: Welc
   }
 }
 
+export interface EmailChangeVerificationProps {
+  /** The NEW email address — verification mail goes here. */
+  newEmail: string
+  /** Display name of the user whose email is being changed. */
+  fullName: string
+  /** Previous email of record (shown in the body for trust signals). */
+  oldEmail: string
+  /** Absolute URL with the one-time token the user must click. */
+  verifyLink: string
+  /** ISO string for when the token expires (rendered for the user). */
+  expiresAt: string
+}
+
+/**
+ * Sends a verification email to the NEW email address whenever a Main Admin
+ * initiates an email change for another user. The auth email is only swapped
+ * after the user clicks this link — that's the whole point of the flow.
+ */
+export async function sendEmailChangeVerification({
+  newEmail,
+  fullName,
+  oldEmail,
+  verifyLink,
+  expiresAt,
+}: EmailChangeVerificationProps) {
+  const apiKey = process.env.BREVO_API_KEY
+  const senderEmail = process.env.BREVO_SENDER_EMAIL
+  const senderName = process.env.BREVO_SENDER_NAME || "AI Manager Portal"
+
+  if (!apiKey || !senderEmail) {
+    console.warn("[email] BREVO_API_KEY or BREVO_SENDER_EMAIL is missing. Skipping email-change verification dispatch.")
+    return false
+  }
+
+  const safeSenderName = escapeHtml(senderName)
+  const safeFullName = escapeHtml(fullName)
+  const safeNewEmail = escapeHtml(newEmail)
+  const safeOldEmail = escapeHtml(oldEmail)
+  const safeVerifyLink = encodeURI(verifyLink)
+  const safeExpires = escapeHtml(
+    new Date(expiresAt).toLocaleString("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }),
+  )
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f3f4f6;
+            margin: 0;
+            padding: 40px 20px;
+            color: #1f2937;
+          }
+          .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            overflow: hidden;
+          }
+          .header {
+            background-color: #111827;
+            padding: 30px;
+            text-align: center;
+          }
+          .header h1 {
+            color: #ffffff;
+            margin: 0;
+            font-size: 22px;
+            font-weight: 600;
+          }
+          .content { padding: 36px 30px; }
+          .content h2 {
+            margin-top: 0;
+            font-size: 19px;
+            color: #111827;
+          }
+          .content p {
+            line-height: 1.6;
+            margin-bottom: 18px;
+            color: #4b5563;
+            font-size: 14.5px;
+          }
+          .change-card {
+            background-color: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 18px 20px;
+            margin: 24px 0;
+            font-size: 14px;
+          }
+          .change-card .row { margin: 4px 0; }
+          .change-card .label {
+            display: inline-block;
+            min-width: 90px;
+            color: #6b7280;
+            font-weight: 500;
+          }
+          .change-card .value {
+            color: #111827;
+            font-weight: 600;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          }
+          .button-container {
+            text-align: center;
+            margin-top: 36px;
+            margin-bottom: 12px;
+          }
+          .button {
+            display: inline-block;
+            background-color: #2563eb;
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 13px 28px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 15px;
+          }
+          .meta {
+            font-size: 12.5px;
+            color: #6b7280;
+            margin-top: 18px;
+            line-height: 1.55;
+          }
+          .footer {
+            background-color: #f9fafb;
+            padding: 18px;
+            text-align: center;
+            font-size: 12.5px;
+            color: #6b7280;
+            border-top: 1px solid #e5e7eb;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Confirm your new email</h1>
+          </div>
+          <div class="content">
+            <h2>Hi ${safeFullName},</h2>
+            <p>An administrator on <strong>${safeSenderName}</strong> requested to change the email address on your account. To keep your account secure, you must confirm the change from this new mailbox.</p>
+
+            <div class="change-card">
+              <div class="row"><span class="label">Previous email:</span> <span class="value">${safeOldEmail}</span></div>
+              <div class="row"><span class="label">New email:</span> <span class="value">${safeNewEmail}</span></div>
+            </div>
+
+            <div class="button-container">
+              <a href="${safeVerifyLink}" class="button">Confirm email change</a>
+            </div>
+
+            <p class="meta">If the button does not work, copy and paste this link into your browser:<br /><a href="${safeVerifyLink}" style="color:#2563eb;word-break:break-all;">${safeVerifyLink}</a></p>
+
+            <p class="meta">This link expires on <strong>${safeExpires}</strong>. Until you confirm, your account will continue to use <strong>${safeOldEmail}</strong> for sign-in and notifications.</p>
+
+            <p class="meta">If you did not expect this change, please ignore this email or contact your administrator immediately.</p>
+          </div>
+          <div class="footer">
+            &copy; ${new Date().getFullYear()} ${safeSenderName}. All rights reserved.
+          </div>
+        </div>
+      </body>
+    </html>
+  `
+
+  try {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "api-key": apiKey,
+        "content-type": "application/json",
+        "accept": "application/json",
+      },
+      body: JSON.stringify({
+        sender: { email: senderEmail, name: senderName },
+        to: [{ email: newEmail, name: fullName }],
+        subject: `Confirm your new email for ${senderName}`,
+        htmlContent,
+      }),
+    })
+
+    if (!res.ok) {
+      const errorData = await res.text()
+      console.error("[email] Failed to send email-change verification via Brevo:", errorData)
+      return false
+    }
+
+    return true
+  } catch (err) {
+    console.error("[email] Exception sending email-change verification:", err)
+    return false
+  }
+}
+
 export async function sendPasswordResetEmail(email: string, resetLink: string) {
   const apiKey = process.env.BREVO_API_KEY
   const senderEmail = process.env.BREVO_SENDER_EMAIL

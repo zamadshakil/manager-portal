@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Users, Trash2, Loader2, Eye, EyeOff, Key, Mail, ShieldCheck, Shield, Pencil } from "lucide-react"
+import { Users, Trash2, Loader2, Eye, EyeOff, Key, Mail, ShieldCheck, Shield, Pencil, MailWarning } from "lucide-react"
 import { RoleTransitionModal } from "./role-transition-modal"
 import { EditUserModal } from "./edit-user-modal"
 import { roleLabel } from "@/lib/auth-shared"
@@ -129,6 +129,18 @@ export function TeamMembers({ members, teams, isMainAdmin = false }: Props) {
                     <p className="text-[11.5px] text-muted-foreground truncate">
                       {m.email} · joined {formatRelative(m.created_at)}
                     </p>
+                    {m.pending_email && (
+                      <p
+                        className="mt-1 inline-flex items-center gap-1 rounded-md border border-amber-300/60 bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+                        title={`Awaiting verification at ${m.pending_email}`}
+                      >
+                        <MailWarning className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        Email under verification
+                        <span className="font-mono font-normal text-amber-700/90 dark:text-amber-200/80 truncate max-w-[200px]">
+                          → {m.pending_email}
+                        </span>
+                      </p>
+                    )}
                   </div>
 
                   {/* Role + Team badge */}
@@ -216,6 +228,18 @@ export function TeamMembers({ members, teams, isMainAdmin = false }: Props) {
                       <span className="text-[12px] text-muted-foreground w-14 shrink-0">Email:</span>
                       <span className="text-[12px] font-mono font-medium select-all">{m.email}</span>
                     </div>
+                    {m.pending_email && (
+                      <div className="flex items-start gap-2">
+                        <MailWarning className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-[2px]" aria-hidden="true" />
+                        <span className="text-[12px] text-muted-foreground w-14 shrink-0">Pending:</span>
+                        <span className="text-[12px] font-mono font-medium text-amber-800 dark:text-amber-200 select-all break-all">
+                          {m.pending_email}
+                          <span className="ml-1 inline-flex items-center rounded-sm bg-amber-100 px-1 py-px text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
+                            Awaiting verification
+                          </span>
+                        </span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2">
                       <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-hidden="true" />
                       <span className="text-[12px] text-muted-foreground w-14 shrink-0">Role:</span>
