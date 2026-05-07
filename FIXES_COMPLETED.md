@@ -1,3 +1,9 @@
+> **⚠️ Historical Document:** This file is a snapshot from April 30, 2026.
+> Since then, the project has migrated from Vercel to Railway, removed
+> Inngest in favour of Railway-native cron and in-process async processing,
+> and replaced Groq/Vercel Blob with OpenRouter/Cloudflare R2. The fix
+> details below are preserved as a historical record of the original audit.
+
 # Audit Fixes Completed ✅
 
 **Date:** April 30, 2026  

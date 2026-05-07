@@ -1,6 +1,6 @@
 # Hierarchia Manager Portal
 
-A comprehensive task and assignment management platform with AI-powered document validation, a conversational Smart AI assistant, and full team management. Built with Next.js 16, self-hosted Supabase on Railway, and Inngest for durable background jobs.
+A comprehensive task and assignment management platform with AI-powered document validation, a conversational Smart AI assistant, and full team management. Built with Next.js 16, self-hosted Supabase on Railway, and Railway-native background processing.
 
 ## Overview
 
@@ -13,13 +13,13 @@ The Hierarchia Manager Portal enables organizations to:
 - **Department Management** — Full CRUD for departments with member assignment and statistics
 - **Track Progress** — Monitor assignment status with real-time updates and deadline alerts
 - **AI Credit System** — Per-user usage quotas with configurable periods (daily/weekly/monthly)
-- **Automated Workflows** — Inngest-powered background jobs for validation pipeline, cron tasks, and expiration cleanup
+- **Automated Workflows** — In-process async pipeline for AI validation + Railway HTTP cron for scheduled cleanup
 
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router), React 19, Tailwind CSS 4
 - **Database**: Self-hosted Supabase on Railway (PostgreSQL + pgvector + GoTrue Auth + PostgREST + Kong)
-- **Background Jobs**: Inngest (durable step functions, 15-minute cron)
+- **Background Work**: In-process async pipeline (fire-and-forget) + Railway HTTP cron (every 15 min)
 - **AI — Validation**: OpenRouter → Gemini 2.0 Flash (via Vercel AI SDK v6) for rule-based document grading + summarisation + vision OCR
 - **AI — Smart AI Chat**: OpenRouter → GPT-4o-mini (configurable) with native tool-calling + RAG retrieval
 - **RAG**: Native pgvector (1536-dim, HNSW index) with RRF fusion (vector + BM25 full-text)
@@ -81,10 +81,7 @@ Railway Project
    ```
    Open [http://localhost:3000](http://localhost:3000) to see the application.
 
-5. **Start the Inngest dev server** (for background job processing)
-   ```bash
-   npx inngest-cli@latest dev
-   ```
+> **Note:** The AI validation pipeline runs in-process — no separate background service is needed locally.
 
 ## Project Structure
 
@@ -92,10 +89,11 @@ Railway Project
 app/
 ├── api/
 │   ├── smart-ai/           # Smart AI endpoints (chat, upload, threads, analytics, health)
-│   ├── inngest/             # Inngest webhook handler
-│   ├── pipeline/[id]/       # Legacy pipeline route
+│   ├── pipeline/[id]/       # AI validation pipeline trigger + status polling
+│   ├── cron/mark-missed/    # Railway HTTP cron endpoint (scheduled jobs)
 │   ├── ai-credits/me/       # AI credit quota endpoint
 │   ├── download/            # Authenticated file download proxy
+│   ├── admin/               # Admin database utilities
 │   └── vitals/              # Web vitals reporting
 ├── actions/                 # Server actions (submissions, tasks, materials, announcements,
 │                            #   departments, users, rules, profile, ai-credits)
@@ -128,10 +126,10 @@ components/
 
 lib/
 ├── supabase/                # Supabase clients (admin, server, client, proxy)
-├── smart-ai/                # RAG indexer, retriever, sliding-window, client
-├── inngest/                 # Inngest client + background functions
-├── llm/                     # LLM pipeline (validate.ts) + orchestrator (pipeline.ts)
-├── parse/                   # Document parsers (PDF, DOCX, PPTX, images)
+├── smart-ai/                # RAG indexer, retriever, reranker, sliding-window, pg-client
+├── llm/                     # LLM pipeline orchestrator (pipeline.ts) + validator (validate.ts)
+├── pipeline/                # In-process async submission processor (process.ts)
+├── parse/                   # Document parsers (PDF via unpdf, DOCX, PPTX, images via Gemini Vision)
 ├── data.ts                  # All read queries (single source of truth)
 ├── auth.ts                  # Role-based auth helpers
 ├── r2.ts                    # Cloudflare R2 storage client
@@ -143,7 +141,7 @@ lib/
 └── upstash-scheduler.ts     # Cron execution tracking
 
 supabase/
-└── migrations/              # SQL migrations (including RAG pgvector schema)
+└── migrations/              # SQL migrations (RAG pgvector, chat, AI credits, etc.)
 
 scripts/                     # DB migrations (001-009), backfill scripts, schema fixes
 
@@ -158,11 +156,11 @@ docs/                        # Architecture docs, audit reports, delivery guides
 - Late submission rules (`allow_late`, `require_late_reason`, `late_submission_deadline`)
 - Task metadata and versioning
 
-### AI Validation Pipeline (Inngest)
+### AI Validation Pipeline (In-Process Async)
 1. Task created with deadlines → assigned to team members
-2. Members submit documents (PDF, DOCX, PPTX, images up to 25 MB)
-3. Inngest `process-submission` function runs:
-   - **Parse**: Extract text via `pdf-parse`, `mammoth`, `officeparser`, or Gemini Vision OCR
+2. Members submit documents (PDF, DOCX, PPTX, XLSX, images, text up to 25 MB)
+3. Pipeline runs as a fire-and-forget async function in the Node.js process:
+   - **Parse**: Extract text via `unpdf`, `mammoth`, `officeparser`, or Gemini Vision OCR
    - **Validate**: Run each validation rule via Gemini 2.0 Flash (structured output, Zod schema)
    - **Summarize**: Generate executive summary + predictive flags
    - **Score**: Weighted aggregate across all rules
@@ -182,7 +180,7 @@ docs/                        # Architecture docs, audit reports, delivery guides
 - Manager assignment with statistics
 - Bulk operations
 
-### Scheduled Jobs (Inngest Cron — Every 15 Minutes)
+### Scheduled Jobs (Railway HTTP Cron — Every 15 Minutes)
 - **Mark Missed**: Updates assignments past `due_at` to "missed" if late submissions are disallowed
 - **Auto-fail Stuck**: Recovers submissions stuck in `queued`/`parsing`/`validating` for 5+ minutes
 - **Expire Announcements**: Deletes announcements past their `expires_at` date + removes from RAG
@@ -204,7 +202,6 @@ pnpm dev              # Start Next.js dev server
 pnpm build            # Production build
 pnpm start            # Run production build
 pnpm lint             # ESLint check
-npx inngest-cli dev   # Start Inngest dev server (for background jobs)
 ```
 
 ### Database Migrations
@@ -253,10 +250,10 @@ See [`.env.local.example`](./.env.local.example) for the complete list with docu
 | **Validation** | `DO_VALIDATION_MODEL`, `DO_SUMMARY_MODEL`, `DO_VISION_MODEL` | Model overrides (default: Gemini 2.0 Flash) |
 | **Storage** | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL` | Cloudflare R2 |
 | **Redis** | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Rate limiting + cron tracking |
-| **Inngest** | `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY` | Background job orchestration |
 | **Email** | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | Transactional emails |
 | **Security** | `CRON_SECRET` | Cron endpoint authentication |
 | **App** | `NEXT_PUBLIC_SITE_URL`, `NODE_ENV` | Application configuration |
+| **Database** | `SUPABASE_DB_URL` (optional) | Direct Postgres for RAG indexer (bypasses PostgREST) |
 
 ## Deployment
 
@@ -274,9 +271,9 @@ The self-hosted Supabase stack (Postgres, Kong, GoTrue, PostgREST, Storage, Real
 ### Post-Deployment Checklist
 - [ ] Verify all environment variables are set on each Railway service
 - [ ] Run database migrations via Supabase Studio SQL Editor
-- [ ] Verify Inngest functions are registered (`/api/inngest` endpoint)
+- [ ] Configure Railway cron to hit `GET /api/cron/mark-missed` every 15 minutes with `Authorization: Bearer $CRON_SECRET`
 - [ ] Test Smart AI chat with a sample query
-- [ ] Verify cron job execution via Inngest dashboard
+- [ ] Verify cron job execution via Railway logs
 
 ## Documentation
 
@@ -289,7 +286,7 @@ The self-hosted Supabase stack (Postgres, Kong, GoTrue, PostgREST, Storage, Real
 ## Contributing
 
 1. Create a feature branch from `main`
-2. Make changes and test locally (including Inngest dev server for pipeline changes)
+2. Make changes and test locally
 3. Commit with clear messages
 4. Open a pull request for review
 
@@ -307,4 +304,4 @@ For issues, questions, or feature requests, please open a GitHub issue or contac
 
 ---
 
-**Last Updated:** May 5, 2026
+**Last Updated:** May 7, 2026

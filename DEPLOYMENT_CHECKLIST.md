@@ -1,7 +1,7 @@
 # Hierarchia Manager Portal — Deployment Checklist
 
 **Platform:** Railway (all services in a single project)
-**Last Updated:** May 5, 2026
+**Last Updated:** May 7, 2026
 
 ---
 
@@ -86,8 +86,6 @@
 | `R2_PUBLIC_URL` | [ ] | Cloudflare R2 |
 | `UPSTASH_REDIS_REST_URL` | [ ] | Rate limiting + cron |
 | `UPSTASH_REDIS_REST_TOKEN` | [ ] | Rate limiting + cron |
-| `INNGEST_EVENT_KEY` | [ ] | From Inngest Cloud |
-| `INNGEST_SIGNING_KEY` | [ ] | From Inngest Cloud |
 | `OPENAI_API_KEY` | [ ] | Optional — preferred for embeddings (falls back to OpenRouter) |
 | `EMBEDDING_MODEL` | [ ] | Defaults to `openai/text-embedding-3-small` |
 | `SMART_AI_MODEL` | [ ] | Defaults to `openai/gpt-4o-mini` |
@@ -96,6 +94,7 @@
 | `CRON_SECRET` | [ ] | Cron endpoint auth |
 | `NEXT_PUBLIC_SITE_URL` | [ ] | Public portal URL |
 | `NODE_ENV` | [ ] | `production` |
+| `SUPABASE_DB_URL` | [ ] | Optional — direct Postgres for RAG indexer |
 
 ---
 
@@ -117,13 +116,11 @@ Railway monitors the `main` branch and auto-deploys on push. Monitor the deploy 
 3. Paste and execute any new migration files
 4. Verify with `\dt` or table browser
 
-### 4. Verify Inngest Registration
-1. Check Inngest Cloud dashboard
-2. Verify the `/api/inngest` endpoint is registered
-3. Confirm functions are discovered:
-   - `process-submission`
-   - `handle-submission-failure`
-   - `mark-missed-cron`
+### 4. Configure Railway Cron
+1. In Railway dashboard, set up a cron job for the manager-portal service
+2. Schedule: every 15 minutes (`*/15 * * * *`)
+3. Endpoint: `GET /api/cron/mark-missed`
+4. Header: `Authorization: Bearer $CRON_SECRET`
 
 ---
 
@@ -144,7 +141,7 @@ Railway monitors the `main` branch and auto-deploys on push. Monitor the deploy 
 - [ ] Manager can assign tasks to specific or all members
 - [ ] Member sees assigned tasks
 - [ ] Member can submit documents (PDF, DOCX, PPTX, images)
-- [ ] Submission triggers Inngest pipeline
+- [ ] Submission triggers in-process async pipeline
 - [ ] Pipeline processes: parsing → validating → scored → passed/failed
 - [ ] Late submission flow works with reason
 
@@ -167,9 +164,9 @@ Railway monitors the `main` branch and auto-deploys on push. Monitor the deploy 
 - [ ] Admin can assign managers
 - [ ] Cannot delete departments with active tasks
 
-### Background Jobs
+### Scheduled Jobs (Railway HTTP Cron)
 
-- [ ] 15-minute cron fires via Inngest
+- [ ] Railway cron hits `/api/cron/mark-missed` every 15 minutes
 - [ ] Missed assignments are marked correctly
 - [ ] Stuck submissions are recovered
 - [ ] Expired announcements are deleted
@@ -214,10 +211,10 @@ git push origin main
 - Monitor deploy logs for errors
 - Check memory/CPU usage
 
-### Inngest Dashboard
-- Monitor function execution history
-- Check for failed runs (auto-retried up to 3 times)
-- Verify cron schedule fires every 15 minutes
+### Cron Job Monitoring
+- Verify cron execution in Railway logs (search for `[cron] mark-missed completed`)
+- Check Upstash Redis for execution tracking via `lib/upstash-scheduler.ts`
+- Monitor for missed cron runs
 
 ### Application Health
 ```bash

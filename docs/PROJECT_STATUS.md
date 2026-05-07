@@ -1,11 +1,11 @@
-# Hierarchia Manager Portal — Project Status & Architecture
+﻿# Hierarchia Manager Portal — Project Status & Architecture
 
 > Living document. Update this file whenever you ship a feature, change an
 > architectural decision, or merge a major refactor. A new contributor
 > should be able to read just this file plus `README.md` and orient
 > themselves in under fifteen minutes.
 
-Last reviewed: 2026-05-05 (full architecture + documentation audit) 
+Last reviewed: 2026-05-07 (full architecture + documentation audit) 
 
 ---
 
@@ -20,7 +20,7 @@ Last reviewed: 2026-05-05 (full architecture + documentation audit)
 - **Background work:** In-process async pipeline for AI validation + Railway HTTP cron (every 15 min) for missed-deadline sweeps, stuck-submission recovery, and expiration cleanup.
 - **Rate limit / idempotency:** Upstash Redis.
 - **Email:** Brevo (transactional welcome emails on user provisioning).
-- **Deployment:** Railway (all services — portal, MCP, RAG, Supabase stack — in a single project).
+- **Deployment:** Railway (portal + self-hosted Supabase stack in a single project).
 - **Roles:** `main_admin`, `manager`, `member`. Three different views of the same dashboard.
 
 If you only remember one thing: **every mutation is a Server Action that validates with Zod, re-checks the role with `requireRole`, writes to Supabase, then `revalidatePath`s the affected routes.** Anything that bypasses that pattern is a bug.
@@ -65,12 +65,6 @@ Authentication is **Supabase Auth** (self-hosted GoTrue on Railway, email + pass
                              |                           +----->|  OpenRouter → Gemini    |
                              |                           |      |  via AI SDK v6          |
                              +---------------------------+      +--------------------------+
-                                       ^           ^
-                                       |           |
-                            +----------+--+   +----+-----------+
-                            | mcp-service |   | FastAPI (RAG)  |
-                            | (Node.js)   |   | analytics      |
-                            +-------------+   +----------------+
                                        ^
                                        |
                              +--------------------+
@@ -93,7 +87,7 @@ Authentication is **Supabase Auth** (self-hosted GoTrue on Railway, email + pass
 | `app/api/` | Route handlers: `/api/download/[id]` (RLS-checked file streaming), `/api/ai-credits/me`, `/api/vitals`. |
 | `lib/supabase/` | `client.ts` (browser SSR), `server.ts` (RSC + actions), `admin.ts` (service-role; **`server-only`**), `proxy.ts` (middleware session refresh + must-reset gate), `database.types.ts` (loose stub). |
 | `lib/llm/` | `pipeline.ts` (orchestrator), `validate.ts` (Zod-typed OpenRouter/Gemini calls + retry/backoff). |
-| `lib/parse/` | Format-specific parsers: PDF (`pdf-parse`), DOCX (`mammoth`), PPTX/.doc (`officeparser`), images (Tesseract → Gemini Vision fallback). |
+| `lib/parse/` | Format-specific parsers: PDF (`unpdf` + `@napi-rs/canvas` OCR fallback), DOCX (`mammoth`), PPTX/XLS/.doc (`officeparser`), images (Gemini Vision), text/markdown (passthrough). |
 | `lib/smart-ai/` | `indexer.ts` (pgvector document indexing), `retriever.ts` (hybrid vector+BM25 retrieval via RPC), `client.ts` (MCP client), `sliding-window.ts` (token management). |
 | `lib/pipeline/` | `process.ts` (in-process async AI validation pipeline with built-in crash recovery). |
 | `lib/data.ts` | All **read** queries used by RSC pages — single source of truth for query shapes. |
@@ -109,8 +103,7 @@ Authentication is **Supabase Auth** (self-hosted GoTrue on Railway, email + pass
 | `components/dashboard/ai-usage/` | AI credit management and usage display. |
 | `components/auth/` | Sign-in form, forgot-password form. |
 | `components/ui/` | shadcn/ui primitives. |
-| `mcp-service/` | Node.js MCP chat orchestration service (separate Railway service). |
-| `rag-service/` | Python FastAPI RAG analytics service (separate Railway service). |
+| `mcp-service/` | _(Decommissioned)_ — Former MCP chat orchestration service. All logic now in `lib/smart-ai/` and `app/api/smart-ai/`. |
 | `scripts/*.sql` | Database migrations. **Run in numeric order, top-down.** |
 | `supabase/migrations/` | RAG pgvector schema + chat schema migrations. |
 | `proxy.ts` | Edge proxy entry; delegates to `lib/supabase/proxy.ts`. |
@@ -280,18 +273,18 @@ Every action returns a discriminated `ActionResult` (`{ ok: true, … } | { ok: 
 1. **Idempotency.** `redis.set("pipeline:lock:{id}", "1", { nx: true, ex: 600 })` — first writer wins for 10 minutes. Releases in `finally`. Prevents duplicate `after()` invocations and racing retries.
 2. **LLM rate limit.** `llmLimiter` (60 / 1 min per team). If the team is over budget, the submission is parked at `needs_review` with a warning flag instead of failing.
 3. **Parse.** `lib/parse/index.ts → extractText(buf, mime)` dispatches:
-   - PDF → `pdf-parse` (we import the inner `pdf-parse/lib/pdf-parse.js` to skip its eager test-fixture read that crashes serverless).
+   - PDF → `unpdf` native text extraction; if text is sparse (< 16 chars), falls back to page-by-page OCR via `@napi-rs/canvas` + Gemini Vision (`describeImage`).
    - DOCX → `mammoth.extractRawText`.
-   - PPTX (and best-effort `.doc`) → `officeparser.parseOfficeAsync`.
-   - Images → Tesseract; if confidence is low or the text is sparse, falls back to **Groq Vision** (`describeImage`).
+   - PPTX, XLS, and best-effort `.doc` → `officeparser.parseOffice`.
+   - Images → Gemini Vision OCR directly via `describeImage`.
+   - Text/Markdown → passthrough.
    - Output is clamped to 60 KB with a `[...truncated...]` marker.
-4. **Vision fallback** triggers when the file is an image AND (text length < 60 OR OCR confidence < 60). Gemini Vision is used natively; the vision result wins only if it’s longer than the OCR result.
-5. **Validate.** Pulls all `enabled` `validation_rules` for the team (with optional `rule_ids` filtering per task). If the submission is for a task with `instructions`, a **synthetic rule** is appended (id `task:{taskId}`, weight 2, threshold 70). All rules run **in parallel** via `Promise.all`. Each call is wrapped in `withRetry(2, exp-backoff)` against OpenRouter 429/5xx.
-6. **Persist runs.** Synthetic `task:` rules are filtered out before writing `validation_runs` (they don’t have a real FK target).
-7. **Aggregate.** Weighted average of rule scores. `passed` requires every rule to pass and no `fail`-severity flag. Any hard fail → `failed`. Otherwise → `needs_review`.
-8. **Late preserves late.** If `submission.is_late` was already `true`, the final status is `late_submitted` regardless of the LLM verdict. The aggregate score, summary, and flags still reflect the AI’s judgement and surface in the submission detail page.
-9. **Mirror.** When the submission has a `task_assignment_id`, the assignment is updated to `submitted` / `late_submitted` (never `failed`/`needs_review` on the assignment row — see the asymmetry note in §4).
-10. **Index for RAG.** On successful processing, the submission content is indexed into `rag_documents` (pgvector) so Smart AI can retrieve it.
+4. **Validate.** Pulls all `enabled` `validation_rules` for the team (with optional `rule_ids` filtering per task). If the submission is for a task with `instructions`, a **synthetic rule** is appended (id `task:{taskId}`, weight 2, threshold 70). All rules run **in parallel** via `Promise.all`. Each call is wrapped in `withRetry(2, exp-backoff)` against OpenRouter 429/5xx.
+5. **Persist runs.** Synthetic `task:` rules are filtered out before writing `validation_runs` (they don't have a real FK target).
+6. **Aggregate.** Weighted average of rule scores. `passed` requires every rule to pass and no `fail`-severity flag. Any hard fail → `failed`. Otherwise → `needs_review`.
+7. **Late preserves late.** If `submission.is_late` was already `true`, the final status is `late_submitted` regardless of the LLM verdict. The aggregate score, summary, and flags still reflect the AI's judgement and surface in the submission detail page.
+8. **Mirror.** When the submission has a `task_assignment_id`, the assignment is updated to `submitted` / `late_submitted` (never `failed`/`needs_review` on the assignment row — see the asymmetry note in §4).
+9. **Index for RAG.** On successful processing, the submission content is indexed into `rag_documents` (pgvector) so Smart AI can retrieve it.
 
 ### 6.5 Cron — missed deadlines, stuck-pipeline recovery, and expiration cleanup
 
@@ -364,10 +357,7 @@ These must be set on the **Railway** service (`manager-portal`). Locally they go
 | `DO_SUMMARY_MODEL` | optional | default: `google/gemini-2.0-flash-001` |
 | `DO_VISION_MODEL` | optional | default: `google/gemini-2.0-flash-001` |
 
-| `MCP_SERVICE_URL` | server only | MCP service private Railway URL |
-| `MCP_SERVICE_TOKEN` | server only | Shared secret for MCP |
-| `RAG_SERVICE_URL` | server only | RAG service private Railway URL |
-| `RAG_SERVICE_TOKEN` | server only | Shared secret for RAG |
+| `SUPABASE_DB_URL` | optional | Direct Postgres URL for RAG indexer (bypasses PostgREST) |
 | `BREVO_API_KEY` | optional | Brevo transactional email |
 | `BREVO_SENDER_EMAIL` | optional | Sender address for emails |
 | `CRON_SECRET` | server only | shared secret for cron endpoint |
@@ -480,7 +470,6 @@ If you only want the latest changes on top of an existing database, **running 00
 
 - `app/actions/users.ts → provisionUser` `revalidatePath`s `/dashboard/admin/users`, but no such route exists today. Harmless, just a leftover.
 - The `assign_task_to_team` RPC is granted to `authenticated` but only the server action calls it (via the admin client which bypasses RLS anyway). The grant is harmless.
-- The `env.ts` module still references the deprecated `rag-service (FastAPI)` in its header comment. The actual FastAPI service exists but RAG is now native via Supabase RPC.
 
 ---
 

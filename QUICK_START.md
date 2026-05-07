@@ -5,7 +5,7 @@ Get the portal running locally in **5 minutes**.
 ## Prerequisites
 - Node.js 22+ (required by `engines` in package.json)
 - Git
-- Credentials from your team: Supabase (Railway Kong URL + JWTs), OpenRouter API key, R2, Upstash, Inngest
+- Credentials from your team: Supabase (Railway Kong URL + JWTs), OpenRouter API key, R2, Upstash
 
 ## Setup
 
@@ -24,17 +24,15 @@ cp .env.local.example .env.local
 # 4. Start dev server
 pnpm dev
 
-# 5. Start Inngest dev server (separate terminal — required for background jobs)
-npx inngest-cli@latest dev
-
-# 6. Open browser
+# 5. Open browser
 open http://localhost:3000
 ```
+
+> **Note:** The AI validation pipeline runs in-process as a fire-and-forget async function — no separate background service is needed locally. Railway HTTP cron handles scheduled jobs in production.
 
 ## Key URLs
 
 - **App:** http://localhost:3000
-- **Inngest Dashboard:** http://localhost:8288 (started by inngest-cli)
 - **Docs:** See `docs/` folder
 - **Database:** Supabase Studio on Railway (link in env vars)
 - **Redis:** Upstash console
@@ -63,10 +61,6 @@ R2_PUBLIC_URL=https://pub-<id>.r2.dev
 UPSTASH_REDIS_REST_URL=...
 UPSTASH_REDIS_REST_TOKEN=...
 
-# Background Jobs (auto-set to "local" in dev by lib/inngest/client.ts)
-INNGEST_EVENT_KEY=local
-INNGEST_SIGNING_KEY=local
-
 # Smart AI embeddings (optional — falls back to OpenRouter if unset)
 OPENAI_API_KEY=sk-...
 EMBEDDING_MODEL=openai/text-embedding-3-small
@@ -91,7 +85,7 @@ See `.env.local.example` for the **full list** with documentation for each varia
 - ⚠️ **NEVER** share credentials in Slack or email
 - ✓ Use the provided credentials from the team
 - ✓ Always refer to `.env.local.example` for what's needed
-- ✓ Inngest dev server auto-detects functions — no registration needed locally
+- ✓ The pipeline runs in-process — no separate background service needed locally
 
 ## First Time?
 
@@ -108,7 +102,6 @@ pnpm dev                    # Start Next.js dev server
 pnpm build                  # Production build
 pnpm start                  # Run production build
 pnpm lint                   # Check code style
-npx inngest-cli@latest dev  # Start Inngest dev server
 
 # Database
 # Apply migrations via Supabase Studio → SQL Editor on Railway
@@ -129,9 +122,6 @@ curl -i http://localhost:3000/api/cron/mark-missed
 **"Redis connection refused"**
 → Check `UPSTASH_REDIS_REST_URL` and token are correct in `.env.local`
 
-**Background jobs not running (submissions stuck in "queued")**
-→ Make sure `npx inngest-cli@latest dev` is running in a separate terminal
-
 **Smart AI chat returns 503**
 → Check `OPENROUTER_API_KEY` is set in `.env.local`. The chat is fully native — no external services required.
 
@@ -150,4 +140,4 @@ curl -i http://localhost:3000/api/cron/mark-missed
 
 ---
 
-**Last Updated:** May 5, 2026
+**Last Updated:** May 7, 2026

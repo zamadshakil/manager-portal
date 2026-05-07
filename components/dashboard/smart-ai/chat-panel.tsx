@@ -260,6 +260,7 @@ export function ChatPanel({
   const dispatchMessage = useCallback(
     (text: string, metadata?: PortalUIMessageMetadata) => {
       let activeThreadId = threadIdRef.current
+      const isNewThread = !activeThreadId
       if (!activeThreadId) {
         activeThreadId = crypto.randomUUID()
         setThreadId(activeThreadId)
@@ -269,8 +270,52 @@ export function ChatPanel({
       }
 
       sendMessage({ text, metadata })
-      // Refresh the sidebar immediately
-      mutate("/api/smart-ai/threads")
+
+      // Optimistic sidebar update: instantly move the active thread to
+      // the top of the list with a fresh `updated_at` and a preview of
+      // the just-sent message. Without this the sidebar only reorders
+      // when the assistant finishes streaming (sometimes 30+ seconds
+      // later), which made it feel like sorting was broken. We do
+      // `revalidate: false` here because we'll do a real revalidation
+      // in `useChat.onFinish` once the round-trip completes.
+      const nowIso = new Date().toISOString()
+      const previewText = text.slice(0, 60)
+      const tid = activeThreadId
+      mutate(
+        "/api/smart-ai/threads",
+        (current: { threads?: any[] } | undefined) => {
+          const threads = current?.threads ? [...current.threads] : []
+          const idx = threads.findIndex((t) => t?.id === tid)
+          const optimisticPreview = {
+            role: "user",
+            content: previewText,
+            created_at: nowIso,
+          }
+          if (idx >= 0) {
+            const [existing] = threads.splice(idx, 1)
+            threads.unshift({
+              ...existing,
+              updated_at: nowIso,
+              last_message: optimisticPreview,
+              message_count: (existing?.message_count ?? 0) + 1,
+            })
+          } else if (isNewThread) {
+            // Brand-new thread — synthesize a minimal entry so the
+            // sidebar shows it immediately. The server will replace
+            // this with the real row on the next revalidation.
+            threads.unshift({
+              id: tid,
+              title: previewText || "New conversation",
+              created_at: nowIso,
+              updated_at: nowIso,
+              message_count: 1,
+              last_message: optimisticPreview,
+            })
+          }
+          return { threads }
+        },
+        { revalidate: false },
+      )
     },
     [profile.id, sendMessage, updateUrlThread, mutate],
   )

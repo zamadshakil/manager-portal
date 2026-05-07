@@ -11,7 +11,7 @@ Start here if you're setting up the project for the first time:
 
 1. **[QUICK_START.md](./QUICK_START.md)** (5 min)
    - Prerequisites (Node 22+, Railway credentials)
-   - 5-step local setup (including Inngest dev server)
+   - 4-step local setup
    - Common commands & troubleshooting
 
 2. **[README.md](./README.md)** (10 min)
@@ -72,7 +72,7 @@ If you're deploying or managing the production system:
 | File | Purpose |
 |------|---------|
 | [README.md](./README.md) | Project overview, tech stack, Railway infrastructure, getting started |
-| [QUICK_START.md](./QUICK_START.md) | 5-minute local setup guide |
+| [QUICK_START.md](./QUICK_START.md) | 4-minute local setup guide |
 | [DOCUMENTATION.md](./DOCUMENTATION.md) | This file — documentation index |
 | [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md) | Deployment verification & testing |
 | [FIXES_COMPLETED.md](./FIXES_COMPLETED.md) | Historical: April 2026 audit fixes |
@@ -94,11 +94,11 @@ If you're deploying or managing the production system:
 
 | File | Purpose |
 |------|---------|
-| [.env.local.example](./.env.local.example) | Full env var template with Railway/Kong/R2/Inngest docs |
+| [.env.local.example](./.env.local.example) | Full env var template with Railway/Kong/R2 docs |
 | [railway.json](./railway.json) | Railway Railpack build + standalone deploy config |
 | [next.config.mjs](./next.config.mjs) | Security headers, CSP, standalone output, body limits |
 | [tailwind.config.ts](./tailwind.config.ts) | Design token configuration |
-| [package.json](./package.json) | Dependencies (Node ≥22, Next 16, AI SDK v6, Inngest, pgvector) |
+| [package.json](./package.json) | Dependencies (Node ≥22, Next 16, AI SDK v6, pgvector) |
 
 > **Decommissioned:** The `mcp-service/` and `rag-service/` directories
 > (and their corresponding Railway deployments) have been removed. All
@@ -117,15 +117,16 @@ If you're deploying or managing the production system:
 - [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md) — Complete specification
 - [docs/ARCHITECTURE_DIAGRAM.md](./docs/ARCHITECTURE_DIAGRAM.md) — Visual diagrams
 
-### Smart AI / RAG / MCP
+### Smart AI / RAG
 - [docs/SMART_AI_AUDIT.md](./docs/SMART_AI_AUDIT.md) — Full subsystem audit
-- [lib/smart-ai/](./lib/smart-ai/) — Indexer, retriever, client, sliding-window
+- [lib/smart-ai/](./lib/smart-ai/) — Indexer, retriever, reranker, client, sliding-window
 - [supabase/migrations/20260505_rag_documents.sql](./supabase/migrations/20260505_rag_documents.sql) — pgvector schema
 
 ### AI Validation Pipeline
-- [lib/inngest/functions.ts](./lib/inngest/functions.ts) — `processSubmission` Inngest function
+- [lib/pipeline/process.ts](./lib/pipeline/process.ts) — In-process async pipeline runner
+- [lib/llm/pipeline.ts](./lib/llm/pipeline.ts) — Pipeline orchestrator with idempotency + budget management
 - [lib/llm/validate.ts](./lib/llm/validate.ts) — Rule runner + summariser + vision (Gemini 2.0 Flash)
-- [lib/parse/](./lib/parse/) — Document parsers (PDF, DOCX, PPTX, images)
+- [lib/parse/](./lib/parse/) — Document parsers (PDF via unpdf, DOCX, PPTX, images via Gemini Vision)
 
 ### Security
 - [docs/PROJECT_STATUS.md#3-roles-rls](./docs/PROJECT_STATUS.md#3-roles-rls-and-the-principle-of-defence-in-depth) — 3-layer defense
@@ -140,7 +141,7 @@ If you're deploying or managing the production system:
 ### Data Model
 - [docs/PROJECT_STATUS.md#4-data-model](./docs/PROJECT_STATUS.md#4-data-model) — Complete schema
 - [scripts/](./scripts/) — SQL migration files (001–009)
-- [supabase/migrations/](./supabase/migrations/) — RAG + chat schema
+- [supabase/migrations/](./supabase/migrations/) — RAG + chat + AI credits schema
 
 ### Design System & Styling
 - [tailwind.config.ts](./tailwind.config.ts) — Tailwind token configuration
@@ -187,13 +188,14 @@ All documentation should include:
    - `app/layout.tsx` — Root layout
    - `app/actions/` — Server actions pattern
    - `lib/supabase/` — Database clients
-   - `lib/inngest/functions.ts` — Background jobs
+   - `lib/pipeline/process.ts` — In-process async pipeline
+   - `lib/llm/pipeline.ts` — Pipeline orchestrator
 3. Trace one end-to-end flow (create task → assign → submit → validate)
 
 ### Week 1-2 (Deep Dive)
 1. [docs/SMART_AI_AUDIT.md](./docs/SMART_AI_AUDIT.md) — Smart AI subsystem (30 min)
 2. Study the validation pipeline:
-   - [lib/inngest/functions.ts](./lib/inngest/functions.ts) — Inngest functions
+   - [lib/llm/pipeline.ts](./lib/llm/pipeline.ts) — Orchestrator
    - [lib/llm/validate.ts](./lib/llm/validate.ts) — LLM validation
 3. Study the RAG system:
    - [lib/smart-ai/indexer.ts](./lib/smart-ai/indexer.ts) — Document indexing
@@ -212,5 +214,5 @@ All documentation should include:
 
 ---
 
-**Last Updated:** May 5, 2026
+**Last Updated:** May 7, 2026
 **Status:** All documentation updated to reflect current codebase
