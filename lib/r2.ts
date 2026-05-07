@@ -1,4 +1,5 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3"
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 const r2 = new S3Client({
   region: "auto",
@@ -60,6 +61,30 @@ export async function head(url: string, options?: any) {
     lastModified: res.LastModified,
     etag: res.ETag,
   }
+}
+
+/**
+ * Generate a pre-signed PUT URL so the browser can upload directly to R2,
+ * bypassing the Next.js server. Returns both the upload URL and the final
+ * public URL the client should store in the message record.
+ *
+ * @param key    R2 object key, e.g. "messaging/{convId}/{uuid}.jpg"
+ * @param contentType  MIME type of the file being uploaded
+ * @param expiresIn    Seconds until the pre-signed URL expires (default 300)
+ */
+export async function presignPut(
+  key: string,
+  contentType: string,
+  expiresIn = 300,
+): Promise<{ uploadUrl: string; publicUrl: string; key: string }> {
+  const command = new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    ContentType: contentType,
+  })
+  const uploadUrl = await getSignedUrl(r2, command, { expiresIn })
+  const publicUrl = `${PUBLIC_URL}/${key}`
+  return { uploadUrl, publicUrl, key }
 }
 
 export async function get(url: string, options?: any) {
