@@ -9,8 +9,9 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const conv = searchParams.get("conv")
-  const before = searchParams.get("before") // ISO timestamp cursor
-  const limit = Math.min(parseInt(searchParams.get("limit") ?? "50"), 100)
+  const before = searchParams.get("before") // ISO cursor — load older messages
+  const after  = searchParams.get("after")  // ISO cursor — poll for newer messages
+  const limit  = Math.min(parseInt(searchParams.get("limit") ?? "50"), 100)
 
   if (!conv) return NextResponse.json({ error: "conv is required" }, { status: 400 })
 
@@ -25,28 +26,35 @@ export async function GET(req: NextRequest) {
     .maybeSingle()
   if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
+  // after-cursor polls return ascending (oldest-first already); before-cursor
+  // returns descending then we reverse client-side to get oldest-first.
+  const ascending = !!after
+
   let query = admin
     .from("messages")
     .select(`
       id, conversation_id, sender_id, content, type,
       media_url, media_metadata, reply_to_id, edited_at, deleted_at, created_at,
       sender:profiles!sender_id ( id, full_name, email, avatar_url ),
-      reactions:message_reactions ( message_id, user_id, emoji, created_at )
+      reactions:message_reactions ( message_id, user_id, emoji, created_at ),
+      reply_to:messages!reply_to_id (
+        id, content, type,
+        sender:profiles!sender_id ( id, full_name, email, avatar_url )
+      )
     `)
     .eq("conversation_id", conv)
     .is("deleted_at", null)
-    .order("created_at", { ascending: false })
+    .order("created_at", { ascending })
     .limit(limit)
 
-  if (before) {
-    query = query.lt("created_at", before)
-  }
+  if (after)  query = query.gt("created_at", after)
+  if (before) query = query.lt("created_at", before)
 
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Return oldest-first so the UI can append naturally
-  return NextResponse.json((data ?? []).reverse())
+  // after-queries are already ascending; before-queries need reversal
+  return NextResponse.json(ascending ? (data ?? []) : (data ?? []).reverse())
 }
 
 export async function POST(req: NextRequest) {

@@ -2,7 +2,7 @@
 
 import { useRef, useState, useCallback } from "react"
 import { Send, Paperclip, Smile, X } from "lucide-react"
-import EmojiPicker, { type EmojiClickData } from "emoji-picker-react"
+import EmojiPicker, { EmojiStyle, type EmojiClickData } from "emoji-picker-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
@@ -182,7 +182,12 @@ export function MessageComposer({
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" side="top" className="p-0 border-0 shadow-lg w-auto">
-            <EmojiPicker onEmojiClick={handleEmojiClick} height={380} />
+            <EmojiPicker
+              onEmojiClick={handleEmojiClick}
+              height={380}
+              emojiStyle={EmojiStyle.NATIVE}
+              lazyLoadEmojis
+            />
           </PopoverContent>
         </Popover>
 

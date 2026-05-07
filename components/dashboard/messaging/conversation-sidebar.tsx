@@ -47,12 +47,19 @@ export function ConversationSidebar({
   profiles,
 }: ConversationSidebarProps) {
   const [search, setSearch] = useState("")
+  const [filter, setFilter] = useState<"all" | "unread" | "groups">("all")
   const [modalOpen, setModalOpen] = useState(false)
   const [modalType, setModalType] = useState<"dm" | "group">("dm")
 
+  const unreadCount = conversations.filter((c) => (c.unread_count ?? 0) > 0).length
+  const groupCount = conversations.filter((c) => c.type === "group").length
+
   const filtered = conversations.filter((c) => {
     const name = convDisplayName(c, currentUserId).toLowerCase()
-    return name.includes(search.toLowerCase())
+    if (!name.includes(search.toLowerCase())) return false
+    if (filter === "unread") return (c.unread_count ?? 0) > 0
+    if (filter === "groups") return c.type === "group"
+    return true
   })
 
   return (
@@ -83,7 +90,7 @@ export function ConversationSidebar({
       </div>
 
       {/* Search */}
-      <div className="px-3 py-2 border-b border-border">
+      <div className="px-3 pt-2 pb-1">
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
@@ -93,6 +100,31 @@ export function ConversationSidebar({
             className="pl-8 h-8 text-sm"
           />
         </div>
+      </div>
+
+      {/* Filter pills */}
+      <div className="flex gap-1.5 px-3 pb-2 overflow-x-auto scrollbar-none border-b border-border">
+        {(["all", "unread", "groups"] as const).map((f) => {
+          const badge = f === "unread" ? unreadCount : f === "groups" ? groupCount : null
+          const label =
+            f === "all" ? "All" :
+            f === "unread" ? `Unread${badge ? ` ${badge}` : ""}` :
+            `Groups${badge ? ` ${badge}` : ""}`
+          return (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={cn(
+                "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                filter === f
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          )
+        })}
       </div>
 
       {/* List */}

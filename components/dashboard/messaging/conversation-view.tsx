@@ -11,6 +11,7 @@ import { TypingIndicator } from "./typing-indicator"
 import { useConversationRealtime } from "@/hooks/use-conversation-realtime"
 import type { Conversation, Message, MessageReaction, TypingUser } from "@/lib/types"
 import { GroupInfoSheet } from "./group-info-sheet"
+import { DmInfoSheet } from "./dm-info-sheet"
 
 interface ConversationViewProps {
   conversation: Conversation
@@ -262,11 +263,9 @@ export function ConversationView({
             )}
           </div>
         </div>
-        {isGroup && (
-          <Button variant="ghost" size="icon" onClick={() => setInfoOpen(true)}>
-            <Info className="h-4 w-4" />
-          </Button>
-        )}
+        <Button variant="ghost" size="icon" onClick={() => setInfoOpen(true)}>
+          <Info className="h-4 w-4" />
+        </Button>
       </div>
 
       {/* Messages */}
@@ -300,8 +299,15 @@ export function ConversationView({
         onTyping={sendTyping}
       />
 
-      {isGroup && (
+      {isGroup ? (
         <GroupInfoSheet
+          open={infoOpen}
+          conversation={conversation}
+          currentUserId={currentUserId}
+          onClose={() => setInfoOpen(false)}
+        />
+      ) : (
+        <DmInfoSheet
           open={infoOpen}
           conversation={conversation}
           currentUserId={currentUserId}

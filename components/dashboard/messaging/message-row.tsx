@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { format, isToday, isYesterday } from "date-fns"
-import { Clock, AlertCircle, Pencil, Trash2, SmilePlus, CornerUpRight, FileText } from "lucide-react"
+import { Clock, AlertCircle, Pencil, Trash2, SmilePlus, CornerUpRight, FileText, CheckCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -44,11 +44,13 @@ export function MessageRow({
 }: MessageRowProps) {
   const [hovered, setHovered] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
+  // Keep actions visible while any dropdown is open to prevent flickering
+  const showActions = hovered || emojiOpen
 
   if (message.deleted_at) {
     return (
-      <div className="px-4 py-1.5 text-sm text-muted-foreground italic">
-        This message was deleted
+      <div className={cn("px-4 py-1.5 flex", isOwn ? "justify-end" : "justify-start")}>
+        <span className="text-xs text-muted-foreground italic">This message was deleted</span>
       </div>
     )
   }
@@ -60,61 +62,97 @@ export function MessageRow({
   const reactionMap = new Map<string, { count: number; mine: boolean }>()
   for (const r of message.reactions ?? []) {
     const existing = reactionMap.get(r.emoji) ?? { count: 0, mine: false }
-    reactionMap.set(r.emoji, {
-      count: existing.count + 1,
-      mine: existing.mine,
-    })
+    reactionMap.set(r.emoji, { count: existing.count + 1, mine: existing.mine })
   }
 
   return (
+    // DOM order: [Avatar] [BubbleColumn] [ActionBar]
+    // flex-row        → Avatar LEFT, Bubble MIDDLE, Actions RIGHT  (other messages)
+    // flex-row-reverse → Avatar RIGHT, Bubble MIDDLE, Actions LEFT  (own messages)
     <div
-      className={cn("group flex gap-3 px-4 py-1.5 hover:bg-accent/30 rounded-lg")}
+      className={cn("flex items-end gap-2 px-4 py-1", isOwn ? "flex-row-reverse" : "flex-row")}
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => { setHovered(false); setEmojiOpen(false) }}
+      onMouseLeave={() => { if (!emojiOpen) setHovered(false) }}
     >
-      {/* Avatar */}
-      <div className="shrink-0 mt-0.5">
-        <Avatar className="h-8 w-8">
+      {/* Avatar — extreme right for own, extreme left for others */}
+      <div className="shrink-0 mb-0.5">
+        <Avatar className="h-7 w-7">
           <AvatarImage src={message.sender?.avatar_url ?? undefined} />
-          <AvatarFallback className="text-[11px]">{initials}</AvatarFallback>
+          <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
         </Avatar>
       </div>
 
-      <div className="flex-1 min-w-0">
-        {/* Header */}
-        <div className="flex items-baseline gap-2">
-          <span className="text-sm font-semibold leading-snug truncate">{senderName}</span>
-          <span className="text-[11px] text-muted-foreground shrink-0">{formatTs(message.created_at)}</span>
-          {message.edited_at && (
-            <span className="text-[10px] text-muted-foreground">(edited)</span>
-          )}
-          {message.status === "sending" && (
-            <Clock className="h-3 w-3 text-muted-foreground" />
-          )}
-          {message.status === "failed" && (
-            <button
-              onClick={() => onRetry?.(message)}
-              className="flex items-center gap-1 text-[11px] text-destructive hover:underline"
-            >
-              <AlertCircle className="h-3 w-3" />
-              Failed — retry
-            </button>
-          )}
-        </div>
-
-        {/* Reply preview */}
-        {message.reply_to && (
-          <div className="border-l-2 border-primary/40 pl-2 mb-1 text-[12px] text-muted-foreground truncate">
-            {message.reply_to.sender?.full_name ?? "Someone"}: {message.reply_to.content ?? "…"}
-          </div>
+      {/* Bubble column */}
+      <div className={cn("flex flex-col min-w-0 max-w-[65%]", isOwn ? "items-end" : "items-start")}>
+        {/* Sender name — only for incoming messages */}
+        {!isOwn && (
+          <span className="text-[11px] font-semibold text-primary px-1 mb-0.5 truncate max-w-full">
+            {senderName}
+          </span>
         )}
 
-        {/* Content */}
-        <MessageContent message={message} />
+        {/* Speech bubble */}
+        <div
+          className={cn(
+            "relative rounded-2xl px-3 py-2 text-sm shadow-sm break-words",
+            isOwn
+              ? "bg-primary text-primary-foreground rounded-tr-sm"
+              : "bg-muted text-foreground rounded-tl-sm",
+          )}
+        >
+          {/* Reply-to preview inside bubble */}
+          {message.reply_to && (
+            <div
+              className={cn(
+                "border-l-2 pl-2 pr-1 mb-2 py-1 rounded text-[11px] leading-snug",
+                isOwn
+                  ? "border-primary-foreground/50 bg-primary-foreground/10 text-primary-foreground/80"
+                  : "border-primary/50 bg-background/30 text-muted-foreground",
+              )}
+            >
+              <p className="font-semibold truncate">
+                {message.reply_to.sender?.full_name ?? "Someone"}
+              </p>
+              <p className="truncate">{message.reply_to.content ?? "Media"}</p>
+            </div>
+          )}
 
-        {/* Reactions */}
+          {/* Message content */}
+          <MessageContent message={message} isOwn={isOwn} />
+
+          {/* Timestamp + delivery status row (inside bubble) */}
+          <div className="flex items-center justify-end gap-1 mt-1">
+            <span
+              className={cn(
+                "text-[10px] select-none",
+                isOwn ? "text-primary-foreground/70" : "text-muted-foreground",
+              )}
+            >
+              {formatTs(message.created_at)}
+              {message.edited_at ? " (edited)" : ""}
+            </span>
+            {isOwn && message.status === "sending" && (
+              <Clock className="h-3 w-3 text-primary-foreground/70 shrink-0" />
+            )}
+            {isOwn && message.status !== "sending" && message.status !== "failed" && (
+              <CheckCheck className="h-3 w-3 text-primary-foreground/70 shrink-0" />
+            )}
+          </div>
+        </div>
+
+        {/* Failed retry — below bubble */}
+        {message.status === "failed" && (
+          <button
+            onClick={() => onRetry?.(message)}
+            className="flex items-center gap-1 text-[11px] text-destructive hover:underline mt-0.5 px-1"
+          >
+            <AlertCircle className="h-3 w-3" /> Failed — retry
+          </button>
+        )}
+
+        {/* Reactions — below bubble */}
         {reactionMap.size > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1.5">
+          <div className={cn("flex flex-wrap gap-1 mt-1", isOwn ? "justify-end" : "justify-start")}>
             {Array.from(reactionMap.entries()).map(([emoji, { count, mine }]) => (
               <button
                 key={emoji}
@@ -133,74 +171,83 @@ export function MessageRow({
         )}
       </div>
 
-      {/* Action bar — visible on hover */}
-      {hovered && (
-        <div className="flex items-center gap-0.5 shrink-0 -mt-0.5">
-          {/* Quick emoji picker */}
-          <DropdownMenu open={emojiOpen} onOpenChange={setEmojiOpen}>
+      {/* Action bar — always mounted, opacity-toggled to prevent unmount-flicker */}
+      <div
+        className={cn(
+          "flex items-center gap-0.5 shrink-0 self-end mb-0.5 transition-opacity duration-100",
+          showActions ? "opacity-100" : "opacity-0 pointer-events-none",
+        )}
+      >
+        {/* Quick emoji reactions */}
+        <DropdownMenu
+          open={emojiOpen}
+          onOpenChange={(open) => {
+            setEmojiOpen(open)
+            if (!open) setHovered(false)
+          }}
+        >
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-7 w-7">
+              <SmilePlus className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align={isOwn ? "start" : "end"} className="p-1">
+            <div className="flex gap-1">
+              {QUICK_EMOJIS.map((e) => (
+                <button
+                  key={e}
+                  onClick={() => { onReact(message.id, e); setEmojiOpen(false) }}
+                  className="text-lg hover:scale-125 transition-transform p-0.5"
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onReply(message)}>
+          <CornerUpRight className="h-3.5 w-3.5" />
+        </Button>
+
+        {isOwn && (
+          <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7">
-                <SmilePlus className="h-3.5 w-3.5" />
+                <Pencil className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="p-1">
-              <div className="flex gap-1">
-                {QUICK_EMOJIS.map((e) => (
-                  <button
-                    key={e}
-                    onClick={() => { onReact(message.id, e); setEmojiOpen(false) }}
-                    className="text-lg hover:scale-125 transition-transform"
-                  >
-                    {e}
-                  </button>
-                ))}
-              </div>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onEdit(message)}>
+                <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => onDelete(message.id)}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onReply(message)}>
-            <CornerUpRight className="h-3.5 w-3.5" />
-          </Button>
-
-          {isOwn && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7">
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => onEdit(message)}>
-                  <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => onDelete(message.id)}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
 
-function MessageContent({ message }: { message: Message }) {
+function MessageContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
   if (message.type === "text") {
     return <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</p>
   }
 
   if (message.type === "image") {
     return (
-      <div className="mt-1 max-w-sm">
+      <div className="mt-1 max-w-[260px]">
         <img
           src={message.media_url ?? ""}
           alt="image"
           loading="lazy"
-          className="rounded-lg object-cover max-h-64 w-auto border border-border"
+          className="rounded-lg object-cover max-h-64 w-auto"
         />
       </div>
     )
@@ -216,27 +263,30 @@ function MessageContent({ message }: { message: Message }) {
 
   if (message.type === "video") {
     return (
-      <div className="mt-1 max-w-sm">
-        <video
-          controls
-          src={message.media_url ?? ""}
-          className="rounded-lg border border-border max-h-64 w-auto"
-        />
+      <div className="mt-1 max-w-[260px]">
+        <video controls src={message.media_url ?? ""} className="rounded-lg max-h-64 w-auto" />
       </div>
     )
   }
 
-  // file
   const meta = message.media_metadata as { name?: string; size?: number } | null
   return (
     <a
       href={message.media_url ?? "#"}
       target="_blank"
       rel="noopener noreferrer"
-      className="mt-1 flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-accent transition-colors w-fit"
+      className={cn(
+        "mt-1 flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:opacity-80 transition-opacity w-fit",
+        isOwn ? "bg-primary-foreground/10" : "bg-background/50 border border-border",
+      )}
     >
-      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-      <span className="truncate max-w-[240px]">
+      <FileText
+        className={cn(
+          "h-4 w-4 shrink-0",
+          isOwn ? "text-primary-foreground/70" : "text-muted-foreground",
+        )}
+      />
+      <span className="truncate max-w-[200px]">
         {meta?.name ?? "File"}
         {meta?.size ? ` (${(meta.size / 1024).toFixed(0)} KB)` : ""}
       </span>
