@@ -93,11 +93,15 @@ export async function processSubmission(submissionId: string) {
   const redis = getRedis()
 
   // Idempotency lock — first writer wins for 10 minutes.
+  // ioredis SET signature: SET key value EX seconds NX → returns "OK" or null.
   if (redis) {
-    const acquired = await redis.set(`pipeline:lock:${submissionId}`, "1", {
-      nx: true,
-      ex: 600,
-    })
+    const acquired = await redis.set(
+      `pipeline:lock:${submissionId}`,
+      "1",
+      "EX",
+      600,
+      "NX",
+    )
     if (!acquired) {
       console.warn("[pipeline] another worker holds the lock for", submissionId)
       return

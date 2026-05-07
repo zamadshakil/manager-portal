@@ -1,102 +1,189 @@
 import "server-only"
-import { Redis } from "@upstash/redis"
-import { Ratelimit } from "@upstash/ratelimit"
+import IORedis, { type Redis } from "ioredis"
+
+// ---------------------------------------------------------------------------
+// Railway-native Redis client
+// ---------------------------------------------------------------------------
+//
+// Migrated off `@upstash/redis` + `@upstash/ratelimit` because we no longer
+// run on Vercel Edge — Railway hosts a persistent Node process that can hold
+// long-lived TCP connections, so HTTP-based Upstash is no longer required.
+//
+// Configuration:
+//   - REDIS_URL — full connection string. Railway's Redis plugin exposes this
+//     automatically (e.g. `redis://default:<pwd>@<host>:6379` or
+//     `rediss://...` for TLS). Set this in the `manager-portal` service.
+//
+// The client is a lazy singleton: we only connect on the first call to
+// `getRedis()`, which keeps cold starts cheap and avoids crashing the build
+// when REDIS_URL isn't set in CI.
+// ---------------------------------------------------------------------------
 
 let _redis: Redis | null = null
+let _initFailed = false
+
 export function getRedis(): Redis | null {
   if (_redis) return _redis
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
-    return null
-  }
+  if (_initFailed) return null
+
+  const url = process.env.REDIS_URL
+  if (!url) return null
+
   try {
-    _redis = Redis.fromEnv()
+    _redis = new IORedis(url, {
+      // Keep retry storms bounded — we'd rather fail a single request fast
+      // than hold the route hostage while ioredis backs off.
+      maxRetriesPerRequest: 3,
+      enableReadyCheck: true,
+      // Open the socket on first command instead of at import time. Important
+      // for Next.js, where this module loads in many worker contexts.
+      lazyConnect: true,
+      // Reconnect with exponential-ish backoff capped at 2s.
+      retryStrategy: (times) => Math.min(times * 200, 2000),
+    })
+
+    _redis.on("error", (err) => {
+      // Don't crash the process — individual command failures are surfaced
+      // by the caller via try/catch and the limiter's fail-closed branch.
+      console.error("[redis] client error:", err.message)
+    })
+
     return _redis
   } catch (err) {
-    console.warn("[redis] failed to init from env", err)
+    console.error("[redis] failed to init from REDIS_URL", err)
+    _initFailed = true
     return null
   }
 }
 
-// H-4: Mock limiter used when Redis is not configured.
+// ---------------------------------------------------------------------------
+// Sliding-window rate limiter (Redis sorted set implementation)
+// ---------------------------------------------------------------------------
 //
-//   * In development we fail OPEN so the local flow keeps working without
-//     Upstash credentials — but emit a loud warning every call.
-//   * In production we fail CLOSED. Returning success: false forces every
-//     rate-limited route to reject the request rather than silently disable
-//     a critical security control. Set UPSTASH_REDIS_REST_URL + TOKEN
-//     in the deployment environment to restore real limiting.
-const mockLimiter = {
-  limit: async (_identifier: string) => {
-    const isProd = process.env.NODE_ENV === "production"
-    console.error(
-      "[redis] Rate limiter is NOT active because UPSTASH_REDIS_REST_URL / " +
-        "UPSTASH_REDIS_REST_TOKEN are not configured. " +
-        (isProd
-          ? "Failing CLOSED — requests will be rejected until Redis is wired up."
-          : "Failing open in development. Set the env vars before deploying."),
-    )
-    return isProd
-      ? { success: false, limit: 0, remaining: 0, reset: Date.now() + 60_000 }
-      : { success: true, limit: 100, remaining: 99, reset: Date.now() + 60_000 }
-  },
+// Algorithm:
+//   1. ZREMRANGEBYSCORE drops entries older than (now - windowMs).
+//   2. ZADD inserts the current request with `now` as the score.
+//   3. ZCARD returns the live request count inside the window.
+//   4. PEXPIRE refreshes the key TTL so empty buckets eventually disappear.
+//
+// All four commands run in a single MULTI pipeline → one round-trip per
+// `.limit()` call, atomic with respect to other limiter writes.
+//
+// The result shape matches what `@upstash/ratelimit` returned, so all
+// existing callers (`{ success }` destructuring, etc.) keep working.
+// ---------------------------------------------------------------------------
+
+export type LimitResult = {
+  success: boolean
+  limit: number
+  remaining: number
+  reset: number
 }
 
-let _uploadLimiter: Ratelimit | null = null
+class SlidingWindowLimiter {
+  constructor(
+    private readonly prefix: string,
+    private readonly maxRequests: number,
+    private readonly windowMs: number,
+  ) {}
+
+  async limit(identifier: string): Promise<LimitResult> {
+    const now = Date.now()
+    const reset = now + this.windowMs
+    const redis = getRedis()
+
+    if (!redis) return mockLimitResult(this.maxRequests, reset)
+
+    const key = `${this.prefix}:${identifier}`
+    const windowStart = now - this.windowMs
+    // Unique member so concurrent requests in the same millisecond don't
+    // collide and silently dedupe inside the sorted set.
+    const member = `${now}-${Math.random().toString(36).slice(2, 10)}`
+
+    try {
+      const pipeline = redis.multi()
+      pipeline.zremrangebyscore(key, 0, windowStart)
+      pipeline.zadd(key, now, member)
+      pipeline.zcard(key)
+      pipeline.pexpire(key, this.windowMs)
+      const results = await pipeline.exec()
+
+      if (!results) throw new Error("redis pipeline.exec() returned null")
+
+      // results[2] is the [err, value] tuple from ZCARD.
+      const zcardResult = results[2]
+      const count = typeof zcardResult?.[1] === "number" ? zcardResult[1] : 0
+
+      const success = count <= this.maxRequests
+      const remaining = Math.max(0, this.maxRequests - count)
+
+      return { success, limit: this.maxRequests, remaining, reset }
+    } catch (err) {
+      // Fail closed in production — we'd rather drop a request than leave a
+      // critical security control silently disabled by a Redis hiccup.
+      console.error(`[redis] limiter '${this.prefix}' error:`, err)
+      const isProd = process.env.NODE_ENV === "production"
+      return isProd
+        ? { success: false, limit: this.maxRequests, remaining: 0, reset }
+        : { success: true, limit: this.maxRequests, remaining: this.maxRequests - 1, reset }
+    }
+  }
+}
+
+// Mock result used when REDIS_URL is unset.
+//   * dev → fail OPEN so local flows keep working without Redis.
+//   * prod → fail CLOSED so a misconfigured deploy can't silently disable
+//     rate limiting (preserves H-4 from the security audit).
+function mockLimitResult(limit: number, reset: number): LimitResult {
+  const isProd = process.env.NODE_ENV === "production"
+  console.error(
+    "[redis] Rate limiter is NOT active because REDIS_URL is not configured. " +
+      (isProd
+        ? "Failing CLOSED — requests will be rejected until Redis is wired up."
+        : "Failing open in development. Set REDIS_URL before deploying."),
+  )
+  return isProd
+    ? { success: false, limit: 0, remaining: 0, reset }
+    : { success: true, limit, remaining: limit - 1, reset }
+}
+
+// ---------------------------------------------------------------------------
+// Limiter singletons
+// ---------------------------------------------------------------------------
+// Same windows + identifiers as before so user-facing behaviour is unchanged.
+
+let _uploadLimiter: SlidingWindowLimiter | null = null
 export function uploadLimiter() {
-  const r = getRedis()
-  if (!r) return mockLimiter
-  if (_uploadLimiter) return _uploadLimiter
-  _uploadLimiter = new Ratelimit({
-    redis: r,
-    // 20 uploads per user per minute
-    limiter: Ratelimit.slidingWindow(20, "1 m"),
-    analytics: true,
-    prefix: "rl:upload",
-  })
+  if (!_uploadLimiter) {
+    // 20 uploads per user per minute.
+    _uploadLimiter = new SlidingWindowLimiter("rl:upload", 20, 60_000)
+  }
   return _uploadLimiter
 }
 
-let _llmLimiter: Ratelimit | null = null
+let _llmLimiter: SlidingWindowLimiter | null = null
 export function llmLimiter() {
-  const r = getRedis()
-  if (!r) return mockLimiter
-  if (_llmLimiter) return _llmLimiter
-  _llmLimiter = new Ratelimit({
-    redis: r,
+  if (!_llmLimiter) {
     // 60 LLM validations per team per minute.
-    limiter: Ratelimit.slidingWindow(60, "1 m"),
-    analytics: true,
-    prefix: "rl:llm",
-  })
+    _llmLimiter = new SlidingWindowLimiter("rl:llm", 60, 60_000)
+  }
   return _llmLimiter
 }
 
-let _chatLimiter: Ratelimit | null = null
+let _chatLimiter: SlidingWindowLimiter | null = null
 export function chatLimiter() {
-  const r = getRedis()
-  if (!r) return mockLimiter
-  if (_chatLimiter) return _chatLimiter
-  _chatLimiter = new Ratelimit({
-    redis: r,
-    // 30 chat messages per user per minute
-    limiter: Ratelimit.slidingWindow(30, "1 m"),
-    analytics: true,
-    prefix: "rl:chat",
-  })
+  if (!_chatLimiter) {
+    // 30 chat messages per user per minute.
+    _chatLimiter = new SlidingWindowLimiter("rl:chat", 30, 60_000)
+  }
   return _chatLimiter
 }
 
-let _authLimiter: Ratelimit | null = null
+let _authLimiter: SlidingWindowLimiter | null = null
 export function authLimiter() {
-  const r = getRedis()
-  if (!r) return mockLimiter
-  if (_authLimiter) return _authLimiter
-  _authLimiter = new Ratelimit({
-    redis: r,
-    // 10 auth actions per IP per 10 minutes
-    limiter: Ratelimit.slidingWindow(10, "10 m"),
-    analytics: true,
-    prefix: "rl:auth",
-  })
+  if (!_authLimiter) {
+    // 10 auth actions per IP/email per 10 minutes.
+    _authLimiter = new SlidingWindowLimiter("rl:auth", 10, 10 * 60_000)
+  }
   return _authLimiter
 }
