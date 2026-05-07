@@ -68,9 +68,12 @@ export async function POST(req: Request) {
       { status: 413 },
     )
   }
-  if (file.type && !ACCEPTED.has(file.type)) {
+  // M-12: Require a non-empty, explicitly allowed MIME type.
+  // The previous guard `if (file.type && ...)` silently accepted uploads with
+  // no Content-Type header (empty string). Now we fail closed.
+  if (!file.type || !ACCEPTED.has(file.type)) {
     return NextResponse.json(
-      { error: `Unsupported file type: ${file.type}` },
+      { error: `Unsupported or missing file type: ${file.type || "(none)"}` },
       { status: 415 },
     )
   }
@@ -135,7 +138,7 @@ export async function POST(req: Request) {
     if (dbError || !doc) {
       console.error("[upload] DB insert failed", dbError)
       return NextResponse.json(
-        { error: "Failed to save document metadata", detail: dbError?.message },
+        { error: "Failed to save document metadata" },
         { status: 500 },
       )
     }
@@ -208,7 +211,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("[upload] unexpected error", err)
     return NextResponse.json(
-      { error: err?.message || "Internal server error" },
+      { error: "Internal server error" },
       { status: 500 },
     )
   }

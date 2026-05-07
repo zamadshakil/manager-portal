@@ -17,14 +17,17 @@ export function getRedis(): Redis | null {
   }
 }
 
-// A dummy limiter that always allows requests if Redis is unconfigured
+// H-4: A mock limiter used when Redis is not configured.
+// It always allows requests (fail-open) but emits a loud error so operators
+// know rate-limiting is not active. Set UPSTASH_REDIS_REST_URL + TOKEN to fix.
 const mockLimiter = {
-  limit: async (_identifier: string) => ({
-    success: true,
-    limit: 100,
-    remaining: 99,
-    reset: Date.now() + 60000,
-  }),
+  limit: async (_identifier: string) => {
+    console.error(
+      "[redis] WARNING: Rate limiter is disabled because UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are not configured. " +
+      "All rate-limit checks will PASS. Set these variables in production immediately.",
+    )
+    return { success: true, limit: 100, remaining: 99, reset: Date.now() + 60000 }
+  },
 }
 
 let _uploadLimiter: Ratelimit | null = null

@@ -13,7 +13,13 @@ import { createClient } from "@/lib/supabase/client"
 export default function LoginForm() {
   const router = useRouter()
   const params = useSearchParams()
-  const next = params.get("next") || "/dashboard"
+  const rawNext = params.get("next") || ""
+  // C-4: Only allow relative paths — reject absolute URLs, protocol-relative
+  // paths (//evil.com), and anything that doesn't start with a single slash.
+  const next =
+    rawNext && /^\/[a-zA-Z0-9_\-/.?=&#%]*$/.test(rawNext) && !rawNext.startsWith("//")
+      ? rawNext
+      : "/dashboard"
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")

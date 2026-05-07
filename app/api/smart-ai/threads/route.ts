@@ -60,7 +60,7 @@ export async function GET(req: Request) {
 
   if (error) {
     console.error(`[threads] list failed (${mode}):`, error.message)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: "Failed to load threads" }, { status: 500 })
   }
 
   if (!threads || threads.length === 0) {
@@ -181,8 +181,21 @@ export async function DELETE(req: Request) {
 
   const { client: supabase } = await getSupabase()
 
-  // Delete messages first (if no FK cascade), then the thread.
-  // Always scope to user_id to prevent cross-user deletion.
+  // H-5: Verify thread ownership BEFORE touching messages.
+  // Service-role bypasses RLS so we must enforce the ownership check explicitly
+  // here to prevent cross-tenant message deletion.
+  const { data: ownedThread } = await supabase
+    .from("chat_threads")
+    .select("id")
+    .eq("id", threadId)
+    .eq("user_id", profile.id)
+    .maybeSingle()
+
+  if (!ownedThread) {
+    return NextResponse.json({ error: "Thread not found" }, { status: 404 })
+  }
+
+  // Safe to delete messages now that ownership is confirmed.
   await supabase
     .from("chat_messages")
     .delete()
@@ -196,7 +209,7 @@ export async function DELETE(req: Request) {
 
   if (error) {
     console.error("[threads] delete failed:", error.message)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: "Failed to delete thread" }, { status: 500 })
   }
 
   return NextResponse.json({ ok: true })

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireProfile } from "@/lib/auth"
+import { requireProfile, requireRole } from "@/lib/auth"
 import { ensureRagSchema, getRagBootstrapState } from "@/lib/smart-ai/bootstrap"
 import { isDirectPgConfigured } from "@/lib/smart-ai/pg-client"
 
@@ -19,10 +19,19 @@ export const dynamic = "force-dynamic"
  * data — restrict further if your environment requires admin-only).
  */
 export async function POST(req: Request) {
+  // H-6: Disabled in production via env flag (set RAG_BOOTSTRAP_DISABLED=true once schema is stable)
+  if (process.env.RAG_BOOTSTRAP_DISABLED === "true") {
+    return NextResponse.json(
+      { ok: false, reason: "Bootstrap is disabled in this environment." },
+      { status: 403 },
+    )
+  }
+
+  // H-6: Restrict to main_admin — any authenticated user could previously trigger DDL
   try {
-    await requireProfile()
+    await requireRole(["main_admin"])
   } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
   let force = false

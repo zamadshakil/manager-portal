@@ -42,8 +42,9 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   const file = formData.get("file") as File | null
   if (!file || file.size === 0) return { ok: false, error: "Choose a file to upload." }
   if (file.size > MAX_FILE_SIZE_BYTES) return { ok: false, error: "File exceeds 25 MB limit." }
-  if (!ACCEPTED_MIME_TYPES.includes(file.type as (typeof ACCEPTED_MIME_TYPES)[number])) {
-    return { ok: false, error: `Unsupported file type: ${file.type || "unknown"}` }
+  // M-12: Require a non-empty, explicitly allow-listed MIME type.
+  if (!file.type || !ACCEPTED_MIME_TYPES.includes(file.type as (typeof ACCEPTED_MIME_TYPES)[number])) {
+    return { ok: false, error: `Unsupported or missing file type: ${file.type || "unknown"}` }
   }
 
   const parsed = UploadSchema.safeParse({

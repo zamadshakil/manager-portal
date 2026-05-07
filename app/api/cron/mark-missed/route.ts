@@ -17,11 +17,13 @@ export const maxDuration = 60;
 export async function GET(request: Request) {
   // ── Auth guard ────────────────────────────────────────────────────
   const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!secret) {
+    console.error("[cron] CRON_SECRET is not configured — rejecting request for safety. Set CRON_SECRET in your environment variables.");
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const auth = request.headers.get("authorization");
+  if (auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -146,7 +148,7 @@ export async function GET(request: Request) {
   } catch (error: any) {
     console.error("[cron] mark-missed failed:", error);
     return NextResponse.json(
-      { error: "Cron job failed", details: error.message },
+      { error: "Cron job failed" },
       { status: 500 }
     );
   }

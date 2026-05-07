@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireProfile } from "@/lib/auth"
+import { requireRole } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { describePgConfig, isDirectPgConfigured, pgPing, pgQuery } from "@/lib/smart-ai/pg-client"
 import { ensureRagSchema, getRagBootstrapState } from "@/lib/smart-ai/bootstrap"
@@ -15,7 +15,11 @@ export const dynamic = "force-dynamic"
  * MCP or RAG services needed.
  */
 export async function GET() {
-  await requireProfile()
+  try {
+    await requireRole(["main_admin"])
+  } catch {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
   const openrouterKey = process.env.OPENROUTER_API_KEY ?? ""
   const embeddingModel = process.env.EMBEDDING_MODEL ?? "text-embedding-3-small"

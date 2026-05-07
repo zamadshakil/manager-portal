@@ -213,6 +213,21 @@ export async function assignTeamManager(formData: FormData) {
       return { ok: false, error: "Invalid manager or user is not a manager" }
     }
 
+    // M-23: Prevent a manager from being assigned to two teams simultaneously
+    const { data: existingTeam } = await admin
+      .from("teams")
+      .select("id, name")
+      .eq("manager_id", managerId)
+      .neq("id", teamId)
+      .maybeSingle()
+
+    if (existingTeam) {
+      return {
+        ok: false,
+        error: `This manager is already managing another team. A manager can only manage one team at a time.`,
+      }
+    }
+
     // Update team
     const { error } = await admin
       .from("teams")

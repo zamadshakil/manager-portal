@@ -13,7 +13,7 @@ const Schema = z
     full_name: z.string().trim().min(1).max(200),
     role: z.enum(["main_admin", "manager", "member"]),
     team_id: z.string().uuid().optional().or(z.literal("")),
-    password: z.string().min(8).max(72),
+    password: z.string().min(12, "Password must be at least 12 characters").max(72),
   })
   .superRefine((value, ctx) => {
     // Managers must own a team — without one they cannot create tasks,

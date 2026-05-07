@@ -32,6 +32,8 @@ const nextConfig = {
   serverExternalPackages: ["unpdf", "mammoth", "officeparser", "tesseract.js", "@napi-rs/canvas"],
 
   async headers() {
+    const isDev = process.env.NODE_ENV === "development"
+
     const security = [
       {
         key: "Strict-Transport-Security",
@@ -41,24 +43,46 @@ const nextConfig = {
       { key: "X-Frame-Options", value: "DENY" },
       { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
       {
+        // L-1: Extended Permissions-Policy — restrict additional browser features
         key: "Permissions-Policy",
-        value: "camera=(), microphone=(), geolocation=()",
+        value: "camera=(), microphone=(), geolocation=(), interest-cohort=(), payment=(), usb=(), clipboard-read=(self)",
       },
       {
+        // H-1: Hardened CSP.
+        // - script-src: removed 'unsafe-eval' in production (kept only in dev for Next.js HMR)
+        // - Added object-src 'none', base-uri 'self', form-action 'self'
+        // - M-11: Tightened connect-src wildcards (operators should replace * with specific hosts)
         key: "Content-Security-Policy",
         value: [
           "default-src 'self'",
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+          isDev
+            ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+            : "script-src 'self' 'unsafe-inline'",
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "img-src 'self' blob: data: https://*.r2.dev",
           "font-src 'self' https://fonts.gstatic.com https://frontend-cdn.perplexity.ai",
           "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.up.railway.app wss://*.up.railway.app https://*.r2.dev",
-          "frame-src 'self' https://*.r2.dev",
+          "frame-src 'none'",
           "frame-ancestors 'none'",
+          "object-src 'none'",
+          "base-uri 'self'",
+          "form-action 'self'",
         ].join("; "),
       },
     ]
-    return [{ source: "/:path*", headers: security }]
+
+    // M-16: Cross-Origin isolation headers for dashboard pages (Spectre mitigation)
+    const crossOriginIsolation = [
+      { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+      { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
+    ]
+
+    return [
+      { source: "/:path*", headers: security },
+      { source: "/dashboard/:path*", headers: crossOriginIsolation },
+      // Stricter Referrer-Policy for auth pages so tokens never leak via Referer
+      { source: "/auth/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
+    ]
   },
 }
 

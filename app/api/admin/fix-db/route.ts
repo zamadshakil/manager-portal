@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server"
 import { pgQuery, isDirectPgConfigured } from "@/lib/smart-ai/pg-client"
+import { requireRole } from "@/lib/auth"
 
 export async function GET() {
+  try {
+    await requireRole(["main_admin"])
+  } catch {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
   if (!isDirectPgConfigured()) {
     return NextResponse.json(
       { error: "Direct PostgreSQL connection is not configured on this environment." },
@@ -125,7 +132,7 @@ export async function GET() {
   } catch (err: any) {
     console.error("[fix-db] Error updating schema:", err)
     return NextResponse.json(
-      { error: err?.message || "Failed to update database schema." },
+      { error: "Failed to update database schema." },
       { status: 500 }
     )
   }

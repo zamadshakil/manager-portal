@@ -1,17 +1,31 @@
 "use server"
 
-import { headers } from "next/headers"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { sendPasswordResetEmail } from "@/lib/email"
+import { authLimiter } from "@/lib/redis"
 
 export async function requestPasswordReset(email: string) {
-  try {
-    const headersList = await headers()
-    const host = headersList.get("host") || "localhost:3000"
-    const protocol = host.includes("localhost") ? "http" : "https"
-    const dynamicSiteUrl = `${protocol}://${host}`
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || dynamicSiteUrl
+  // Rate-limit by normalised email to deter enumeration and credential-stuffing
+  const { success: allowed } = await authLimiter().limit(`forgot:${email.toLowerCase()}`)
+  if (!allowed) {
+    // Return the same success shape to avoid timing/content oracle
+    return { success: true }
+  }
 
+  // C-3: Never derive the site URL from request headers — always use the
+  // pinned canonical origin. Falls back to localhost only in development so
+  // the dev flow keeps working without a NEXT_PUBLIC_SITE_URL set.
+  const siteUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (process.env.NODE_ENV === "development" ? "http://localhost:3000" : null)
+
+  if (!siteUrl) {
+    console.error("[auth] NEXT_PUBLIC_SITE_URL is not set — cannot generate a safe reset link.")
+    // H-3: Still return success to avoid leaking whether the email exists
+    return { success: true }
+  }
+
+  try {
     const supabase = createAdminClient()
     
     // We generate a recovery link using the admin API so we can handle the email sending ourselves
@@ -23,14 +37,11 @@ export async function requestPasswordReset(email: string) {
       }
     })
 
-    if (error) {
-      console.error("[auth] Error generating recovery link:", error)
-      return { success: false, error: "Failed to generate recovery link" }
-    }
-
-    if (!data.properties?.action_link) {
-      console.error("[auth] No action link returned from Supabase")
-      return { success: false, error: "Failed to generate recovery link" }
+    // H-3: Do NOT surface whether the email is known or not — always return
+    // success to the client. Errors are logged server-side only.
+    if (error || !data?.properties?.action_link) {
+      console.error("[auth] Error generating recovery link (may be unknown email):", error?.message ?? "no action_link")
+      return { success: true }
     }
 
     let resetLink = data.properties.action_link
@@ -50,12 +61,13 @@ export async function requestPasswordReset(email: string) {
     const emailSent = await sendPasswordResetEmail(email, resetLink)
 
     if (!emailSent) {
-      return { success: false, error: "Failed to send reset email" }
+      console.error("[auth] Failed to send reset email for:", email)
     }
 
+    // H-3: Always return success regardless of email-send outcome
     return { success: true }
   } catch (error) {
     console.error("[auth] Exception requesting password reset:", error)
-    return { success: false, error: "An unexpected error occurred" }
+    return { success: true }
   }
 }

@@ -135,8 +135,7 @@ export async function sendWelcomeEmail({ email, fullName, role, password }: Welc
 
             <div class="credentials">
               <p><strong>Login Email:</strong> ${email}</p>
-              ${password ? `<p><strong>Temporary Password:</strong> <span class="password">${password}</span></p>` : ''}
-              <p style="font-size: 13px; margin-top: 15px; color: #6b7280;">You will be required to change your password upon your first login.</p>
+              <p style="font-size: 13px; margin-top: 15px; color: #6b7280;">Your temporary password has been shared with you separately via a secure channel. You will be required to change your password upon your first login.</p>
             </div>
 
             <div class="button-container">
