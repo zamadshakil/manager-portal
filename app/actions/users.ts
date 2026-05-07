@@ -207,6 +207,59 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
   return { ok: true }
 }
 
+const UpdateProfileSchema = z.object({
+  userId: z.string().uuid(),
+  full_name: z.string().trim().min(1, "Full name is required").max(200),
+  email: z.string().email("Invalid email address"),
+})
+
+/**
+ * Update a user's full name and/or email. Only main_admin can do this.
+ * Syncs the change to both Supabase Auth metadata and the profiles table.
+ */
+export async function updateUserProfile(
+  userId: string,
+  fullName: string,
+  email: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const actor = await requireRole(["main_admin"])
+
+  const parsed = UpdateProfileSchema.safeParse({ userId, full_name: fullName, email })
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
+
+  // Prevent updating own email to something invalid (edge guard)
+  const admin = createAdminClient()
+
+  // 1. Update Supabase Auth (email + name in metadata)
+  const { error: authError } = await admin.auth.admin.updateUserById(parsed.data.userId, {
+    email: parsed.data.email,
+    user_metadata: { full_name: parsed.data.full_name },
+  })
+
+  if (authError) return { ok: false, error: "Could not update user credentials." }
+
+  // 2. Sync profile row
+  const { error: profileError } = await admin
+    .from("profiles")
+    .update({ full_name: parsed.data.full_name, email: parsed.data.email })
+    .eq("id", parsed.data.userId)
+
+  if (profileError) return { ok: false, error: "Could not update profile." }
+
+  await logActivity({
+    actorId: actor.id,
+    teamId: null,
+    action: "user.profile_updated",
+    entityType: "profile",
+    entityId: parsed.data.userId,
+    metadata: { full_name: parsed.data.full_name, email: parsed.data.email },
+  })
+
+  revalidatePath("/dashboard/team")
+  revalidatePath("/dashboard/admin/users")
+  return { ok: true }
+}
+
 const RoleTransitionSchema = z.object({
   userId: z.string().uuid(),
   newRole: z.enum(["main_admin", "manager", "member"]),
