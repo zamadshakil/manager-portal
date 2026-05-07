@@ -25,14 +25,9 @@ export default function ForgotPasswordForm() {
     setError(null)
     setLoading(true)
     try {
-      const res = await requestPasswordReset(email)
-
-      if (!res.success) {
-        setError(res.error || "Failed to send reset link. Please try again.")
-        setLoading(false)
-        return
-      }
-
+      await requestPasswordReset(email)
+      // H-3: the server always returns success regardless of whether the email
+      // exists — always show the confirmation screen to avoid account enumeration.
       setSuccess(true)
     } catch {
       setError("Failed to send reset link. Please try again.")
