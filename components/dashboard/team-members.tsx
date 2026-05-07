@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Users, Trash2, Loader2, Eye, EyeOff, Key, Mail, ShieldCheck, Shield } from "lucide-react"
+import { Users, Trash2, Loader2, Eye, EyeOff, Key, Mail, ShieldCheck, Shield, Pencil } from "lucide-react"
 import { RoleTransitionModal } from "./role-transition-modal"
+import { EditUserModal } from "./edit-user-modal"
 import { roleLabel } from "@/lib/auth-shared"
 import { formatRelative } from "@/lib/format"
 import { deleteUser } from "@/app/actions/users"
@@ -25,6 +26,7 @@ export function TeamMembers({ members, teams, isMainAdmin = false }: Props) {
   const [pending, start] = useTransition()
   const [expandedCredentials, setExpandedCredentials] = useState<Set<string>>(new Set())
   const [transitioningUser, setTransitioningUser] = useState<Profile | null>(null)
+  const [editingUser, setEditingUser] = useState<Profile | null>(null)
 
   function handleDeleteClick(id: string) {
     setError(null)
@@ -153,6 +155,17 @@ export function TeamMembers({ members, teams, isMainAdmin = false }: Props) {
                         )}
                       </button>
 
+                      {/* Edit profile button */}
+                      <button
+                        type="button"
+                        onClick={() => setEditingUser(m)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        aria-label="Edit name and email"
+                        title="Edit name / email"
+                      >
+                        <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+
                       {/* Change Role button */}
                       <button
                         type="button"
@@ -241,6 +254,14 @@ export function TeamMembers({ members, teams, isMainAdmin = false }: Props) {
           user={transitioningUser}
           isOpen={!!transitioningUser}
           onClose={() => setTransitioningUser(null)}
+        />
+      )}
+
+      {editingUser && (
+        <EditUserModal
+          user={editingUser}
+          isOpen={!!editingUser}
+          onClose={() => setEditingUser(null)}
         />
       )}
     </section>
