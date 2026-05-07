@@ -25,7 +25,7 @@ export async function GET() {
       id, type, name, created_by, avatar_url, created_at, updated_at,
       conversation_members (
         user_id, role, joined_at, last_read_at,
-        profiles:profiles ( id, full_name, email, avatar_url )
+        profiles:profiles!user_id ( id, full_name, email, avatar_url )
       )
     `)
     .in("id", convIds)
@@ -55,7 +55,15 @@ export async function GET() {
           .gt("created_at", lastReadAt),
       ])
 
-      return { ...conv, last_message: lastMsg ?? null, unread_count: unread ?? 0 }
+      return {
+        ...conv,
+        members: (conv.conversation_members ?? []).map((m: any) => ({
+          ...m,
+          profile: m.profiles,
+        })),
+        last_message: lastMsg ?? null,
+        unread_count: unread ?? 0,
+      }
     }),
   )
 
@@ -87,7 +95,17 @@ export async function POST(req: NextRequest) {
       user_a: user.id,
       user_b: otherId,
     })
-    if (existing) return NextResponse.json(existing)
+    if (existing && existing.length > 0) {
+      // Fetch members so the sidebar can resolve the other user's name
+      const { data: members } = await admin
+        .from("conversation_members")
+        .select("user_id, role, joined_at, last_read_at, profiles:profiles!user_id ( id, full_name, email, avatar_url )")
+        .eq("conversation_id", existing[0].id)
+      return NextResponse.json({
+        ...existing[0],
+        members: (members ?? []).map((m: any) => ({ ...m, profile: m.profiles })),
+      })
+    }
   }
 
   // Create conversation
@@ -109,5 +127,14 @@ export async function POST(req: NextRequest) {
   const { error: mErr } = await admin.from("conversation_members").insert(memberRows)
   if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 })
 
-  return NextResponse.json(conv, { status: 201 })
+  // Return with members so the sidebar can resolve names / avatars
+  const { data: members } = await admin
+    .from("conversation_members")
+    .select("user_id, role, joined_at, last_read_at, profiles:profiles!user_id ( id, full_name, email, avatar_url )")
+    .eq("conversation_id", conv.id)
+
+  return NextResponse.json({
+    ...conv,
+    members: (members ?? []).map((m: any) => ({ ...m, profile: m.profiles })),
+  }, { status: 201 })
 }

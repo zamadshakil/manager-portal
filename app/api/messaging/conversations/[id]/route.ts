@@ -18,7 +18,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       id, type, name, created_by, avatar_url, created_at, updated_at,
       conversation_members (
         user_id, role, joined_at, last_read_at,
-        profiles:profiles ( id, full_name, email, avatar_url )
+        profiles:profiles!user_id ( id, full_name, email, avatar_url )
       )
     `)
     .eq("id", id)
@@ -31,7 +31,13 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  return NextResponse.json(conv)
+  return NextResponse.json({
+    ...conv,
+    members: (conv.conversation_members ?? []).map((m: any) => ({
+      ...m,
+      profile: m.profiles,
+    })),
+  })
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {

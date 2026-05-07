@@ -32,6 +32,15 @@ export function ConversationView({
   const [infoOpen, setInfoOpen] = useState(false)
   const listRef = useRef<MessageListHandle>(null)
 
+  // Defensive: never mount for an invalid conversation object
+  if (!conversation.id || typeof conversation.id !== "string") {
+    return (
+      <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
+        Invalid conversation
+      </div>
+    )
+  }
+
   const fetchMessages = useCallback(async (before?: string) => {
     const params = new URLSearchParams({ conv: conversation.id, limit: "50" })
     if (before) params.set("before", before)
