@@ -17,16 +17,27 @@ export function getRedis(): Redis | null {
   }
 }
 
-// H-4: A mock limiter used when Redis is not configured.
-// It always allows requests (fail-open) but emits a loud error so operators
-// know rate-limiting is not active. Set UPSTASH_REDIS_REST_URL + TOKEN to fix.
+// H-4: Mock limiter used when Redis is not configured.
+//
+//   * In development we fail OPEN so the local flow keeps working without
+//     Upstash credentials — but emit a loud warning every call.
+//   * In production we fail CLOSED. Returning success: false forces every
+//     rate-limited route to reject the request rather than silently disable
+//     a critical security control. Set UPSTASH_REDIS_REST_URL + TOKEN
+//     in the deployment environment to restore real limiting.
 const mockLimiter = {
   limit: async (_identifier: string) => {
+    const isProd = process.env.NODE_ENV === "production"
     console.error(
-      "[redis] WARNING: Rate limiter is disabled because UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are not configured. " +
-      "All rate-limit checks will PASS. Set these variables in production immediately.",
+      "[redis] Rate limiter is NOT active because UPSTASH_REDIS_REST_URL / " +
+        "UPSTASH_REDIS_REST_TOKEN are not configured. " +
+        (isProd
+          ? "Failing CLOSED — requests will be rejected until Redis is wired up."
+          : "Failing open in development. Set the env vars before deploying."),
     )
-    return { success: true, limit: 100, remaining: 99, reset: Date.now() + 60000 }
+    return isProd
+      ? { success: false, limit: 0, remaining: 0, reset: Date.now() + 60_000 }
+      : { success: true, limit: 100, remaining: 99, reset: Date.now() + 60_000 }
   },
 }
 
