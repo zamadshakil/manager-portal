@@ -69,6 +69,7 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
               : "Your team hasn't uploaded anything yet."
         }
         canDelete={canDelete}
+        fromStatus={status}
       />
     </>
   )

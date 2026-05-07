@@ -24,13 +24,19 @@ interface SubmissionsTableProps {
   showFooterLink?: boolean
   emptyHint?: string
   canDelete?: boolean
+  fromStatus?: string
 }
 
-export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDelete = false }: SubmissionsTableProps) {
+export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDelete = false, fromStatus }: SubmissionsTableProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [isDeleting, startDeleting] = useTransition()
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [targetIds, setTargetIds] = useState<string[]>([])
+
+  function detailHref(id: string) {
+    const qs = fromStatus ? `?fromStatus=${encodeURIComponent(fromStatus)}` : ""
+    return `/dashboard/submissions/${id}${qs}`
+  }
 
   const allSelected = rows.length > 0 && selectedIds.size === rows.length
   const someSelected = selectedIds.size > 0 && selectedIds.size < rows.length
@@ -136,7 +142,7 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
                         <Link
-                          href={`/dashboard/submissions/${row.id}`}
+                          href={detailHref(row.id)}
                           className="block text-[13px] font-semibold truncate hover:text-primary"
                         >
                           {row.title}
@@ -210,7 +216,7 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
                             {fileIconLabel(row.mime_type)}
                           </span>
                           <Link
-                            href={`/dashboard/submissions/${row.id}`}
+                            href={detailHref(row.id)}
                             className="block truncate font-semibold hover:text-primary"
                           >
                             {row.title}
@@ -241,7 +247,7 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
                             </button>
                           )}
                           <Link
-                            href={`/dashboard/submissions/${row.id}`}
+                            href={detailHref(row.id)}
                             className="inline-flex items-center gap-1 text-[12px] font-semibold text-primary hover:underline"
                           >
                             Open

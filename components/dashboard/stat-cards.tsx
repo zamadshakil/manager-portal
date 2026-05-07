@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { TrendingUp, Activity, ShieldCheck, AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -7,6 +8,7 @@ interface Stat {
   hint?: string
   icon: React.ComponentType<{ className?: string }>
   tone?: "default" | "warn" | "ok"
+  href: string
 }
 
 interface StatCardsProps {
@@ -23,6 +25,7 @@ export function StatCards({ total, passRate, avgScore, needsReview }: StatCardsP
       value: total.toLocaleString(),
       hint: "all time",
       icon: Activity,
+      href: "/dashboard/submissions",
     },
     {
       label: "AI pass rate",
@@ -30,12 +33,14 @@ export function StatCards({ total, passRate, avgScore, needsReview }: StatCardsP
       hint: "passing validation rules",
       icon: ShieldCheck,
       tone: passRate >= 80 ? "ok" : passRate >= 50 ? "default" : "warn",
+      href: "/dashboard/submissions",
     },
     {
       label: "Avg score",
       value: avgScore > 0 ? `${avgScore}/100` : "—",
       hint: "weighted across rules",
       icon: TrendingUp,
+      href: "/dashboard/submissions",
     },
     {
       label: "Needs review",
@@ -43,6 +48,7 @@ export function StatCards({ total, passRate, avgScore, needsReview }: StatCardsP
       hint: "awaiting attention",
       icon: AlertTriangle,
       tone: needsReview > 0 ? "warn" : "default",
+      href: "/dashboard/submissions?status=needs_review",
     },
   ]
 
@@ -54,9 +60,10 @@ export function StatCards({ total, passRate, avgScore, needsReview }: StatCardsP
       {stats.map((s) => {
         const Icon = s.icon
         return (
-          <article
+          <Link
             key={s.label}
-            className="rounded-xl border border-border bg-card p-4 lg:p-5 shadow-card transition-shadow hover:shadow-deep"
+            href={s.href}
+            className="rounded-xl border border-border bg-card p-4 lg:p-5 shadow-card transition-all hover:shadow-deep hover:border-primary/30 cursor-pointer block"
           >
             <div className="flex items-start justify-between gap-2">
               <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
@@ -79,7 +86,7 @@ export function StatCards({ total, passRate, avgScore, needsReview }: StatCardsP
             {s.hint ? (
               <p className="mt-1.5 text-[12px] text-muted-foreground">{s.hint}</p>
             ) : null}
-          </article>
+          </Link>
         )
       })}
     </section>

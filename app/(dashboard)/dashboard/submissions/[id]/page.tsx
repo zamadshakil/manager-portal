@@ -11,11 +11,13 @@ import { cn } from "@/lib/utils"
 
 interface PageProps {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ fromStatus?: string }>
 }
 
-export default async function SubmissionDetail({ params }: PageProps) {
+export default async function SubmissionDetail({ params, searchParams }: PageProps) {
   const profile = await requireProfile()
   const { id } = await params
+  const { fromStatus } = await searchParams
   const supabase = await createClient()
 
   const { data: submission } = await supabase
@@ -56,7 +58,11 @@ export default async function SubmissionDetail({ params }: PageProps) {
   return (
     <>
       <Link
-        href="/dashboard/submissions"
+        href={
+          fromStatus
+            ? `/dashboard/submissions?status=${encodeURIComponent(fromStatus)}`
+            : "/dashboard/submissions"
+        }
         className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
