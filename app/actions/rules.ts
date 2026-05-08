@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
-import { requireRole } from "@/lib/auth"
+import { requireProfile } from "@/lib/auth"
+import {
+  AccessDeniedError,
+  CAPABILITIES,
+  assertCapability,
+} from "@/lib/permissions"
 import { logActivity } from "@/lib/activity"
 
 const Schema = z.object({
@@ -16,7 +21,7 @@ const Schema = z.object({
 })
 
 export async function upsertRule(formData: FormData) {
-  const profile = await requireRole(["main_admin", "manager"])
+  const profile = await requireProfile()
 
   const parsed = Schema.safeParse({
     rule_name: formData.get("rule_name") || "",
@@ -32,10 +37,13 @@ export async function upsertRule(formData: FormData) {
   const supabase = await createClient()
 
   if (id) {
-    // For updates, check permission
+    // Load the row first so we can scope the capability check to the rule's
+    // team. The legacy creator-role guard is still enforced for managers — it
+    // is a product invariant ("managers cannot edit admin-authored rules")
+    // that lives below the generic capability layer.
     const { data: existingRule } = await supabase
       .from("validation_rules")
-      .select("id, created_by, profiles!created_by(role)")
+      .select("id, team_id, created_by, profiles!created_by(role)")
       .eq("id", id)
       .single()
 
@@ -43,7 +51,18 @@ export async function upsertRule(formData: FormData) {
       return { ok: false, error: "Rule not found." }
     }
 
-    // Permission check: Managers cannot edit rules created by main_admin
+    try {
+      await assertCapability(profile, CAPABILITIES.VALIDATION_RULES_UPDATE, {
+        team_id: (existingRule as any).team_id ?? null,
+        is_global: ((existingRule as any).team_id ?? null) === null,
+      })
+    } catch (err) {
+      if (err instanceof AccessDeniedError) {
+        return { ok: false, error: "You do not have permission to update this rule." }
+      }
+      throw err
+    }
+
     const creatorRole = (existingRule as any).profiles?.role
     if (profile.role === "manager" && creatorRole === "main_admin") {
       return { ok: false, error: "Managers cannot edit rules created by the main admin." }
@@ -69,6 +88,18 @@ export async function upsertRule(formData: FormData) {
       entityId: id,
     })
   } else {
+    try {
+      await assertCapability(profile, CAPABILITIES.VALIDATION_RULES_CREATE, {
+        team_id: profile.role === "main_admin" ? null : profile.team_id ?? null,
+        is_global: profile.role === "main_admin",
+      })
+    } catch (err) {
+      if (err instanceof AccessDeniedError) {
+        return { ok: false, error: "You do not have permission to create rules." }
+      }
+      throw err
+    }
+
     const { data, error } = await supabase
       .from("validation_rules")
       .insert({
@@ -98,14 +129,13 @@ export async function upsertRule(formData: FormData) {
 }
 
 export async function deleteRule(formData: FormData) {
-  const profile = await requireRole(["main_admin", "manager"])
+  const profile = await requireProfile()
   const id = String(formData.get("id") || "")
   const supabase = await createClient()
 
-  // Verify rule exists and check permission
   const { data: rule } = await supabase
     .from("validation_rules")
-    .select("id, created_by, profiles!created_by(role)")
+    .select("id, team_id, created_by, profiles!created_by(role)")
     .eq("id", id)
     .single()
 
@@ -113,7 +143,18 @@ export async function deleteRule(formData: FormData) {
     return { ok: false, error: "Rule not found." }
   }
 
-  // Permission check: Managers cannot delete rules created by main_admin
+  try {
+    await assertCapability(profile, CAPABILITIES.VALIDATION_RULES_DELETE, {
+      team_id: (rule as any).team_id ?? null,
+      is_global: ((rule as any).team_id ?? null) === null,
+    })
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return { ok: false, error: "You do not have permission to delete this rule." }
+    }
+    throw err
+  }
+
   const creatorRole = (rule as any).profiles?.role
   if (profile.role === "manager" && creatorRole === "main_admin") {
     return { ok: false, error: "Managers cannot delete rules created by the main admin." }

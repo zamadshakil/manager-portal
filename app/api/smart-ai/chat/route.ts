@@ -7,6 +7,11 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { scopeForProfile } from "@/lib/smart-ai/client"
 import { retrieveChunks } from "@/lib/smart-ai/retriever"
+import {
+  CAPABILITIES,
+  aiAllowedRagSourceTypes,
+  hasCapability,
+} from "@/lib/permissions"
 import { applySlidingWindow, type SimpleMessage } from "@/lib/smart-ai/sliding-window"
 import { chatLimiter } from "@/lib/redis"
 import { logActivity } from "@/lib/activity"
@@ -128,6 +133,16 @@ interface Body {
 export async function POST(req: Request) {
   const profile = await requireProfile()
 
+  // Capability gate. Without `smart_ai.chat` the user cannot use Smart AI
+  // at all. The main admin can revoke this per-user via an explicit deny
+  // override even though the role default grants it.
+  if (!(await hasCapability(profile, CAPABILITIES.SMART_AI_CHAT))) {
+    return NextResponse.json(
+      { error: "You do not have access to Smart AI." },
+      { status: 403 },
+    )
+  }
+
   const { success } = await chatLimiter().limit(profile.id)
   if (!success) {
     return NextResponse.json(
@@ -215,6 +230,13 @@ export async function POST(req: Request) {
   }
 
   const scope = scopeForProfile(profile)
+
+  // Capability-aware RAG allowlist. We compute the set of RAG `source_type`
+  // values the user is allowed to retrieve (read + ai_analyze) once per
+  // request and forward it to every retrieveChunks() call. Unauthorised
+  // chunks never enter the LLM context window, even if they would have
+  // matched the embedding/BM25 query.
+  const allowedSourceTypes = await aiAllowedRagSourceTypes(profile)
 
   // ---------------------------------------------------------------------
   // Flatten UIMessage[] → simple {role, content}
@@ -845,6 +867,7 @@ export async function POST(req: Request) {
               documentId: documentId ?? null,
               sourceType: sourceType ?? null,
               topK: effectiveTopK,
+              allowedSourceTypes,
             }),
           )
           return { results: chunks, count: chunks.length }

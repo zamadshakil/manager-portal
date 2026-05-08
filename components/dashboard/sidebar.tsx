@@ -17,6 +17,7 @@ import {
   Sparkles,
   BrainCircuit,
   MessageSquare,
+  KeyRound,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { roleLabel } from "@/lib/auth-shared"
@@ -118,6 +119,12 @@ const NAV: NavGroup[] = [
         label: "Departments",
         icon: Users,
         href: "/dashboard/departments",
+        roles: ["main_admin"],
+      },
+      {
+        label: "Access Control",
+        icon: KeyRound,
+        href: "/dashboard/permissions",
         roles: ["main_admin"],
       },
       {

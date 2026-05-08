@@ -171,6 +171,17 @@ export interface RetrieveOptions {
   documentId?: string | null
   sourceType?: string | null
   topK?: number
+  /**
+   * Capability-aware allowlist of `source_type` values the caller is
+   * permitted to retrieve. When provided, both the SQL filter and the
+   * post-retrieval safety net drop chunks whose source_type is not in
+   * this list. Pass `null` / omit to skip filtering (legacy behaviour).
+   *
+   * The chat route computes this from the user's effective capabilities
+   * via `aiAllowedRagSourceTypes`, so unauthorised modules never reach
+   * the LLM context window — the #1 RAG-leakage defence.
+   */
+  allowedSourceTypes?: string[] | null
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +282,12 @@ interface DirectPgSearchParams {
   sourceType: string | null
   sourceId: string | null
   limit: number
+  /**
+   * Optional capability allowlist. When non-null, rows whose `source_type`
+   * is not in this array are filtered at the SQL level. The post-retrieval
+   * filter in `retrieveChunks` is the second line of defence.
+   */
+  allowedSourceTypes: string[] | null
 }
 
 async function vectorSearchDirectPg(p: DirectPgSearchParams): Promise<RetrievedChunk[]> {
@@ -278,6 +295,9 @@ async function vectorSearchDirectPg(p: DirectPgSearchParams): Promise<RetrievedC
   //   (1) they own it, OR
   //   (2) it has no owner and either matches their team or has no team,
   //   (3) main_admin sees everything.
+  // PLUS (when supplied) the row's source_type must be in the capability
+  // allowlist — this is what blocks "AI sees validation rules even though
+  // the member can't read them in the UI".
   const sql = `
     SELECT
       id::text                               AS id,
@@ -291,6 +311,7 @@ async function vectorSearchDirectPg(p: DirectPgSearchParams): Promise<RetrievedC
     WHERE
       ($6::text IS NULL OR source_type = $6)
       AND ($7::text IS NULL OR source_id = $7)
+      AND ($8::text[] IS NULL OR source_type = ANY($8::text[]))
       AND (
         $5 = 'main_admin'
         OR owner_id = $3
@@ -310,6 +331,7 @@ async function vectorSearchDirectPg(p: DirectPgSearchParams): Promise<RetrievedC
     p.role,
     p.sourceType,
     p.sourceId,
+    p.allowedSourceTypes,
   ])
   return res.rows.map(parseRow)
 }
@@ -330,6 +352,7 @@ async function bm25SearchDirectPg(p: DirectPgSearchParams): Promise<RetrievedChu
       tsv @@ plainto_tsquery('english', $1)
       AND ($7::text IS NULL OR source_type = $7)
       AND ($8::text IS NULL OR source_id = $8)
+      AND ($9::text[] IS NULL OR source_type = ANY($9::text[]))
       AND (
         $6 = 'main_admin'
         OR owner_id = $4
@@ -352,6 +375,7 @@ async function bm25SearchDirectPg(p: DirectPgSearchParams): Promise<RetrievedChu
       p.role,
       p.sourceType,
       p.sourceId,
+      p.allowedSourceTypes,
     ])
     return res.rows.map(parseRow)
   } catch (err: any) {
@@ -396,6 +420,16 @@ export async function retrieveChunks(
     let bm25Results: RetrievedChunk[] = []
 
     // 2. Run hybrid search via the most reliable path available.
+    // Normalise the capability allowlist: empty array means "no source types
+    // allowed at all" (we still let chat_attachment + targeted document IDs
+    // pass the post-retrieval filter below).
+    const allowedSourceTypes =
+      opts.allowedSourceTypes && opts.allowedSourceTypes.length > 0
+        ? opts.allowedSourceTypes
+        : opts.allowedSourceTypes === undefined || opts.allowedSourceTypes === null
+        ? null
+        : []
+
     if (useDirectPg) {
       const params: DirectPgSearchParams = {
         vector: vecLiteral,
@@ -406,6 +440,7 @@ export async function retrieveChunks(
         sourceType: opts.sourceType ?? null,
         sourceId: opts.documentId ?? null,
         limit: limitCount,
+        allowedSourceTypes,
       }
 
       // Run both searches in parallel — they hit different indexes.
@@ -462,6 +497,25 @@ export async function retrieveChunks(
       } catch (e) {
         console.warn("[rag] BM25 search failed (non-fatal):", e)
       }
+    }
+
+    // 2b. Capability allowlist safety net.
+    //
+    // Even though we already pass the allowlist into the SQL of the
+    // direct-pg path, we also enforce it in JS here so the RPC path
+    // and any future retrieval surface inherits the same guarantee.
+    // `chat_attachment` and targeted document searches (where the user
+    // already proved access by uploading / specifying the source) are
+    // exempt — those are owner-scoped at the row level.
+    if (allowedSourceTypes !== null) {
+      const allow = new Set(allowedSourceTypes)
+      const sourceIdAllow = opts.documentId
+      const filterFn = (c: RetrievedChunk) =>
+        c.source_type === "chat_attachment" ||
+        (sourceIdAllow != null && c.source_id === sourceIdAllow) ||
+        allow.has(c.source_type)
+      vectorResults = vectorResults.filter(filterFn)
+      bm25Results = bm25Results.filter(filterFn)
     }
 
     // 3. Threshold filtering — bypassed for targeted searches.

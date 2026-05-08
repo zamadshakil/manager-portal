@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { CAPABILITIES, hasCapability } from "@/lib/permissions"
 import type {
   ActivityLogEntry,
   Announcement,
@@ -265,6 +266,15 @@ export async function getDailyMetrics(
 }
 
 export async function listRules(profile: Profile): Promise<ValidationRule[]> {
+  // Capability-driven gate. Members are blocked unless the main admin has
+  // explicitly granted them `validation_rules.read`. RLS enforces the same
+  // decision at the database boundary; this app-layer check just keeps us
+  // from issuing a guaranteed-empty round-trip and surfaces the rule clearly
+  // to anyone reading the code.
+  if (!(await hasCapability(profile, CAPABILITIES.VALIDATION_RULES_READ))) {
+    return []
+  }
+
   const supabase = await createClient()
 
   let q = supabase
@@ -272,18 +282,15 @@ export async function listRules(profile: Profile): Promise<ValidationRule[]> {
     .select("*, creator:profiles!created_by(role)")
     .order("created_at", { ascending: false })
 
-  // Scope rules:
-  // - main_admin sees all rules (no filter)
-  // - manager sees their team's rules AND global rules (team_id is null)
-  // - member should not access this directly
-  if (profile.role === "manager") {
+  // Scope: main_admin sees all rules, everyone else sees their team's rules
+  // plus globals. RLS already enforces this, but the explicit filter keeps
+  // queries narrow when running under the user-context client.
+  if (profile.role !== "main_admin") {
     if (profile.team_id) {
       q = q.or(`team_id.eq.${profile.team_id},team_id.is.null`)
     } else {
       q = q.is("team_id", null)
     }
-  } else if (profile.role !== "main_admin") {
-    return [] // Members don't have access to rules
   }
 
   const { data } = await q
