@@ -29,7 +29,7 @@ const nextConfig = {
     // ------------------------------------------------------------------
     optimizePackageImports: ["lucide-react", "date-fns", "recharts"],
   },
-  serverExternalPackages: ["unpdf", "mammoth", "officeparser", "@napi-rs/canvas"],
+  serverExternalPackages: ["unpdf", "mammoth", "officeparser", "@napi-rs/canvas", "node-unrar-js"],
 
   async headers() {
     const isDev = process.env.NODE_ENV === "development"
@@ -78,7 +78,7 @@ const nextConfig = {
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "img-src 'self' blob: data: https://*.r2.dev",
           "font-src 'self' https://fonts.gstatic.com https://frontend-cdn.perplexity.ai",
-          `connect-src 'self' ${supabaseOrigins.join(" ")} https://*.r2.dev`,
+          `connect-src 'self' ${supabaseOrigins.join(" ")} https://*.r2.dev https://*.r2.cloudflarestorage.com`,
           "frame-src 'none'",
           "frame-ancestors 'none'",
           "object-src 'none'",

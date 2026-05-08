@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server"
 import { put } from "@/lib/r2"
 import { extractText } from "@/lib/parse"
 import { indexDocument } from "@/lib/smart-ai/indexer"
-import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
+import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES, ARCHIVE_MIME_TYPES } from "@/lib/types"
 import { uploadLimiter } from "@/lib/redis"
 
 export const runtime = "nodejs"
@@ -58,7 +58,17 @@ export async function POST(req: Request) {
   }
 
   // ---- 2. Validation ---------------------------------------------------
+  const isArchive = (ARCHIVE_MIME_TYPES as readonly string[]).includes(file.type)
   if (file.size > MAX_FILE_SIZE_BYTES) {
+    if (isArchive) {
+      return NextResponse.json(
+        {
+          error: `Archive exceeds 25 MB — upload it via the Materials section which supports archives up to 100 MB.`,
+          code: "ARCHIVE_TOO_LARGE_FOR_CHAT",
+        },
+        { status: 413 },
+      )
+    }
     return NextResponse.json(
       {
         error: `File exceeds the ${Math.round(

@@ -4,7 +4,10 @@ import { useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { FolderOpen, Loader2 } from "lucide-react"
 import { createMaterial } from "@/app/actions/materials"
+import { ARCHIVE_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
 import type { UserRole } from "@/lib/types"
+
+const ARCHIVE_MIMES = new Set<string>(ARCHIVE_MIME_TYPES as readonly string[])
 
 export function MaterialUploader({
   role,
@@ -25,6 +28,102 @@ export function MaterialUploader({
   const [expiresAt, setExpiresAt] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [pending, start] = useTransition()
+  // Large-archive presigned upload state
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [uploadStage, setUploadStage] = useState<"" | "presigning" | "uploading" | "registering" | "processing">("")
+
+  const effectiveTarget = role === "manager" && currentTeamId ? currentTeamId : target
+  const isLargeArchive =
+    file !== null &&
+    ARCHIVE_MIMES.has(file.type) &&
+    file.size > MAX_FILE_SIZE_BYTES
+
+  async function handleLargeArchiveUpload() {
+    if (!file) return
+    setError(null)
+    setUploadProgress(0)
+    let succeeded = false
+
+    try {
+      // Step 1: Get presigned URL
+      setUploadStage("presigning")
+      const presignRes = await fetch("/api/materials/presign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim() || undefined,
+          tags: tags.trim() || undefined,
+          target: effectiveTarget,
+          expiresAt: expiresAt || undefined,
+          mimeType: file.type,
+          sizeBytes: file.size,
+        }),
+      })
+      const presignData = await presignRes.json()
+      if (!presignRes.ok) {
+        setError(presignData.error ?? "Could not get upload URL.")
+        return
+      }
+      const { uploadUrl, materialId } = presignData as {
+        uploadUrl: string
+        materialId: string
+      }
+
+      // Step 2: Upload directly to R2 with progress tracking
+      setUploadStage("uploading")
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open("PUT", uploadUrl)
+        xhr.setRequestHeader("Content-Type", file.type)
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            setUploadProgress(Math.round((e.loaded / e.total) * 100))
+          }
+        }
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve()
+          } else {
+            reject(new Error(`R2 upload failed: HTTP ${xhr.status}`))
+          }
+        }
+        xhr.onerror = () => reject(new Error("Network error during upload"))
+        xhr.send(file)
+      })
+      setUploadProgress(100)
+
+      // Step 3: Register the upload (triggers background processing)
+      setUploadStage("registering")
+      const regRes = await fetch("/api/materials/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ materialId }),
+      })
+      const regData = await regRes.json()
+      if (!regRes.ok) {
+        setError(regData.error ?? "Could not finalize upload.")
+        return
+      }
+
+      succeeded = true
+      setUploadStage("processing")
+      setFile(null)
+      setTitle("")
+      setDescription("")
+      setTags("")
+      setExpiresAt("")
+      if (inputRef.current) inputRef.current.value = ""
+      router.refresh()
+    } catch (err: any) {
+      setError(err?.message ?? "Upload failed.")
+    } finally {
+      if (!succeeded) {
+        setUploadStage("")
+        setUploadProgress(null)
+      }
+    }
+  }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -33,17 +132,19 @@ export function MaterialUploader({
       setError("Choose a file.")
       return
     }
+
+    if (isLargeArchive) {
+      void handleLargeArchiveUpload()
+      return
+    }
+
     const fd = new FormData()
     fd.set("file", file)
     fd.set("title", title.trim())
     fd.set("description", description.trim())
     fd.set("tags", tags.trim())
-    
-    // For managers, force their own team id
-    fd.set("target", role === "manager" && currentTeamId ? currentTeamId : target)
-    if (expiresAt) {
-      fd.set("expiresAt", expiresAt)
-    }
+    fd.set("target", effectiveTarget)
+    if (expiresAt) fd.set("expiresAt", expiresAt)
 
     start(async () => {
       const res = await createMaterial(fd)
@@ -83,7 +184,7 @@ export function MaterialUploader({
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,.doc,.docx,.txt,.ppt,.pptx,.png,.jpg,.jpeg,.xlsx,.md"
+          accept=".pdf,.doc,.docx,.txt,.ppt,.pptx,.png,.jpg,.jpeg,.xlsx,.md,.zip,.rar"
           onChange={(e) => {
             const f = e.target.files?.[0] ?? null
             setFile(f)
@@ -155,6 +256,37 @@ export function MaterialUploader({
           </label>
         ) : null}
 
+        {isLargeArchive && (
+          <p className="text-[11px] text-muted-foreground">
+            Large archive (&gt;25 MB) — will upload directly to storage and extract content in the background.
+          </p>
+        )}
+
+        {uploadProgress !== null && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-[11px] text-muted-foreground">
+              <span>
+                {uploadStage === "presigning" && "Requesting upload URL…"}
+                {uploadStage === "uploading" && `Uploading… ${uploadProgress}%`}
+                {uploadStage === "registering" && "Finalising…"}
+              </span>
+              <span>{uploadProgress}%</span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-200"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {uploadStage === "processing" && (
+          <p className="text-[12px] font-semibold text-amber-600 dark:text-amber-400">
+            Archive uploaded — extracting content in background…
+          </p>
+        )}
+
         {error ? (
           <p role="alert" className="text-[12px] font-semibold text-destructive">
             {error}
@@ -164,10 +296,10 @@ export function MaterialUploader({
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={!file || pending}
+            disabled={!file || pending || uploadProgress !== null}
             className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-9 text-[13px] font-semibold text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97] disabled:opacity-60"
           >
-            {pending ? (
+            {pending || uploadProgress !== null ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Uploading…
               </>

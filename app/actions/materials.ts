@@ -6,8 +6,9 @@ import { put, del } from "@/lib/r2"
 import { createClient } from "@/lib/supabase/server"
 import { requireRole } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
-import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
+import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES, ARCHIVE_MIME_TYPES } from "@/lib/types"
 import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
+import { processArchiveBackground } from "@/lib/archive-processor"
 
 const MetaSchema = z.object({
   title: z.string().trim().min(2).max(200),
@@ -25,7 +26,16 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
 
   const file = formData.get("file") as File | null
   if (!file || file.size === 0) return { ok: false, error: "Choose a file." }
-  if (file.size > MAX_FILE_SIZE_BYTES) return { ok: false, error: "File exceeds 25 MB." }
+  const isArchive = (ARCHIVE_MIME_TYPES as readonly string[]).includes(file.type)
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    if (isArchive) {
+      return {
+        ok: false,
+        error: "Archive exceeds 25 MB — use the large-archive upload path.",
+      }
+    }
+    return { ok: false, error: "File exceeds 25 MB." }
+  }
   if (!ACCEPTED_MIME_TYPES.includes(file.type as (typeof ACCEPTED_MIME_TYPES)[number])) {
     return { ok: false, error: `Unsupported file type: ${file.type}` }
   }
@@ -82,10 +92,11 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
       file_type: file.type,
       size_bytes: file.size,
       tags,
+      archive_status: isArchive ? "processing" : "na",
       ...(parsed.data.expiresAt && {
         expires_at: new Date(parsed.data.expiresAt).toISOString(),
       }),
-    })
+    } as any)
     .select("id")
     .single()
   if (error || !data) {
@@ -103,6 +114,18 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
     entityId: data.id,
     metadata: { mime: file.type, size: file.size, tags },
   })
+
+  // For small archives, kick off background text extraction + RAG indexing.
+  if (isArchive) {
+    void processArchiveBackground(
+      data.id,
+      blob.url,
+      file.type,
+      teamId,
+      profile.id,
+      parsed.data.title,
+    )
+  }
 
   // Index title + description + tags. The file itself is *not* yet parsed
   // into the RAG index — that's the next step (server-side text extraction
