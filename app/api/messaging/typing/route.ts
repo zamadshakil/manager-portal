@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { getRedis } from "@/lib/redis"
 
 export async function POST(req: NextRequest) {
@@ -9,6 +10,16 @@ export async function POST(req: NextRequest) {
 
   const { conv, name } = (await req.json()) as { conv: string; name: string }
   if (!conv) return NextResponse.json({ error: "conv is required" }, { status: 400 })
+
+  // Only members of the conversation may write typing indicators.
+  const admin = createAdminClient()
+  const { data: membership } = await admin
+    .from("conversation_members")
+    .select("user_id")
+    .eq("conversation_id", conv)
+    .eq("user_id", user.id)
+    .maybeSingle()
+  if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
   const redis = getRedis()
   if (redis) {

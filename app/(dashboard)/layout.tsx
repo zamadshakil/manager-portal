@@ -26,16 +26,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex h-screen overflow-hidden bg-background text-foreground">
       <DashboardSidebar role={profile.role} />
 
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <TopBar
           name={profile.full_name ?? profile.email}
           email={profile.email}
           role={profile.role}
         />
-        <main className="flex-1 px-4 lg:px-8 py-6 lg:py-8 pb-24 lg:pb-12 space-y-6 lg:space-y-8 min-w-0">
+        <main className="flex-1 min-h-0 overflow-y-auto flex flex-col px-4 lg:px-8 py-6 lg:py-8 pb-24 lg:pb-12 space-y-6 lg:space-y-8 min-w-0">
           {children}
         </main>
       </div>

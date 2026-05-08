@@ -120,7 +120,13 @@ export function useConversationRealtime({
     }
 
     async function fullSync() {
-      if (!active || realtimeActive) return
+      // Always run, even when Realtime is connected.
+      // Realtime DELETE events for message_reactions can be dropped during
+      // brief network blips; without this periodic resync a removed reaction
+      // would stay visible in the UI indefinitely. The message GET response
+      // includes the full reactions join, so handleMessageUpdated will
+      // overwrite any stale reaction state with the authoritative DB value.
+      if (!active) return
       try {
         const url =
           `/api/messaging/messages` +
@@ -197,7 +203,12 @@ export function useConversationRealtime({
       )
       .on(
         "postgres_changes" as any,
-        { event: "INSERT", schema: "public", table: "message_reactions" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "message_reactions",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
         (payload: any) => {
           if (!active) return
           const r = payload.new as MessageReaction
@@ -206,7 +217,12 @@ export function useConversationRealtime({
       )
       .on(
         "postgres_changes" as any,
-        { event: "DELETE", schema: "public", table: "message_reactions" },
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "message_reactions",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
         (payload: any) => {
           if (!active) return
           const r = payload.old as MessageReaction

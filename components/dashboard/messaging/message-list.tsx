@@ -17,7 +17,12 @@ import type { Message } from "@/lib/types"
 
 export interface MessageListHandle {
   scrollToBottom: (behavior?: ScrollBehavior) => void
-  prependMessages: (older: Message[]) => void
+  /** Scroll the virtual list to an absolute pixel offset. */
+  scrollToOffset: (offset: number) => void
+  /** Return the current scroll offset (scrollTop of the outer container). */
+  getScrollOffset: () => number
+  /** True when the user is within 100 px of the bottom of the list. */
+  isAtBottom: () => boolean
 }
 
 interface MessageListProps {
@@ -31,13 +36,15 @@ interface MessageListProps {
   onDelete: (msgId: string) => void
   onReply: (msg: Message) => void
   onRetry: (msg: Message) => void
+  /** Called (on user-initiated scroll) when the list reaches near the bottom. */
+  onScrolledToBottom?: () => void
 }
 
-const ESTIMATED_ITEM_SIZE = 72
+export const ESTIMATED_ITEM_SIZE = 72
 
 export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
   function MessageList(
-    { messages, currentUserId, loadingMore, hasMore, onLoadMore, onReact, onEdit, onDelete, onReply, onRetry },
+    { messages, currentUserId, loadingMore, hasMore, onLoadMore, onReact, onEdit, onDelete, onReply, onRetry, onScrolledToBottom },
     ref,
   ) {
     const listRef = useRef<VariableSizeList>(null)
@@ -46,6 +53,9 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
     const [showScrollBadge, setShowScrollBadge] = useState(false)
     const sentinelRef = useRef<HTMLDivElement>(null)
     const prevMessageCount = useRef(messages.length)
+    // Tracks whether the user is currently near the bottom of the list.
+    // Written on every user-initiated scroll; read by isAtBottom() on the handle.
+    const isAtBottomRef = useRef(true)
 
     const getItemSize = useCallback(
       (index: number) => {
@@ -73,9 +83,11 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
 
     useImperativeHandle(ref, () => ({
       scrollToBottom,
-      prependMessages: () => {
-        // Scroll preservation handled by react-window naturally
+      scrollToOffset: (offset: number) => {
+        listRef.current?.scrollTo(offset)
       },
+      getScrollOffset: () => outerRef.current?.scrollTop ?? 0,
+      isAtBottom: () => isAtBottomRef.current,
     }))
 
     // On initial load + new messages: auto-scroll to bottom unless user scrolled up
@@ -154,7 +166,13 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
             const outer = outerRef.current
             if (!outer) return
             const distanceFromBottom = outer.scrollHeight - scrollOffset - outer.clientHeight
-            if (distanceFromBottom < 50) setShowScrollBadge(false)
+            isAtBottomRef.current = distanceFromBottom < 100
+            if (distanceFromBottom < 50) {
+              setShowScrollBadge(false)
+              // Notify parent so it can mark the conversation as read when
+              // the user scrolls down to the latest message.
+              onScrolledToBottom?.()
+            }
           }}
         />
 
