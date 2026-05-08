@@ -92,7 +92,6 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
       file_type: file.type,
       size_bytes: file.size,
       tags,
-      archive_status: isArchive ? "processing" : "na",
       ...(parsed.data.expiresAt && {
         expires_at: new Date(parsed.data.expiresAt).toISOString(),
       }),
@@ -104,6 +103,16 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
       await del(blob.url)
     } catch {}
     return { ok: false, error: error?.message ?? "Could not save material." }
+  }
+
+  // Set archive_status separately so the insert succeeds even if the migration
+  // has not been applied yet (column will simply not exist in schema cache).
+  if (isArchive) {
+    void supabase
+      .from("materials")
+      .update({ archive_status: "processing" } as any)
+      .eq("id", data.id)
+      .then(() => {}, () => {})
   }
 
   await logActivity({

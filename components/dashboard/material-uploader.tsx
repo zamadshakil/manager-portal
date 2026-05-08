@@ -37,6 +37,10 @@ export function MaterialUploader({
     file !== null &&
     ARCHIVE_MIMES.has(file.type) &&
     file.size > MAX_FILE_SIZE_BYTES
+  const isOversized =
+    file !== null &&
+    !ARCHIVE_MIMES.has(file.type) &&
+    file.size > MAX_FILE_SIZE_BYTES
 
   async function handleLargeArchiveUpload() {
     if (!file) return
@@ -130,6 +134,12 @@ export function MaterialUploader({
     setError(null)
     if (!file) {
       setError("Choose a file.")
+      return
+    }
+
+    // Reject non-archive files that exceed the server action body limit
+    if (!ARCHIVE_MIMES.has(file.type) && file.size > MAX_FILE_SIZE_BYTES) {
+      setError(`File exceeds the 25 MB limit (${(file.size / 1024 / 1024).toFixed(1)} MB). Please compress it or choose a smaller file.`)
       return
     }
 
@@ -256,6 +266,12 @@ export function MaterialUploader({
           </label>
         ) : null}
 
+        {isOversized && (
+          <p className="text-[12px] font-semibold text-destructive">
+            File is {(file!.size / 1024 / 1024).toFixed(1)} MB — maximum is 25 MB for non-archive files. Please compress it or use a ZIP archive.
+          </p>
+        )}
+
         {isLargeArchive && (
           <p className="text-[11px] text-muted-foreground">
             Large archive (&gt;25 MB) — will upload directly to storage and extract content in the background.
@@ -296,7 +312,7 @@ export function MaterialUploader({
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={!file || pending || uploadProgress !== null}
+            disabled={!file || pending || uploadProgress !== null || isOversized}
             className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-9 text-[13px] font-semibold text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97] disabled:opacity-60"
           >
             {pending || uploadProgress !== null ? (

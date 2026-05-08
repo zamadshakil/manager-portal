@@ -133,7 +133,6 @@ export async function POST(req: Request) {
       size_bytes: sizeBytes,
       tags: tagList,
       ...(expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {}),
-      archive_status: "pending",
     } as any)
     .select("id")
     .single()
@@ -142,6 +141,13 @@ export async function POST(req: Request) {
     console.error("[presign] DB insert failed:", error?.message)
     return NextResponse.json({ error: "Could not save material record." }, { status: 500 })
   }
+
+  // Set archive_status separately — insert must succeed even before migration
+  void supabase
+    .from("materials")
+    .update({ archive_status: "pending" } as any)
+    .eq("id", data.id)
+    .then(() => {}, () => {})
 
   await logActivity({
     actorId: profile.id,
