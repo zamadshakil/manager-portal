@@ -1,8 +1,15 @@
-import { type NextRequest } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 import { updateSession } from "@/lib/supabase/proxy"
 
 export async function proxy(request: NextRequest) {
-  return await updateSession(request)
+  const traceId = crypto.randomUUID().replace(/-/g, "")
+
+  const response = (await updateSession(request)) ?? NextResponse.next()
+
+  response.headers.set("x-trace-id", traceId)
+  response.headers.set("x-pathname", request.nextUrl.pathname)
+
+  return response
 }
 
 export const config = {
