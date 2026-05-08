@@ -334,12 +334,13 @@ export async function listTeamMembers(profile: Profile): Promise<Profile[]> {
 export async function listAllProfiles(profile: Profile): Promise<Profile[]> {
   if (profile.role !== "main_admin") return []
   const supabase = createAdminClient()
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("profiles")
     .select("*")
-    .is("deleted_at", null)
+    .not("role", "eq", "__nonexistent__")
     .order("created_at", { ascending: true })
-  return (data ?? []) as Profile[]
+  if (error) console.error("[listAllProfiles] error:", error.message)
+  return ((data ?? []) as Profile[]).filter((p) => p.deleted_at == null)
 }
 
 export async function listTeams(): Promise<Team[]> {
