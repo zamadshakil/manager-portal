@@ -21,6 +21,7 @@ export type Database = {
           avatar_url: string | null
           deleted_at: string | null
           pending_email: string | null
+          email_change_token_hash: string | null
           email_change_token_expires_at: string | null
           email_change_requested_at: string | null
           email_change_requested_by: string | null
@@ -38,6 +39,7 @@ export type Database = {
           avatar_url?: string | null
           deleted_at?: string | null
           pending_email?: string | null
+          email_change_token_hash?: string | null
           email_change_token_expires_at?: string | null
           email_change_requested_at?: string | null
           email_change_requested_by?: string | null
@@ -55,6 +57,7 @@ export type Database = {
           avatar_url?: string | null
           deleted_at?: string | null
           pending_email?: string | null
+          email_change_token_hash?: string | null
           email_change_token_expires_at?: string | null
           email_change_requested_at?: string | null
           email_change_requested_by?: string | null
@@ -557,7 +560,7 @@ export type Database = {
           file_name: string
           file_url: string
           file_type: string | null
-          rag_status: "pending" | "indexed" | "failed" | "skipped"
+          rag_status: "pending" | "indexed" | "failed" | "skipped" | "processing" | "completed"
           text_excerpt: string | null
           indexed_at: string | null
           created_at: string
@@ -569,13 +572,13 @@ export type Database = {
           file_name: string
           file_url: string
           file_type?: string | null
-          rag_status?: "pending" | "indexed" | "failed" | "skipped"
+          rag_status?: "pending" | "indexed" | "failed" | "skipped" | "processing" | "completed"
           text_excerpt?: string | null
           indexed_at?: string | null
           created_at?: string
         }
         Update: {
-          rag_status?: "pending" | "indexed" | "failed" | "skipped"
+          rag_status?: "pending" | "indexed" | "failed" | "skipped" | "processing" | "completed"
           text_excerpt?: string | null
           indexed_at?: string | null
         }
@@ -820,6 +823,44 @@ export type Database = {
           updated_at: string
         }[]
       }
+      assign_task_to_team: {
+        Args: { p_task_id: string; p_team_id: string }
+        Returns: number
+      }
+      invalidate_user_sessions: {
+        Args: { target_user_id: string }
+        Returns: undefined
+      }
+      get_department_credit_summary: {
+        Args: Record<string, never>
+        Returns: {
+          team_id: string
+          team_name: string
+          total_credits: number
+          used_credits: number
+          remaining_credits: number
+          user_count: number
+        }[]
+      }
+      get_top_credit_consumers: {
+        Args: { p_limit: number }
+        Returns: {
+          user_id: string
+          full_name: string | null
+          email: string
+          team_name: string | null
+          total_credits: number
+        }[]
+      }
+      get_latest_thread_messages: {
+        Args: { thread_ids: string[] }
+        Returns: {
+          thread_id: string
+          role: string
+          content: string
+          created_at: string
+        }[]
+      }
     }
     Enums: {
       user_role: "main_admin" | "manager" | "member"
@@ -830,7 +871,7 @@ export type Database = {
       conversation_type: "dm" | "group"
       member_role: "admin" | "member"
       message_type: "text" | "image" | "file" | "audio" | "video"
-      rag_status: "pending" | "indexed" | "failed" | "skipped"
+      rag_status: "pending" | "indexed" | "failed" | "skipped" | "processing" | "completed"
     }
     CompositeTypes: {
       [_ in never]: never

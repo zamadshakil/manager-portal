@@ -163,7 +163,7 @@ async function runPipeline(submissionId: string) {
       console.error("[pipeline] submission not found", submissionId, subError)
       return
     }
-    const submission = subData as Submission
+    const submission = subData as unknown as Submission
 
     // Credit pre-check — bail before any parse/LLM work if the uploader is over quota.
     // The period is advanced first so a stale counter doesn't block a new billing period.
@@ -571,7 +571,7 @@ async function runPipeline(submissionId: string) {
         status: finalStatus,
         score: Number(aggScore.toFixed(2)),
         summary,
-        flags: aggregateFlags,
+        flags: aggregateFlags as unknown as any,
         extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
         metadata: {
           rules_evaluated: persistable.length,

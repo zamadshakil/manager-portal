@@ -295,7 +295,7 @@ async function insertViaRpc(
   if (deleteError) {
     console.warn("[rag] delete_rag_chunks rpc non-fatal:", deleteError.message)
   }
-  const { error } = await supabase.rpc("insert_rag_chunks", { rows })
+  const { error } = await supabase.rpc("insert_rag_chunks", { rows: rows as unknown as any })
   if (error) {
     throw new Error(
       `${error.message}${error.hint ? ` (hint: ${error.hint})` : ""}${
@@ -321,7 +321,7 @@ async function insertViaPostgrest(
     .delete()
     .eq("source_type", r0.source_type)
     .eq("source_id", r0.source_id)
-  const { error } = await supabase.from("rag_documents").insert(rows)
+  const { error } = await supabase.from("rag_documents").insert(rows as unknown as any)
   if (error) {
     throw new Error(
       `${error.message}${error.hint ? ` (hint: ${error.hint})` : ""}${

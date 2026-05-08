@@ -32,7 +32,7 @@ export async function processSubmission(submissionId: string): Promise<{ status:
       return { status: "skipped or completed" };
     }
 
-    const submission = sub as Submission;
+    const submission = sub as unknown as Submission;
 
     const [{ data: rulesData }, taskRow] = await Promise.all([
       admin.from("validation_rules").select("*").or(`team_id.eq.${submission.team_id},team_id.is.null`).eq("enabled", true),
@@ -194,7 +194,7 @@ export async function processSubmission(submissionId: string): Promise<{ status:
       status: finalStatus as any,
       score: finalScore,
       summary: summaryData.summary,
-      flags: aggregateFlags,
+      flags: aggregateFlags as unknown as any,
     }).eq("id", submissionId);
 
     // ── Stage 9: Reindex for RAG ──────────────────────────────────────

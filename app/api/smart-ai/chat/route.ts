@@ -360,7 +360,7 @@ export async function POST(req: Request) {
 
     const { error: msgErr } = await persistClient
       .from("chat_messages")
-      .insert(msgPayload)
+      .insert(msgPayload as any)
 
     if (msgErr) {
       console.error("[smart-ai] user message save failed:", msgErr.message, msgErr.code)
@@ -665,7 +665,7 @@ export async function POST(req: Request) {
           filtersArg: typeof validFilters,
           applyOrder: boolean,
         ) => {
-          let builder: any = supabase.from(table).select(selectArg)
+          let builder: any = supabase.from(table as any).select(selectArg)
           for (const f of filtersArg) {
             const v = f.value
             switch (f.op) {
@@ -1300,7 +1300,7 @@ export async function POST(req: Request) {
             }
             await persistClient
               .from("chat_threads")
-              .update(updates)
+              .update(updates as any)
               .eq("id", threadId)
           }
         } catch (persistErr: any) {

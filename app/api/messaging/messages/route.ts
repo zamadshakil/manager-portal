@@ -197,7 +197,7 @@ export async function POST(req: NextRequest) {
       media_url: media_url ?? null,
       media_metadata: media_metadata ?? null,
       reply_to_id: reply_to_id ?? null,
-    })
+    } as any)
     .select(`
       id, conversation_id, sender_id, content, type,
       media_url, media_metadata, reply_to_id, edited_at, deleted_at, created_at,
