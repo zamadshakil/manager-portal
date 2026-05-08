@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin"
 
 type Params = { params: Promise<{ id: string }> }
 
+const EMOJI_RE = /^\p{Emoji}/u
+
 export async function POST(req: NextRequest, { params }: Params) {
   const { id } = await params
   const supabase = await createClient()
@@ -11,34 +13,35 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const { emoji } = (await req.json()) as { emoji: string }
-  if (!emoji) return NextResponse.json({ error: "emoji is required" }, { status: 400 })
+  if (!emoji || !EMOJI_RE.test(emoji))
+    return NextResponse.json({ error: "emoji is required" }, { status: 400 })
 
   const admin = createAdminClient()
 
-  // Check if reaction already exists — if so, remove it (toggle)
-  const { data: existing } = await admin
-    .from("message_reactions")
-    .select("message_id")
-    .eq("message_id", id)
-    .eq("user_id", user.id)
-    .eq("emoji", emoji)
+  // Verify the message exists and the caller is a member of its conversation.
+  const { data: msg } = await admin
+    .from("messages")
+    .select("conversation_id")
+    .eq("id", id)
     .maybeSingle()
+  if (!msg) return NextResponse.json({ error: "Message not found" }, { status: 404 })
 
-  if (existing) {
-    const { error } = await admin
-      .from("message_reactions")
-      .delete()
-      .eq("message_id", id)
-      .eq("user_id", user.id)
-      .eq("emoji", emoji)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json({ action: "removed" })
-  }
+  const { data: member } = await admin
+    .from("conversation_members")
+    .select("user_id")
+    .eq("conversation_id", msg.conversation_id)
+    .eq("user_id", user.id)
+    .maybeSingle()
+  if (!member) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-  const { error } = await admin
-    .from("message_reactions")
-    .insert({ message_id: id, user_id: user.id, emoji })
+  // Single round-trip toggle via RPC (migration 20260512_messaging_ux.sql).
+  // INSERT ... ON CONFLICT DO NOTHING: if inserted → "added"; else DELETE → "removed".
+  const { data: action, error } = await admin.rpc("toggle_reaction", {
+    p_message_id: id,
+    p_user_id: user.id,
+    p_emoji: emoji,
+  })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ action: "added" })
+  return NextResponse.json({ action })
 }

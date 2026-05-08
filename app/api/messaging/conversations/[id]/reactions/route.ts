@@ -24,31 +24,29 @@ export async function GET(req: NextRequest, { params }: Params) {
     .maybeSingle()
   if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-  // Fetch reactions added after the cursor for messages in this conversation.
+  // Fetch reactions added after the cursor for messages in THIS conversation.
+  // We filter server-side via the denormalized conversation_id column added
+  // in migration 20260509_messaging_security_critical.sql so we never load
+  // reactions belonging to other conversations into the Node process.
   // Since hard-deleted reactions have no tombstone row we return only additions;
   // removes are handled by the 30 s full-sync safety net in the hook.
   const { data, error } = await admin
     .from("message_reactions")
-    .select(`
-      message_id, user_id, emoji, created_at,
-      message:messages!message_id ( conversation_id )
-    `)
+    .select("message_id, user_id, emoji, created_at")
+    .eq("conversation_id", conversationId)
     .gt("created_at", after)
     .order("created_at", { ascending: true })
     .limit(200)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Filter to only reactions for this conversation and attach action
-  const filtered = (data ?? [])
-    .filter((r: any) => r.message?.conversation_id === conversationId)
-    .map((r: any) => ({
-      message_id: r.message_id,
-      user_id:    r.user_id,
-      emoji:      r.emoji,
-      created_at: r.created_at,
-      action:     "added" as const,
-    }))
+  const result = (data ?? []).map((r) => ({
+    message_id: r.message_id as string,
+    user_id:    r.user_id    as string,
+    emoji:      r.emoji      as string,
+    created_at: r.created_at as string,
+    action:     "added" as const,
+  }))
 
-  return NextResponse.json(filtered)
+  return NextResponse.json(result)
 }

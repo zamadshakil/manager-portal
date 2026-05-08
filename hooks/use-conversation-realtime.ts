@@ -4,7 +4,9 @@ import { useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { Message, MessageReaction, TypingUser } from "@/lib/types"
 
-// Poll intervals — active only when Supabase Realtime is unavailable
+// Poll intervals — kept active for reliability.
+// Realtime can be "SUBSCRIBED" yet not deliver DB events if publication is
+// misconfigured, so polling remains the guaranteed delivery path.
 const MSG_POLL_MS    = 2000
 const MOD_POLL_MS    = 3000
 const REACT_POLL_MS  = 2500
@@ -118,7 +120,13 @@ export function useConversationRealtime({
     }
 
     async function fullSync() {
-      if (!active || realtimeActive) return
+      // Always run, even when Realtime is connected.
+      // Realtime DELETE events for message_reactions can be dropped during
+      // brief network blips; without this periodic resync a removed reaction
+      // would stay visible in the UI indefinitely. The message GET response
+      // includes the full reactions join, so handleMessageUpdated will
+      // overwrite any stale reaction state with the authoritative DB value.
+      if (!active) return
       try {
         const url =
           `/api/messaging/messages` +
@@ -131,7 +139,7 @@ export function useConversationRealtime({
       } catch { /* silent */ }
     }
 
-    // ── Polling timers (only active when Realtime is down) ───────────────────
+    // ── Polling timers (always-on reliability path) ───────────────────────────
 
     let msgTimer:      ReturnType<typeof setInterval> | null = null
     let modTimer:      ReturnType<typeof setInterval> | null = null
@@ -195,7 +203,12 @@ export function useConversationRealtime({
       )
       .on(
         "postgres_changes" as any,
-        { event: "INSERT", schema: "public", table: "message_reactions" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "message_reactions",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
         (payload: any) => {
           if (!active) return
           const r = payload.new as MessageReaction
@@ -204,7 +217,12 @@ export function useConversationRealtime({
       )
       .on(
         "postgres_changes" as any,
-        { event: "DELETE", schema: "public", table: "message_reactions" },
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "message_reactions",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
         (payload: any) => {
           if (!active) return
           const r = payload.old as MessageReaction
@@ -215,7 +233,8 @@ export function useConversationRealtime({
         if (!active) return
         if (status === "SUBSCRIBED") {
           realtimeActive = true
-          stopPolling()  // Realtime takes over — no polling needed
+          // Keep polling active even when subscribed; Realtime is used as an
+          // accelerator, not the only source of truth.
         } else if (
           status === "CHANNEL_ERROR" ||
           status === "TIMED_OUT" ||
@@ -226,7 +245,7 @@ export function useConversationRealtime({
         }
       })
 
-    // Start polling immediately; Realtime will disable it once connected
+    // Start polling immediately; Realtime accelerates updates when available
     startPolling()
 
     return () => {

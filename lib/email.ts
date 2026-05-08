@@ -27,7 +27,7 @@ export async function sendWelcomeEmail({ email, fullName, role, password }: Welc
   const apiKey = process.env.BREVO_API_KEY
   const senderEmail = process.env.BREVO_SENDER_EMAIL
   const senderName = process.env.BREVO_SENDER_NAME || "AI Manager Portal"
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://manager-portal-production-55a7.up.railway.app"
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? ""
 
   if (!apiKey || !senderEmail) {
     console.warn("[email] BREVO_API_KEY or BREVO_SENDER_EMAIL is missing. Skipping email dispatch.")

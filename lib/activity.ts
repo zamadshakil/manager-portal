@@ -30,7 +30,7 @@ export async function logActivity(params: LogParams) {
       action: params.action,
       entity_type: params.entityType,
       entity_id: params.entityId ?? null,
-      metadata: params.metadata ?? {},
+      metadata: (params.metadata ?? {}) as any,
       ip_address: ip,
       user_agent: ua,
     })

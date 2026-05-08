@@ -1,4 +1,5 @@
 import { Suspense } from "react"
+import Image from "next/image"
 import LoginForm from "@/components/auth/login-form"
 
 export const dynamic = "force-dynamic"
@@ -8,10 +9,12 @@ export default function LoginPage() {
     <main className="relative min-h-svh flex items-center justify-center p-4 overflow-hidden bg-[#030712]">
       {/* Background Hero Image */}
       <div className="absolute inset-0 z-0">
-        <img 
-          src="/professional_dark_bg.png" 
-          alt="Hierarchia Portal" 
-          className="absolute inset-0 w-full h-full object-cover opacity-60 mix-blend-screen"
+        <Image
+          src="/professional_dark_bg.png"
+          alt="Hierarchia Portal"
+          fill
+          priority
+          className="object-cover opacity-60 mix-blend-screen"
         />
         {/* Overlay gradients for better readability */}
         <div className="absolute inset-0 bg-gradient-to-b from-[#030712]/80 via-[#030712]/40 to-[#030712]/90" />

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { presignPut } from "@/lib/r2"
 
 const ALLOWED_TYPES = new Set([
@@ -33,9 +34,22 @@ export async function POST(req: NextRequest) {
   if (!ALLOWED_TYPES.has(contentType)) {
     return NextResponse.json({ error: "File type not allowed" }, { status: 400 })
   }
+  if (typeof size !== "number" || size <= 0) {
+    return NextResponse.json({ error: "size must be a positive number" }, { status: 400 })
+  }
   if (size > MAX_SIZE) {
     return NextResponse.json({ error: "File too large (max 50 MB)" }, { status: 400 })
   }
+
+  // Only members of the target conversation may upload files to its path.
+  const admin = createAdminClient()
+  const { data: membership } = await admin
+    .from("conversation_members")
+    .select("user_id")
+    .eq("conversation_id", conversationId)
+    .eq("user_id", user.id)
+    .maybeSingle()
+  if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
   const ext = fileName.split(".").pop() ?? "bin"
   const key = `messaging/${conversationId}/${crypto.randomUUID()}.${ext}`

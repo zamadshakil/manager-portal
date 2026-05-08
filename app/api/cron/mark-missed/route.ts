@@ -135,14 +135,6 @@ export async function GET(request: Request) {
       expiredMaterialsDeleted: expiredMatRows.length,
     };
 
-    // Optional: record execution in Redis for monitoring
-    try {
-      const { recordTaskExecution } = await import("@/lib/upstash-scheduler");
-      await recordTaskExecution("mark-missed", result);
-    } catch (e) {
-      console.error("Failed to record task execution", e);
-    }
-
     console.log("[cron] mark-missed completed:", result);
     return NextResponse.json(result);
   } catch (error: any) {

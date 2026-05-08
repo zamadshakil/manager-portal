@@ -52,7 +52,8 @@ export async function POST(
   try {
     admin = createAdminClient()
   } catch (err: any) {
-    return NextResponse.json({ error: "Admin client init failed", details: err.message }, { status: 500 })
+    console.error("[pipeline] admin client init failed:", err.message)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 
   const { data: sub } = await admin

@@ -163,7 +163,38 @@ async function runPipeline(submissionId: string) {
       console.error("[pipeline] submission not found", submissionId, subError)
       return
     }
-    const submission = subData as Submission
+    const submission = subData as unknown as Submission
+
+    // Credit pre-check — bail before any parse/LLM work if the uploader is over quota.
+    // The period is advanced first so a stale counter doesn't block a new billing period.
+    try {
+      await admin.rpc("maybe_reset_period", { p_user_id: submission.uploader_id })
+      const { data: creditRow } = await admin
+        .from("ai_credit_limits")
+        .select("is_unlimited, used_this_period, monthly_limit")
+        .eq("user_id", submission.uploader_id)
+        .maybeSingle()
+      if (creditRow && !creditRow.is_unlimited && creditRow.used_this_period >= creditRow.monthly_limit) {
+        await admin
+          .from("submissions")
+          .update({
+            status: "failed",
+            flags: [
+              {
+                severity: "fail" as const,
+                message: "AI credit limit reached for this period. Ask your administrator to increase your limit.",
+              },
+            ] satisfies SubmissionFlag[],
+          })
+          .eq("id", submissionId)
+        clearTimeout(deadlineTimer)
+        return
+      }
+    } catch (creditErr: any) {
+      // Non-fatal: if the credit check errors, let the pipeline proceed rather than
+      // blocking a legitimate submission. The accounting step at the end still runs.
+      console.warn("[pipeline] credit pre-check failed (non-fatal):", creditErr?.message)
+    }
 
     await admin.from("submissions").update({ status: "parsing" }).eq("id", submissionId)
 
@@ -540,7 +571,7 @@ async function runPipeline(submissionId: string) {
         status: finalStatus,
         score: Number(aggScore.toFixed(2)),
         summary,
-        flags: aggregateFlags,
+        flags: aggregateFlags as unknown as any,
         extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
         metadata: {
           rules_evaluated: persistable.length,

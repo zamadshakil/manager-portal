@@ -5,7 +5,7 @@ import { Info } from "lucide-react"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { MessageList, type MessageListHandle } from "./message-list"
+import { MessageList, type MessageListHandle, ESTIMATED_ITEM_SIZE } from "./message-list"
 import { MessageComposer } from "./message-composer"
 import { TypingIndicator } from "./typing-indicator"
 import { useConversationRealtime } from "@/hooks/use-conversation-realtime"
@@ -24,6 +24,11 @@ export function ConversationView({
   currentUserId,
   currentUserName,
 }: ConversationViewProps) {
+  // Compute validity flag BEFORE hooks — used as a conditional render guard
+  // at the bottom of the function.  We cannot do an early return here because
+  // all hooks below must be called unconditionally (Rules of Hooks).
+  const isInvalidConversation = !conversation.id || typeof conversation.id !== "string"
+
   const [messages, setMessages] = useState<Message[]>([])
   const [loadingInitial, setLoadingInitial] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -34,15 +39,6 @@ export function ConversationView({
   replyToRef.current = replyTo
   const [infoOpen, setInfoOpen] = useState(false)
   const listRef = useRef<MessageListHandle>(null)
-
-  // Defensive: never mount for an invalid conversation object
-  if (!conversation.id || typeof conversation.id !== "string") {
-    return (
-      <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-        Invalid conversation
-      </div>
-    )
-  }
 
   const fetchMessages = useCallback(async (before?: string) => {
     const params = new URLSearchParams({ conv: conversation.id, limit: "50" })
@@ -74,23 +70,56 @@ export function ConversationView({
       .finally(() => setLoadingInitial(false))
   }, [fetchMessages, patchReplyTos])
 
-  // Mark as read whenever conversation is opened or new messages arrive
+  // Mark the conversation as read — only when the tab is focused AND the user
+  // is at (or near) the bottom of the list.  Calling it when scrolled up or
+  // with the tab in the background would incorrectly zero the unread counter.
+  const markRead = useCallback(() => {
+    if (!document.hasFocus()) return
+    if (!listRef.current?.isAtBottom()) return
+    fetch(`/api/messaging/conversations/${conversation.id}/read`, { method: "POST" }).catch(() => {})
+  }, [conversation.id]) // listRef is a stable ref; isAtBottom reads from isAtBottomRef at call-time
+
+  // Trigger on new messages arriving while the user is already at the bottom
   useEffect(() => {
     if (messages.length === 0) return
-    fetch(`/api/messaging/conversations/${conversation.id}/read`, { method: "POST" }).catch(() => {})
-  }, [conversation.id, messages.length])
+    markRead()
+  }, [conversation.id, messages.length, markRead])
+
+  // Re-check when the user returns to this tab (focus or visibility change)
+  useEffect(() => {
+    const onFocus = () => markRead()
+    const onVisible = () => { if (!document.hidden) markRead() }
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [markRead])
 
   const handleLoadMore = useCallback(async () => {
     if (loadingMore || !hasMore || messages.length === 0) return
     setLoadingMore(true)
+    // Capture scroll position before prepending so react-window's virtual
+    // layout shift doesn't jump the viewport to a different message.
+    const prevOffset = listRef.current?.getScrollOffset() ?? 0
     try {
       const oldest = messages[0]?.created_at
       const older = await fetchMessages(oldest)
+      // New items are unmeasured; use the same estimate react-window uses.
+      const addedHeight = older.length * ESTIMATED_ITEM_SIZE
       setMessages((prev) => {
         const combined = [...older, ...prev]
         return [...patchReplyTos(older, combined), ...prev]
       })
       setHasMore(older.length === 50)
+      // Two rAFs: first waits for React to commit new items to the DOM;
+      // second waits for react-window to recalculate the virtual layout.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToOffset(prevOffset + addedHeight)
+        })
+      })
     } catch {
       toast.error("Failed to load older messages")
     } finally {
@@ -191,9 +220,14 @@ export function ConversationView({
       if (!res.ok) throw new Error(await res.text())
       const real: Message = await res.json()
       setMessages((prev) => {
-        // Preserve reply_to from the optimistic message if the server join returned null
         const optimistic = prev.find((m) => m.id === tmpId)
         const replyTo = real.reply_to ?? optimistic?.reply_to ?? null
+        // Realtime may have delivered the real row before the POST response
+        // arrived and already added it to state. If so, just drop the tmp
+        // placeholder to avoid having two copies of the same message.
+        if (prev.some((m) => m.id === real.id)) {
+          return prev.filter((m) => m.id !== tmpId)
+        }
         return prev.map((m) => (m.id === tmpId ? { ...real, reply_to: replyTo, status: "sent" } : m))
       })
     } catch {
@@ -270,6 +304,14 @@ export function ConversationView({
   const headerInitials = headerName.slice(0, 2).toUpperCase()
   const memberCount = conversation.members?.length ?? 0
 
+  if (isInvalidConversation) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
+        Invalid conversation
+      </div>
+    )
+  }
+
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0">
       {/* Header */}
@@ -309,6 +351,7 @@ export function ConversationView({
           onDelete={handleDelete}
           onReply={setReplyTo}
           onRetry={handleRetry}
+          onScrolledToBottom={markRead}
         />
       )}
 

@@ -24,120 +24,90 @@ export function MessagingLayout({
   const [loading, setLoading] = useState(true)
 
   const presenceRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Stable ref so fetchConversations can zero unread for the active conversation
+  // without taking selectedId as a hook dependency (which would restart effects).
+  const selectedIdRef = useRef<string | null>(null)
+  selectedIdRef.current = selectedId
 
-  // Fetch conversation list
-  const fetchConversations = useCallback(async () => {
+  // Fetch conversation list and merge into state.
+  // When the currently-selected conversation is refreshed from the server its
+  // unread_count is forced to 0 (user is actively viewing it) and the richer
+  // client-side members array is preserved to avoid flickering.
+  const fetchConversations = useCallback(async (showErrorToast = false) => {
     try {
       const res = await fetch("/api/messaging/conversations")
       if (!res.ok) throw new Error("Failed to load conversations")
       const data: Conversation[] = await res.json()
-      setConversations(data)
+      setConversations((prev) =>
+        (data as Conversation[]).map((fc) => {
+          if (fc.id === selectedIdRef.current) {
+            const existing = prev.find((c) => c.id === fc.id)
+            return { ...fc, members: existing?.members ?? fc.members, unread_count: 0 }
+          }
+          return fc
+        }),
+      )
     } catch {
-      toast.error("Could not load conversations")
+      if (showErrorToast) toast.error("Could not load conversations")
     }
-  }, [])
+  }, []) // no deps — uses selectedIdRef instead of selectedId
 
-  useEffect(() => {
-    fetchConversations().finally(() => setLoading(false))
+  // Debounced refresh — coalesces rapid-fire Realtime events (e.g. a burst of
+  // incoming messages) into a single fetch 400 ms after the last trigger.
+  const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scheduleRefresh = useCallback(() => {
+    if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
+    refreshDebounceRef.current = setTimeout(() => void fetchConversations(), 400)
   }, [fetchConversations])
 
-  // Background poll — refresh sidebar (last_message + unread_count) every 2 s.
-  // Only the non-selected conversations are fully replaced; the selected one
-  // keeps unread_count = 0 since it is currently being viewed.
-  // This runs as a fallback when Realtime is unavailable.
   useEffect(() => {
-    const timer = setInterval(async () => {
-      try {
-        const res = await fetch("/api/messaging/conversations")
-        if (!res.ok) return
-        const fresh: Conversation[] = await res.json()
-        setConversations((prev) => {
-          return fresh.map((fc) => {
-            if (fc.id === selectedId) {
-              // Preserve the selected conv's member data but keep unread = 0
-              const existing = prev.find((c) => c.id === fc.id)
-              return { ...fc, members: existing?.members ?? fc.members, unread_count: 0 }
-            }
-            return fc
-          })
-        })
-      } catch {
-        // silent — stale data is acceptable
-      }
-    }, 2_000)
-    return () => clearInterval(timer)
-  }, [selectedId])
+    fetchConversations(true).finally(() => setLoading(false))
+  }, [fetchConversations])
 
-  // Supabase Realtime: sidebar channel for new conversations and message updates
+  // Safety-net poll at 30 s.
+  // Realtime is the primary delivery path; this catches any events that slip
+  // through when the channel is degraded. 30 s matches the presence heartbeat
+  // cadence and avoids a constant per-user background request every 5 s.
+  useEffect(() => {
+    const timer = setInterval(() => void fetchConversations(), 30_000)
+    return () => clearInterval(timer)
+  }, [fetchConversations]) // stable — no selectedId dep needed
+
+  // Supabase Realtime: sidebar channel for new conversations and message updates.
+  // Both handlers call scheduleRefresh() (debounced 400 ms) instead of fetching
+  // directly — this coalesces bursts and avoids duplicate in-flight requests.
+  // The effect no longer depends on selectedId, so the channel is not recreated
+  // every time the user clicks a different conversation.
   useEffect(() => {
     const supabase = createClient()
     let active = true
-    let realtimeActive = false
 
     const channel = supabase
       .channel(`sidebar:${currentUserId}`)
       .on(
         "postgres_changes" as any,
         { event: "INSERT", schema: "public", table: "conversation_members" },
-        async (payload: any) => {
+        (payload: any) => {
           if (!active || payload.new.user_id !== currentUserId) return
-          // New conversation added — refresh full list
-          try {
-            const res = await fetch("/api/messaging/conversations")
-            if (res.ok) {
-              const fresh: Conversation[] = await res.json()
-              setConversations(fresh)
-            }
-          } catch {}
+          scheduleRefresh()
         },
       )
       .on(
         "postgres_changes" as any,
         { event: "INSERT", schema: "public", table: "messages" },
-        async (payload: any) => {
+        () => {
           if (!active) return
-          const convId = payload.new.conversation_id
-          // Refresh the specific conversation to get updated last_message and unread_count
-          try {
-            const res = await fetch("/api/messaging/conversations")
-            if (res.ok) {
-              const fresh: Conversation[] = await res.json()
-              setConversations((prev) => {
-                const updated = fresh.find((c) => c.id === convId)
-                if (!updated) return prev
-                return prev.map((c) => {
-                  if (c.id === convId) {
-                    return {
-                      ...updated,
-                      unread_count: c.id === selectedId ? 0 : updated.unread_count,
-                    }
-                  }
-                  return c
-                })
-              })
-            }
-          } catch {}
+          scheduleRefresh()
         },
       )
-      .subscribe((status: string) => {
-        if (!active) return
-        if (status === "SUBSCRIBED") {
-          realtimeActive = true
-        } else if (
-          status === "CHANNEL_ERROR" ||
-          status === "TIMED_OUT" ||
-          status === "CLOSED"
-        ) {
-          realtimeActive = false
-        }
-      })
+      .subscribe()
 
     return () => {
       active = false
-      realtimeActive = false
+      if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
       supabase.removeChannel(channel)
     }
-  }, [currentUserId, selectedId])
+  }, [currentUserId, scheduleRefresh])
 
   // Presence heartbeat every 30 s
   useEffect(() => {
@@ -169,7 +139,7 @@ export function MessagingLayout({
   }, [])
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] -mx-4 lg:-mx-8 -my-6 lg:-my-8 overflow-hidden">
+    <div className="flex flex-1 min-h-0 -mx-4 lg:-mx-8 -my-6 lg:-my-8 overflow-hidden">
       <ConversationSidebar
         conversations={conversations}
         selectedId={selectedId}

@@ -306,3 +306,58 @@ All boundaries enforced at:
 2. **Database query level**: `listRules()`, `listTeamMembers()` filtering
 3. **Server action level**: `canManageTeam()` checks
 4. **RLS level**: Supabase policies on sensitive tables
+
+---
+
+## Messaging Subsystem
+
+```
+┌─ MESSAGING UI ─────────────────────────────────────────────────┐
+│ /dashboard/messages                                            │
+│ ├─ MessagingLayout (split view + URL state)                    │
+│ │  ├─ ConversationSidebar     (DMs + groups, unread badges)    │
+│ │  ├─ ConversationView                                         │
+│ │  │  ├─ MessageList         (virtualized, replies, reactions) │
+│ │  │  ├─ TypingIndicator                                       │
+│ │  │  └─ MessageComposer     (text + file/image upload)        │
+│ │  └─ DmInfoSheet / GroupInfoSheet                             │
+│ └─ NewConversationModal       (DM-by-search or group creation) │
+└────────────────────────────────────────────────────────────────┘
+
+┌─ API ROUTES ──────────────────────────────────────────────────┐
+│ /api/messaging/conversations              GET/POST            │
+│ /api/messaging/conversations/[id]         GET/PATCH/DELETE    │
+│ /api/messaging/conversations/[id]/members POST/DELETE         │
+│ /api/messaging/conversations/[id]/read    POST (last_read_at) │
+│ /api/messaging/messages                   POST                │
+│ /api/messaging/messages/[id]              PATCH/DELETE        │
+│ /api/messaging/messages/[id]/reactions    POST/DELETE         │
+│ /api/messaging/typing                     POST                │
+│ /api/messaging/presence                   GET/POST            │
+│ /api/messaging/upload                     POST (R2 attachments)│
+└────────────────────────────────────────────────────────────────┘
+
+┌─ DATA + REALTIME ─────────────────────────────────────────────┐
+│  conversations           ──┐                                  │
+│  conversation_members    ──┤  RLS: members-only access        │
+│  messages                ──┤  + soft-delete via deleted_at    │
+│  message_reactions       ──┘  + supabase_realtime publication │
+│                                                                │
+│  RPC: find_dm_conversation(user_a, user_b) → unique 2-person  │
+│       DM (used to dedupe DM creation)                         │
+│                                                                │
+│  Trigger: bump_conversation_updated_at on INSERT/UPDATE on    │
+│           messages (drives sidebar ordering)                  │
+│                                                                │
+│  Client subscribes via                                         │
+│    hooks/use-conversation-realtime.ts                          │
+│  → INSERT/UPDATE/DELETE on messages, message_reactions,       │
+│    conversation_members                                       │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Messaging permissions
+- Any authenticated user can DM or group-chat any other user (no team scoping).
+- `conversation_members.role` (`admin` | `member`) gates rename/avatar updates and member removal in groups.
+- Senders can edit/soft-delete their own messages; reactions are member-scoped.
+- Attachments uploaded via `/api/messaging/upload` go to R2; the URL is stored in `messages.media_url` with `media_metadata` (size, mime, etc.).

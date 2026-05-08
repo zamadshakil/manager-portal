@@ -10,6 +10,7 @@ The Hierarchia Manager Portal enables organizations to:
 - **Assign to Teams** — Distribute tasks to members with role-based permissions
 - **Process Submissions** — Validate submissions with an AI pipeline (Gemini 2.0 Flash via OpenRouter)
 - **Smart AI Assistant** — Conversational AI with native RAG retrieval, tool-calling against live database, and document uploads
+- **Messaging** — In-app DMs and group conversations with realtime delivery, typing/presence, reactions, replies, file attachments, and Slack-style read receipts
 - **Department Management** — Full CRUD for departments with member assignment and statistics
 - **Track Progress** — Monitor assignment status with real-time updates and deadline alerts
 - **AI Credit System** — Per-user usage quotas with configurable periods (daily/weekly/monthly)
@@ -24,8 +25,9 @@ The Hierarchia Manager Portal enables organizations to:
 - **AI — Smart AI Chat**: OpenRouter → GPT-4o-mini (configurable) with native tool-calling + RAG retrieval
 - **RAG**: Native pgvector (1536-dim, HNSW index) with RRF fusion (vector + BM25 full-text)
 - **File Storage**: Cloudflare R2 (S3-compatible)
-- **Caching & Rate Limiting**: Upstash Redis
-- **Email**: Brevo (transactional welcome emails)
+- **Realtime**: Supabase Realtime (WebSocket subscriptions for messaging + assignments)
+- **Caching & Rate Limiting**: Railway-native Redis (via `REDIS_URL`, ioredis client)
+- **Email**: Brevo (transactional welcome emails + email-change verification)
 - **Deployment**: Railway (all services in a single project)
 
 ## Railway Infrastructure
@@ -88,7 +90,8 @@ Railway Project
 ```
 app/
 ├── api/
-│   ├── smart-ai/           # Smart AI endpoints (chat, upload, threads, analytics, health)
+│   ├── smart-ai/           # Smart AI endpoints (chat, upload, threads, analytics, health, bootstrap)
+│   ├── messaging/           # Messaging endpoints (conversations, messages, presence, typing, upload)
 │   ├── pipeline/[id]/       # AI validation pipeline trigger + status polling
 │   ├── cron/mark-missed/    # Railway HTTP cron endpoint (scheduled jobs)
 │   ├── ai-credits/me/       # AI credit quota endpoint
@@ -102,6 +105,7 @@ app/
 ├── (dashboard)/             # Protected dashboard routes
 │   └── dashboard/
 │       ├── smart-ai/        # Smart AI chat portal
+│       ├── messages/        # Messaging UI (DMs + groups)
 │       ├── tasks/           # Task management
 │       ├── submissions/     # Submission management
 │       ├── departments/     # Department management (admin)
@@ -121,6 +125,7 @@ components/
 ├── auth/                    # Login form, forgot-password form
 ├── dashboard/               # All dashboard UI components
 │   ├── smart-ai/            # Smart AI chat panel, analytics, shell
+│   ├── messaging/           # Conversation sidebar, message list/composer, info sheets, typing indicator
 │   └── ai-usage/            # AI credit management UI
 └── web-vitals-reporter.tsx  # Performance monitoring
 
@@ -133,7 +138,7 @@ lib/
 ├── data.ts                  # All read queries (single source of truth)
 ├── auth.ts                  # Role-based auth helpers
 ├── r2.ts                    # Cloudflare R2 storage client
-├── redis.ts                 # Upstash Redis + rate limiters
+├── redis.ts                 # Railway-native Redis (ioredis) + rate limiters
 ├── email.ts                 # Brevo email integration
 ├── env.ts                   # Centralized env-var validation
 ├── types.ts                 # TypeScript type definitions
@@ -174,6 +179,14 @@ docs/                        # Architecture docs, audit reports, delivery guides
 - Persistent chat threads with history
 - Per-user AI credit quotas
 
+### Messaging
+- Direct messages and group conversations between any portal users
+- Realtime message delivery via Supabase Realtime (WebSocket)
+- Typing indicators, presence, reactions, replies, edit/delete
+- File / image / audio / video attachments uploaded to R2 via `/api/messaging/upload`
+- Per-conversation `last_read_at` for unread counts; soft-delete for messages
+- RLS-enforced visibility (members of the conversation only)
+
 ### Department Management
 - Full CRUD for departments (teams)
 - Member assignment and transfer
@@ -205,7 +218,9 @@ pnpm lint             # ESLint check
 ```
 
 ### Database Migrations
-Apply SQL files from `scripts/` in the Supabase SQL Editor, in numeric order:
+Apply SQL files in order. Foundational schema lives in `scripts/`; everything from RAG onward is in `supabase/migrations/` (timestamped).
+
+Foundational (`scripts/`):
 ```
 scripts/001_init_schema.sql
 scripts/002_helper_functions.sql
@@ -215,27 +230,45 @@ scripts/005_tasks_and_late_submissions.sql
 scripts/006_security_hardening_and_indexes.sql
 scripts/006_expiration_for_materials.sql
 scripts/007_rule_ids_and_delete_policy.sql
-scripts/008_fix_manager_auth.sql
-scripts/009_assign_managers_to_tasks.sql
+scripts/smart-ai-chat-followup.sql           (chat threads/messages/documents)
 ```
 
-RAG/Smart AI tables:
+Incremental (`supabase/migrations/`, timestamped — apply in order):
 ```
-supabase/migrations/20260505_rag_documents.sql
-scripts/smart-ai-chat-followup.sql
+20260501_global_validation_rules.sql        (+ 0502 RLS fixes)
+20260502_fix_manager_auth.sql
+20260503_late_submission_deadline.sql
+20260504_chat_persistence_base.sql / smart_ai_chat.sql
+20260505_rag_documents.sql / rag_documents_fixup.sql
+20260506_rag_full_setup.sql / rag_rpc.sql
+20260506_ai_credits_setup.sql / ai_usage_increment_rpc.sql
+20260506_ensure_materials_expiration.sql
+20260506_gotrue_refresh_token_fix.sql
+20260506_invalidate_sessions_rpc.sql
+20260507_add_materials_expiration.sql
+20260507_ai_usage_ledger.sql
+20260507_credit_chat_rpcs.sql
+20260507_email_change_verification.sql
+20260508_messaging.sql                        (conversations/messages/reactions + RLS + realtime publication)
+20260508_profile_soft_delete.sql
+20260509_messaging_security_critical.sql
+20260510_messaging_correctness.sql
+20260511_messaging_perf.sql
+20260512_messaging_ux.sql
 ```
 
 Key tables:
-- `profiles` — Users with roles (`main_admin`, `manager`, `member`)
+- `profiles` — Users with roles (`main_admin`, `manager`, `member`); supports soft-delete
 - `teams` — Departments/teams
 - `tasks` — Task definitions with instructions and deadline rules
 - `task_assignments` — Per-member assignment instances
 - `submissions` — Uploaded documents with AI validation results
-- `validation_rules` — Team-scoped AI grading rules
+- `validation_rules` — Team-scoped AI grading rules (+ global rules)
 - `validation_runs` — Per-rule AI evaluation results
 - `rag_documents` — pgvector document chunks for Smart AI RAG
 - `chat_threads` / `chat_messages` / `chat_documents` — Smart AI conversation persistence
 - `ai_credit_limits` / `ai_usage_log` — AI credit quota system
+- `conversations` / `conversation_members` / `messages` / `message_reactions` — Messaging
 - `announcements` / `materials` — Team communications
 - `activity_log` — Append-only audit trail
 
@@ -249,7 +282,7 @@ See [`.env.local.example`](./.env.local.example) for the complete list with docu
 | **LLM** | `OPENROUTER_API_KEY`, `OPENAI_API_KEY` (optional), `SMART_AI_MODEL`, `EMBEDDING_MODEL` | OpenRouter for chat completions; OpenAI direct for embeddings (preferred — falls back to OpenRouter) |
 | **Validation** | `DO_VALIDATION_MODEL`, `DO_SUMMARY_MODEL`, `DO_VISION_MODEL` | Model overrides (default: Gemini 2.0 Flash) |
 | **Storage** | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL` | Cloudflare R2 |
-| **Redis** | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Rate limiting + cron tracking |
+| **Redis** | `REDIS_URL` | Railway-native Redis — rate limiting, idempotency locks, cron observability |
 | **Email** | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | Transactional emails |
 | **Security** | `CRON_SECRET` | Cron endpoint authentication |
 | **App** | `NEXT_PUBLIC_SITE_URL`, `NODE_ENV` | Application configuration |
@@ -304,4 +337,4 @@ For issues, questions, or feature requests, please open a GitHub issue or contac
 
 ---
 
-**Last Updated:** May 7, 2026
+**Last Updated:** May 8, 2026

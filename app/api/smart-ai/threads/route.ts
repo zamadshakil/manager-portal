@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireProfile } from "@/lib/auth"
 import { createClient as createBrowserClient } from "@/lib/supabase/server"
 import { createClient as createSBClient } from "@supabase/supabase-js"
+import type { Database } from "@/lib/supabase/database.types"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -21,7 +22,7 @@ async function getSupabase() {
 
   if (serviceRoleKey && supabaseUrl) {
     return {
-      client: createSBClient(supabaseUrl, serviceRoleKey, {
+      client: createSBClient<Database>(supabaseUrl, serviceRoleKey, {
         auth: { persistSession: false, autoRefreshToken: false },
       }),
       mode: "service_role" as const,

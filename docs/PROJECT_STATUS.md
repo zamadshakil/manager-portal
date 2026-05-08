@@ -5,7 +5,7 @@
 > should be able to read just this file plus `README.md` and orient
 > themselves in under fifteen minutes.
 
-Last reviewed: 2026-05-07 (full architecture + documentation audit) 
+Last reviewed: 2026-05-08 (added messaging subsystem + Redis migration to Railway-native ioredis)
 
 ---
 
@@ -18,8 +18,9 @@ Last reviewed: 2026-05-07 (full architecture + documentation audit)
 - **AI — Validation:** OpenRouter → Gemini 2.0 Flash (via Vercel AI SDK v6) for validation + summarisation + vision OCR.
 - **AI — Smart AI Chat:** OpenRouter → GPT-4o-mini (configurable) with native tool-calling + RAG retrieval (pgvector + BM25).
 - **Background work:** In-process async pipeline for AI validation + Railway HTTP cron (every 15 min) for missed-deadline sweeps, stuck-submission recovery, and expiration cleanup.
-- **Rate limit / idempotency:** Upstash Redis.
-- **Email:** Brevo (transactional welcome emails on user provisioning).
+- **Realtime:** Supabase Realtime (WebSocket) — used by the messaging subsystem and the assignments listener.
+- **Rate limit / idempotency:** Railway-native Redis (`REDIS_URL`, ioredis client — we migrated off Upstash REST when we left Vercel Edge).
+- **Email:** Brevo (transactional welcome emails + email-change verification).
 - **Deployment:** Railway (portal + self-hosted Supabase stack in a single project).
 - **Roles:** `main_admin`, `manager`, `member`. Three different views of the same dashboard.
 
@@ -37,7 +38,7 @@ Hierarchia is a portal where managers assign document-style tasks (PDF, DOCX, PP
 | **Manager** | Owns one team. Configures validation rules, creates tasks (single or bulk-assigned), reviews submissions, posts team announcements/materials. |
 | **Member** | Sees their assigned tasks, uploads submissions, reads announcements, downloads materials, sees their own performance. |
 
-Authentication is **Supabase Auth** (self-hosted GoTrue on Railway, email + password) with **provision-only onboarding**. There is no public sign-up. Data lives in **self-hosted Supabase Postgres** behind RLS. Files live in **Cloudflare R2** with download proxied through a server route that re-checks RLS. The AI validation pipeline runs on **OpenRouter (Gemini 2.0 Flash)** via Vercel AI SDK v6, with native Gemini Vision for OCR. The **Smart AI** conversational assistant uses OpenRouter with tool-calling and native pgvector RAG retrieval. Per-user/per-team rate-limiting and per-submission idempotency live in **Upstash Redis**. AI usage is tracked via a per-user **credit system** with configurable periods.
+Authentication is **Supabase Auth** (self-hosted GoTrue on Railway, email + password) with **provision-only onboarding**. There is no public sign-up. Data lives in **self-hosted Supabase Postgres** behind RLS. Files live in **Cloudflare R2** with download proxied through a server route that re-checks RLS. The AI validation pipeline runs on **OpenRouter (Gemini 2.0 Flash)** via Vercel AI SDK v6, with native Gemini Vision for OCR. The **Smart AI** conversational assistant uses OpenRouter with tool-calling and native pgvector RAG retrieval. The **messaging** subsystem (DMs + groups) uses Supabase Realtime over RLS-protected tables, with attachments stored in R2. Per-user/per-team rate-limiting and per-submission idempotency live in **Railway Redis** (ioredis). AI usage is tracked via a per-user **credit system** with configurable periods.
 
 ---
 
@@ -82,7 +83,8 @@ Authentication is **Supabase Auth** (self-hosted GoTrue on Railway, email + pass
 | `app/(dashboard)/dashboard/` | All authenticated routes. RSC-first; the route-group layout enforces session and renders top-bar/sidebar/mobile-nav. |
 | `app/auth/` | Login, forgot-password, update-password, OAuth callback, signout, error page. |
 | `app/actions/` | Server Actions: `submissions`, `tasks`, `materials`, `announcements`, `departments`, `users`, `rules`, `profile`, `ai-credits`. Each validates with Zod, re-checks role with `requireRole`, writes to Supabase, then `revalidatePath`s. |
-| `app/api/smart-ai/` | Smart AI endpoints: `chat` (streaming), `upload` (R2 + RAG indexing), `threads` (history), `analytics`, `health`. |
+| `app/api/smart-ai/` | Smart AI endpoints: `chat` (streaming), `upload` (R2 + RAG indexing), `threads` (history), `analytics`, `health`, `bootstrap`. |
+| `app/api/messaging/` | Messaging endpoints: `conversations` (list/create/update/leave), `messages` (post/edit/delete), `presence`, `typing`, `upload` (R2 attachments). |
 | `app/api/cron/` | Railway cron endpoint for scheduled background jobs (mark-missed, expire content, recover stuck). |
 | `app/api/` | Route handlers: `/api/download/[id]` (RLS-checked file streaming), `/api/ai-credits/me`, `/api/vitals`. |
 | `lib/supabase/` | `client.ts` (browser SSR), `server.ts` (RSC + actions), `admin.ts` (service-role; **`server-only`**), `proxy.ts` (middleware session refresh + must-reset gate), `database.types.ts` (loose stub). |
@@ -94,18 +96,20 @@ Authentication is **Supabase Auth** (self-hosted GoTrue on Railway, email + pass
 | `lib/auth.ts` | `requireProfile`, `requireRole`, `canManageTeam`, `getCurrentProfile`. |
 | `lib/auth-shared.ts` | `roleLabel` (safe to import from client components — no `server-only` deps). |
 | `lib/r2.ts` | Cloudflare R2 client (`put`, `del`, `head`, `get`) via `@aws-sdk/client-s3`. |
-| `lib/redis.ts` | Upstash client + `uploadLimiter()` + `llmLimiter()` + `chatLimiter()` (`server-only`). |
+| `lib/redis.ts` | Railway-native ioredis client + sliding-window rate limiters (`uploadLimiter`, `llmLimiter`, `chatLimiter`, messaging limiters) (`server-only`). |
 | `lib/email.ts` | Brevo transactional email integration (welcome emails). |
 | `lib/env.ts` | Centralized env-var validation with Railway migration notes. |
 | `lib/activity.ts` | `logActivity()` — append-only audit trail (`server-only`). |
 | `components/dashboard/` | All UI for the dashboard. Files are named after the page they primarily serve. |
 | `components/dashboard/smart-ai/` | Smart AI chat panel, analytics dashboard, shell layout. |
+| `components/dashboard/messaging/` | Messaging shell: conversation sidebar, conversation view, message list/composer, typing indicator, DM/group info sheets, new-conversation modal. |
 | `components/dashboard/ai-usage/` | AI credit management and usage display. |
 | `components/auth/` | Sign-in form, forgot-password form. |
 | `components/ui/` | shadcn/ui primitives. |
+| `hooks/use-conversation-realtime.ts` | Supabase Realtime subscription for messaging (INSERT/UPDATE/DELETE on `messages` + `message_reactions` + `conversation_members`). |
 | `mcp-service/` | _(Decommissioned)_ — Former MCP chat orchestration service. All logic now in `lib/smart-ai/` and `app/api/smart-ai/`. |
-| `scripts/*.sql` | Database migrations. **Run in numeric order, top-down.** |
-| `supabase/migrations/` | RAG pgvector schema + chat schema migrations. |
+| `scripts/*.sql` | Foundational database migrations. **Run in numeric order, top-down.** |
+| `supabase/migrations/` | Incremental migrations: RAG, Smart AI chat, AI credits, email-change verification, profile soft-delete, **messaging** (`20260508_messaging.sql` + perf/security/UX patches). |
 | `proxy.ts` | Edge proxy entry; delegates to `lib/supabase/proxy.ts`. |
 | `railway.json` | Railway build + deploy configuration. |
 | `next.config.mjs` | Security headers + Server Actions body limit (30 MB) + standalone output. |
@@ -175,6 +179,30 @@ task_assignments                                                         [005]
 validation_runs   -- one per (submission, rule), written by service role only
 activity_log      -- append-only audit trail, written by service role only
 report_snapshots  -- precomputed dashboard rollups (table exists; not yet populated)
+
+Messaging                                                                [20260508+]
+conversations
+  +- type: 'dm' | 'group'
+  +- name, avatar_url, created_by
+  +- timestamps (updated_at bumped on new message via trigger)
+
+conversation_members
+  +- (conversation_id, user_id) PK
+  +- role: 'admin' | 'member'
+  +- last_read_at  (drives unread counts)
+
+messages
+  +- conversation_id, sender_id, content
+  +- type: 'text' | 'image' | 'file' | 'audio' | 'video'
+  +- media_url, media_metadata jsonb
+  +- reply_to_id (FK -> messages)
+  +- edited_at, deleted_at  (soft-delete)
+
+message_reactions
+  +- (message_id, user_id, emoji) PK
+
+-- Realtime publication: messages + message_reactions + conversation_members
+-- RPC: find_dm_conversation(user_a, user_b)  -- returns the unique 2-person DM
 ```
 
 ### Status state machines
@@ -214,6 +242,10 @@ Each row below is a verified path through the codebase as of this audit.
 | Re-assign on an existing task | (no UI yet) | `app/actions/tasks.ts → assignTask` → `assign_task_to_team(p_task_id, p_team_id)` RPC (SECURITY DEFINER) | `task_assignments`, `activity_log` |
 | Member opens a task | `/dashboard/tasks/[id]` | RSC reads via `getTaskById`, `getMyAssignmentForTask`, `listAssignmentsForTask` | none |
 | Member submits to a task | `TaskSubmissionForm` on task detail | `app/actions/submissions.ts → createSubmission` (rate-limit, deadline check, blob upload, insert submission, mirror assignment, trigger async pipeline) | `submissions`, `task_assignments`, Blob, `activity_log` |
+| Open messages | `/dashboard/messages` | RSC reads conversations via session client; client subscribes to Supabase Realtime via `use-conversation-realtime` | none |
+| Send a message | `MessageComposer` | `POST /api/messaging/messages` — rate-limited, RLS-checked insert into `messages`; trigger bumps `conversations.updated_at`; realtime broadcast to other members | `messages`, `conversations.updated_at` |
+| Attach a file to a message | `MessageComposer` | `POST /api/messaging/upload` — R2 upload + insert message with `type` + `media_url` + `media_metadata` | R2, `messages` |
+| React / reply / edit / delete a message | message row actions | `POST/DELETE /api/messaging/messages/[id]` — RLS enforces sender-only edits + member-only reactions; `deleted_at` is set for soft-delete | `messages`, `message_reactions` |
 | AI pipeline runs | (background) | `lib/llm/pipeline.ts → processSubmission` (Redis lock → parse → optional vision fallback → run rules + task brief → write `validation_runs` → update submission + assignment) | `submissions`, `task_assignments`, `validation_runs` |
 | Manager retries a submission | submission detail → `SubmissionActions` | `app/actions/submissions.ts → retrySubmission` resets status to `queued` then `after(processSubmission)` | `submissions`, `activity_log` |
 | Manager deletes a submission | submission detail → `SubmissionActions` | `app/actions/submissions.ts → deleteSubmission` deletes row + Blob | `submissions`, Blob, `activity_log` |
@@ -311,7 +343,7 @@ The handler runs four operations via the admin client:
 
 | Module | Imports from | Imported by | Server-only? |
 |---|---|---|---|
-| `lib/upstash-scheduler.ts` | `@upstash/redis` | `app/api/cron/mark-missed`, monitoring tools | yes |
+| `lib/upstash-scheduler.ts` | `lib/redis.ts` (ioredis) | `app/api/cron/mark-missed`, monitoring tools | yes |
 | `lib/supabase/admin.ts` | `@supabase/supabase-js` | `app/actions/*`, `lib/pipeline/process.ts`, `lib/activity.ts` | yes |
 | `lib/supabase/server.ts` | `@supabase/ssr`, `next/headers` | RSC pages, `lib/auth.ts`, `lib/data.ts`, action handlers | no (RSC compatible) |
 | `lib/supabase/client.ts` | `@supabase/ssr` | `components/auth/login-form.tsx` | no (browser) |
@@ -321,7 +353,7 @@ The handler runs four operations via the admin client:
 | `lib/data.ts` | `lib/supabase/server.ts`, `lib/types.ts` | RSC pages only | no |
 | `lib/activity.ts` | `lib/supabase/admin.ts`, `next/headers` | every action | yes |
 | `lib/r2.ts` | `@aws-sdk/client-s3` | `app/actions/submissions.ts`, `app/actions/materials.ts`, `app/api/download/*` | yes |
-| `lib/redis.ts` | `@upstash/redis`, `@upstash/ratelimit` | `lib/pipeline/process.ts`, `app/actions/submissions.ts`, `app/api/smart-ai/chat` | yes |
+| `lib/redis.ts` | `ioredis` | `lib/pipeline/process.ts`, `app/actions/submissions.ts`, `app/api/smart-ai/chat`, `app/api/messaging/*`, `lib/upstash-scheduler.ts` | yes |
 | `lib/email.ts` | native `fetch` (Brevo API) | `app/actions/users.ts` | no |
 | `lib/env.ts` | `process.env` | `lib/supabase/*`, `proxy.ts` | no |
 | `lib/pipeline/process.ts` | `lib/supabase/admin.ts`, `lib/parse`, `lib/llm/validate.ts`, `lib/smart-ai/indexer.ts` | `app/api/pipeline/[id]/route.ts` | yes |
@@ -349,8 +381,7 @@ These must be set on the **Railway** service (`manager-portal`). Locally they go
 | `R2_SECRET_ACCESS_KEY` | server only | R2 secret key |
 | `R2_BUCKET_NAME` | server only | R2 bucket name |
 | `R2_PUBLIC_URL` | server only | R2 public URL (e.g. `https://pub-xxx.r2.dev`) |
-| `UPSTASH_REDIS_REST_URL` | server only | rate limit + cron tracking |
-| `UPSTASH_REDIS_REST_TOKEN` | server only | as above |
+| `REDIS_URL` | server only | Railway Redis — rate limit, idempotency locks, cron observability (full ioredis URL, e.g. `redis://default:<pwd>@<host>:6379`) |
 | `OPENROUTER_API_KEY` | server only | OpenRouter API key (validation + Smart AI) |
 | `SMART_AI_MODEL` | optional | default: `openai/gpt-4o-mini` |
 | `DO_VALIDATION_MODEL` | optional | default: `google/gemini-2.0-flash-001` |
@@ -404,10 +435,29 @@ scripts/005_tasks_and_late_submissions.sql         -- tasks / assignments / late
 scripts/006_security_hardening_and_indexes.sql     -- additional RLS + perf indexes
 scripts/006_expiration_for_materials.sql           -- expires_at for announcements/materials
 scripts/007_rule_ids_and_delete_policy.sql         -- per-task rule_ids + delete policies
-scripts/008_fix_manager_auth.sql                  -- manager auth fixes
-scripts/009_assign_managers_to_tasks.sql           -- manager task assignment
-supabase/migrations/20260505_rag_documents.sql    -- pgvector + HNSW + search RPCs + RLS
 scripts/smart-ai-chat-followup.sql                -- chat_threads/messages/documents schema + RLS
+
+-- Incremental migrations (supabase/migrations/, timestamped — apply in order)
+20260501_global_validation_rules.sql              -- global rules + 0502 RLS fixes
+20260502_fix_manager_auth.sql                     -- manager auth fixes
+20260503_late_submission_deadline.sql
+20260504_chat_persistence_base.sql + smart_ai_chat.sql
+20260505_rag_documents.sql + rag_documents_fixup.sql -- pgvector + HNSW + search RPCs + RLS
+20260506_rag_full_setup.sql + rag_rpc.sql
+20260506_ai_credits_setup.sql + ai_usage_increment_rpc.sql
+20260506_ensure_materials_expiration.sql
+20260506_gotrue_refresh_token_fix.sql
+20260506_invalidate_sessions_rpc.sql
+20260507_add_materials_expiration.sql
+20260507_ai_usage_ledger.sql
+20260507_credit_chat_rpcs.sql
+20260507_email_change_verification.sql
+20260508_messaging.sql                            -- conversations / messages / reactions + RLS + realtime publication + find_dm_conversation RPC
+20260508_profile_soft_delete.sql
+20260509_messaging_security_critical.sql           -- tightens membership / rate-limit / abuse RLS
+20260510_messaging_correctness.sql
+20260511_messaging_perf.sql                        -- additional indexes for chat lookups
+20260512_messaging_ux.sql                          -- read-receipt / unread-count helpers
 ```
 
 If you only want the latest changes on top of an existing database, **running 005 alone is safe**: it re-creates any missing helpers (`current_user_role`, `current_user_team`, `is_manager_of`, `is_main_admin`, `touch_updated_at`) and skips anything that already exists.
@@ -438,6 +488,9 @@ If you only want the latest changes on top of an existing database, **running 00
 - **Smart AI chat threads** with persistent history and thread sidebar
 - **AI credit system** — per-user usage quotas with configurable periods (daily/weekly/monthly)
 - **Native RAG** — pgvector + BM25 full-text search with RRF fusion, HNSW index
+- **Messaging** — DMs + groups with realtime delivery (Supabase Realtime), typing/presence, reactions, replies, edit, soft-delete, R2 attachments, per-user `last_read_at` unread counts
+- **Email-change verification** — token-based confirmation flow under `/auth/confirm-email-change`
+- **Profile soft-delete** — deactivate users without losing referential integrity
 - Announcements + materials (team-scoped, `expires_at` filtering, auto-expiration via Railway HTTP cron)
 - **Welcome emails** via Brevo on user provisioning
 - Activity log (append-only audit trail; explicit RLS deny on client writes)
@@ -454,7 +507,7 @@ If you only want the latest changes on top of an existing database, **running 00
 ### In flight / TODO (priority order)
 
 - **Manager UI to call `assignTask`**. The server action is implemented and the SQL RPC `assign_task_to_team` is granted to `authenticated`, but no button surfaces it yet.
-- **Realtime status on submission detail.** Subscribe to a Supabase channel so members see `queued → validating → passed` without refreshing.
+- **Realtime status on submission detail.** Subscribe to a Supabase channel so members see `queued → validating → passed` without refreshing. Messaging already does this via `use-conversation-realtime` — the same pattern can be lifted.
 - **Daily cron rollup of `report_snapshots`.** Reports currently compute from raw `submissions`; precompute to cut DB load.
 - **Redis cache on `getDailyMetrics`** (60s TTL) for hot dashboard reads.
 - **Read receipts on announcements** — track who has acknowledged.

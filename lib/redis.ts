@@ -187,3 +187,12 @@ export function authLimiter() {
   }
   return _authLimiter
 }
+
+let _messageLimiter: SlidingWindowLimiter | null = null
+export function messageLimiter() {
+  if (!_messageLimiter) {
+    // 60 messages per user per minute — generous for real-time chat, blocks spam.
+    _messageLimiter = new SlidingWindowLimiter("rl:msg", 60, 60_000)
+  }
+  return _messageLimiter
+}

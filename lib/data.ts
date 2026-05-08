@@ -127,7 +127,7 @@ export async function listSubmissions(
   if (opts.cursor) q = q.lt("created_at", opts.cursor)
 
   const { data } = await q
-  const rows = (data ?? []) as Submission[]
+  const rows = (data ?? []) as unknown as Submission[]
   const next = rows.length > limit ? rows[limit].created_at : undefined
   return { rows: rows.slice(0, limit), nextCursor: next }
 }
@@ -158,7 +158,7 @@ export async function listMaterials(profile: Profile, limit = 100): Promise<Mate
     .select("*, teams(name)")
     .order("created_at", { ascending: false })
     .limit(limit)
-  return (data ?? []) as Material[]
+  return (data ?? []) as unknown as Material[]
 }
 
 export async function listActivity(
@@ -336,6 +336,7 @@ export async function listAllProfiles(profile: Profile): Promise<Profile[]> {
   const { data } = await supabase
     .from("profiles")
     .select("*")
+    .is("deleted_at", null)
     .order("created_at", { ascending: true })
   return (data ?? []) as Profile[]
 }
@@ -443,7 +444,7 @@ export async function getDepartmentById(id: string): Promise<DepartmentWithStats
     ...team,
     manager,
     member_count: members?.length || 0,
-  }
+  } as unknown as DepartmentWithStats
 }
 
 export async function listUnassignedMembers(): Promise<Profile[]> {

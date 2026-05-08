@@ -1,6 +1,6 @@
 # Hierarchia Manager Portal — Executive Overview
 
-> **Client Delivery Document** | Version 1.0 | May 2, 2026  
+> **Client Delivery Document** | Version 2.0 | May 8, 2026  
 > **Prepared by:** JobFlowAI Engineering
 
 ---
@@ -30,13 +30,28 @@
 ## 3. Key Features at a Glance
 
 ### 🤖 AI-Powered Document Validation
-- Supports **PDF, DOCX, PPTX, PNG, JPEG** (up to 25 MB)
-- Text extraction via native parsers + AI vision for images
+- Supports **PDF, DOCX, PPTX, XLSX, PNG, JPEG, plain text/Markdown** (up to 25 MB)
+- Native text extraction (`unpdf`, `mammoth`, `officeparser`) + Gemini Vision OCR fallback for images and scanned PDFs
 - Configurable validation rules with custom prompts, thresholds, and weights
-- Weighted scoring with pass/fail/needs-review outcomes
+- Per-task `rule_ids` selection and an optional task-specific AI brief
+- Weighted scoring with pass / fail / needs_review outcomes
 - Executive summaries and predictive risk flags
 
-### 📋 Task & Assignment Management
+### � Smart AI Conversational Assistant
+- Chat against the live Supabase database with native tool-calling
+- Native RAG retrieval over `rag_documents` (pgvector + BM25 full-text, RRF fusion, keyword reranking)
+- Document upload + automatic chunk indexing for chat-attached files
+- Persistent chat threads with history per user
+- Per-user AI credit quotas with configurable refill periods
+
+### 📬 In-App Messaging
+- Direct messages and group conversations between any portal users
+- Realtime delivery via Supabase Realtime (WebSocket)
+- Typing indicators, presence, reactions, replies, edit/delete
+- File / image / audio / video attachments uploaded to Cloudflare R2
+- Per-conversation `last_read_at` for unread counts; soft-delete for messages
+
+### � Task & Assignment Management
 - Hierarchical task creation with deadlines
 - Bulk or selective team member assignment
 - Late submission policies (allow/deny, require reason)
@@ -57,10 +72,11 @@
 
 ### 🔐 Enterprise-Grade Security
 - Row-Level Security (RLS) on every database table
-- 4-layer defense: Edge proxy → Route guards → Server action checks → RLS
-- Security headers (HSTS, CSP, X-Frame-Options)
-- Rate limiting on uploads and LLM calls
+- 3-layer defense: Middleware → Server Action → Postgres RLS
+- Security headers (HSTS, CSP, X-Frame-Options DENY, Permissions-Policy)
+- Rate limiting on uploads, LLM calls, chat, and messaging
 - Append-only audit log
+- `server-only` imports protect service-role credentials at build time
 
 ---
 
@@ -68,17 +84,19 @@
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **Frontend** | Next.js 16, React 19 | Server-side rendering, server components |
-| **UI Components** | Shadcn/ui + Radix UI | Accessible, composable component library |
+| **Frontend** | Next.js 16, React 19 | RSC-first app router, server actions |
+| **UI Components** | shadcn/ui + Radix UI | Accessible, composable component library |
 | **Styling** | Tailwind CSS 4 | Utility-first CSS with design token system |
-| **Database** | Supabase (PostgreSQL) | Managed Postgres with RLS and real-time |
-| **Authentication** | Supabase Auth | Session management, JWT tokens |
-| **File Storage** | Vercel Blob | Private document storage with signed URLs |
-| **AI Inference** | DigitalOcean AI (DeepSeek V3, Nemotron VL) | Document validation and vision OCR |
-| **Background Jobs** | Inngest | Durable, step-based async pipelines |
-| **Caching & Rate Limiting** | Upstash Redis | Rate limiting, pipeline locks, cron monitoring |
-| **Deployment** | Vercel | Serverless deployment with edge functions |
-| **Analytics** | Vercel Analytics | Web vitals and usage tracking |
+| **Database** | Self-hosted Supabase Postgres + pgvector (on Railway) | Postgres with RLS, full-text search, vector search |
+| **Authentication** | Self-hosted Supabase GoTrue (on Railway) | Session management, JWT, provision-only onboarding |
+| **File Storage** | Cloudflare R2 (S3-compatible) | Private document storage, fronted by an authenticated download proxy |
+| **AI — Validation** | OpenRouter → Gemini 2.0 Flash (Vercel AI SDK v6) | Rule evaluation, summarisation, vision OCR |
+| **AI — Smart AI Chat** | OpenRouter → GPT-4o-mini (configurable) | Tool-calling assistant with native pgvector RAG |
+| **Background Jobs** | In-process async pipeline + Railway HTTP cron | Fire-and-forget validation + scheduled cleanup every 15 min |
+| **Realtime** | Supabase Realtime (WebSocket) | Messaging delivery, assignment updates |
+| **Caching & Rate Limiting** | Railway-native Redis (ioredis) | Rate limiting, idempotency locks, cron observability |
+| **Email** | Brevo (Sendinblue) | Welcome emails, email-change verification |
+| **Deployment** | Railway | Single project hosts the Next.js app + the entire self-hosted Supabase stack |
 | **Validation** | Zod | Runtime schema validation for all inputs |
 | **Charts** | Recharts | Data visualization on dashboards |
 
@@ -117,22 +135,24 @@ Member uploads file
         │
         ▼
 ┌─────────────────┐
-│  1. UPLOAD       │  File → Vercel Blob (private)
+│  1. UPLOAD       │  File → Cloudflare R2 (private, random suffix)
 │                  │  Submission row → status: "queued"
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│  2. PARSE        │  PDF → unpdf | DOCX → mammoth
-│                  │  PPTX → officeparser | Image → AI Vision
+│  2. PARSE        │  PDF → unpdf (+ Gemini Vision OCR fallback)
+│                  │  DOCX → mammoth | PPTX/XLSX → officeparser
+│                  │  Images → Gemini Vision OCR
 │                  │  status: "parsing"
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│  3. VALIDATE     │  Run each enabled validation rule
-│                  │  DeepSeek V3 scores 0-100 per rule
-│                  │  Concurrent with rate limiting
+│  3. VALIDATE     │  Run each enabled validation rule in parallel
+│                  │  Gemini 2.0 Flash (via OpenRouter) scores 0-100
+│                  │  Optional task-specific brief appended as a rule
+│                  │  Rate-limited per team via Redis
 │                  │  status: "validating"
 └────────┬────────┘
          │
@@ -145,8 +165,9 @@ Member uploads file
          ▼
 ┌─────────────────┐
 │  5. SCORE        │  Weighted aggregate across all rules
-│                  │  Final status: passed/failed/needs_review
-│                  │  Results saved to database
+│                  │  Final status: passed / failed / needs_review
+│                  │  validation_runs persisted; assignment mirrored
+│                  │  Submission text indexed into pgvector for RAG
 └─────────────────┘
 ```
 
@@ -164,9 +185,12 @@ Member uploads file
 | Departments | `/dashboard/departments` | Organization-wide department overview |
 | Announcements | `/dashboard/announcements` | Team-wide announcements with priority levels |
 | Materials | `/dashboard/materials` | Shared reference documents and resources |
+| Smart AI | `/dashboard/smart-ai` | Conversational AI assistant with RAG + tool-calling |
+| Messages | `/dashboard/messages` | DMs and group conversations with realtime delivery |
+| AI Usage | `/dashboard/ai-usage` | Per-user AI credit consumption + admin allowance management |
 | Activity | `/dashboard/activity` | Audit log of all system actions |
 | Reports | `/dashboard/reports` | Analytics and metric snapshots |
-| Settings | `/dashboard/settings` | Profile and password management |
+| Settings | `/dashboard/settings` | Profile, password, and email management |
 
 ---
 

@@ -4,8 +4,9 @@ Get the portal running locally in **5 minutes**.
 
 ## Prerequisites
 - Node.js 22+ (required by `engines` in package.json)
+- pnpm 9.15+
 - Git
-- Credentials from your team: Supabase (Railway Kong URL + JWTs), OpenRouter API key, R2, Upstash
+- Credentials from your team: Supabase (Railway Kong URL + JWTs), OpenRouter API key, R2, Railway Redis (`REDIS_URL`)
 
 ## Setup
 
@@ -35,7 +36,7 @@ open http://localhost:3000
 - **App:** http://localhost:3000
 - **Docs:** See `docs/` folder
 - **Database:** Supabase Studio on Railway (link in env vars)
-- **Redis:** Upstash console
+- **Redis:** Railway Redis plugin in the same project
 
 ## Critical Environment Variables
 
@@ -57,9 +58,8 @@ R2_SECRET_ACCESS_KEY=...
 R2_BUCKET_NAME=...
 R2_PUBLIC_URL=https://pub-<id>.r2.dev
 
-# Caching & Rate Limiting
-UPSTASH_REDIS_REST_URL=...
-UPSTASH_REDIS_REST_TOKEN=...
+# Caching & Rate Limiting (Railway Redis plugin — reference REDIS_URL from the Redis service)
+REDIS_URL=redis://default:<password>@<host>:6379
 
 # Smart AI embeddings (optional — falls back to OpenRouter if unset)
 OPENAI_API_KEY=sk-...
@@ -120,7 +120,7 @@ curl -i http://localhost:3000/api/cron/mark-missed
 → Check `.env.local` has the Railway Supabase service-role JWT
 
 **"Redis connection refused"**
-→ Check `UPSTASH_REDIS_REST_URL` and token are correct in `.env.local`
+→ Check `REDIS_URL` is set in `.env.local` and reachable. With it unset, rate limiters fail-open locally and fail-closed in production — individual features will still work.
 
 **Smart AI chat returns 503**
 → Check `OPENROUTER_API_KEY` is set in `.env.local`. The chat is fully native — no external services required.
@@ -140,4 +140,4 @@ curl -i http://localhost:3000/api/cron/mark-missed
 
 ---
 
-**Last Updated:** May 7, 2026
+**Last Updated:** May 8, 2026

@@ -62,6 +62,26 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json()
   const { name, avatar_url } = body as { name?: string; avatar_url?: string }
 
+  if (name !== undefined) {
+    if (typeof name !== "string" || name.trim().length === 0) {
+      return NextResponse.json({ error: "name must be a non-empty string" }, { status: 400 })
+    }
+    if (name.length > 120) {
+      return NextResponse.json({ error: "name must be 120 characters or fewer" }, { status: 400 })
+    }
+  }
+  if (avatar_url !== undefined && avatar_url !== null) {
+    if (typeof avatar_url !== "string" || avatar_url.length > 500) {
+      return NextResponse.json({ error: "avatar_url must be a string of 500 characters or fewer" }, { status: 400 })
+    }
+    if (/^javascript:/i.test(avatar_url.trim())) {
+      return NextResponse.json({ error: "avatar_url scheme not allowed" }, { status: 400 })
+    }
+  }
+  if (name === undefined && avatar_url === undefined) {
+    return NextResponse.json({ error: "Provide name or avatar_url to update" }, { status: 400 })
+  }
+
   const { data, error } = await admin
     .from("conversations")
     .update({ name, avatar_url })

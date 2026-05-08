@@ -111,7 +111,7 @@ export async function upsertRule(formData: FormData) {
         weight: parsed.data.weight,
         enabled: !!parsed.data.enabled,
         created_by: profile.id,
-      })
+      } as any)
       .select("id")
       .single()
     if (error || !data) return { ok: false, error: error?.message ?? "Could not create rule." }
