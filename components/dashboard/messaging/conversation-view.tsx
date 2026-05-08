@@ -30,6 +30,8 @@ export function ConversationView({
   const [hasMore, setHasMore] = useState(true)
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([])
   const [replyTo, setReplyTo] = useState<Message | null>(null)
+  const replyToRef = useRef<Message | null>(null)
+  replyToRef.current = replyTo
   const [infoOpen, setInfoOpen] = useState(false)
   const listRef = useRef<MessageListHandle>(null)
 
@@ -157,6 +159,7 @@ export function ConversationView({
       media_url: payload.media_url ?? null,
       media_metadata: payload.media_metadata ?? null,
       reply_to_id: payload.reply_to_id ?? null,
+      reply_to: replyToRef.current ?? null,
       edited_at: null,
       deleted_at: null,
       created_at: new Date().toISOString(),

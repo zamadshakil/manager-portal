@@ -104,7 +104,11 @@ export async function POST(req: NextRequest) {
     .select(`
       id, conversation_id, sender_id, content, type,
       media_url, media_metadata, reply_to_id, edited_at, deleted_at, created_at,
-      sender:profiles!sender_id ( id, full_name, email, avatar_url )
+      sender:profiles!sender_id ( id, full_name, email, avatar_url ),
+      reply_to:messages!reply_to_id (
+        id, content, type,
+        sender:profiles!sender_id ( id, full_name, email, avatar_url )
+      )
     `)
     .single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
