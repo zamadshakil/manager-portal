@@ -111,6 +111,10 @@ export function MaterialUploader({
       setExpiresAt("")
       if (inputRef.current) inputRef.current.value = ""
       router.refresh()
+      setTimeout(() => {
+        setUploadStage("")
+        setUploadProgress(null)
+      }, 3000)
     } catch (err: any) {
       setError(err?.message ?? "Upload failed.")
     } finally {
