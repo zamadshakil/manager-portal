@@ -73,14 +73,13 @@ export function MaterialUploader({
         materialId: string
       }
 
-      // Step 2: Upload via server proxy (avoids browser-to-R2 CORS restriction)
+      // Step 2: Upload raw bytes to server proxy (avoids FormData parsing limits
+      // and browser-to-R2 CORS restrictions).
       setUploadStage("uploading")
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest()
-        const fd = new FormData()
-        fd.append("materialId", materialId)
-        fd.append("file", file)
-        xhr.open("POST", "/api/materials/upload-proxy")
+        xhr.open("POST", `/api/materials/upload-proxy?materialId=${encodeURIComponent(materialId)}`)
+        xhr.setRequestHeader("Content-Type", file.type || "application/zip")
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
             setUploadProgress(Math.round((e.loaded / e.total) * 100))
@@ -99,7 +98,7 @@ export function MaterialUploader({
           }
         }
         xhr.onerror = () => reject(new Error("Network error during upload"))
-        xhr.send(fd)
+        xhr.send(file)
       })
       setUploadProgress(100)
 
