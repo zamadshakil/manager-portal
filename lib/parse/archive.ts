@@ -91,76 +91,17 @@ async function* extractZip(buf: Buffer): AsyncIterable<ArchiveEntry> {
 }
 
 // ---------------------------------------------------------------------------
-// RAR extraction via node-unrar-js (WASM, no native binary)
+// RAR extraction — stub
+//
+// WASM-based RAR extractors (e.g. node-unrar-js) are incompatible with
+// Next.js Turbopack because their .wasm loader files cannot be marked as
+// serverExternalPackages.  RAR files are accepted for storage but their
+// inner documents are not extracted for RAG indexing.
 // ---------------------------------------------------------------------------
 
-async function* extractRar(buf: Buffer): AsyncIterable<ArchiveEntry> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let createExtractorFromData: (...args: any[]) => Promise<any>
-  try {
-    const mod = await import("node-unrar-js")
-    createExtractorFromData = mod.createExtractorFromData as any
-  } catch (err: any) {
-    throw new Error(`node-unrar-js unavailable: ${err?.message ?? err}`)
-  }
-
-  // Ensure a clean, non-shared ArrayBuffer (avoids pool-offset issues)
-  const dataArr = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
-
-  let wasmBinary: ArrayBuffer | SharedArrayBuffer | undefined
-  try {
-    const { readFileSync } = await import("fs")
-    const { createRequire } = await import("module")
-    // ESM shim to get the package's own directory
-    const req = createRequire(import.meta.url)
-    const wasmPath: string = req.resolve("node-unrar-js/esm/js/unrar.wasm")
-    const wasmBuf = readFileSync(wasmPath)
-    wasmBinary = wasmBuf.buffer.slice(wasmBuf.byteOffset, wasmBuf.byteOffset + wasmBuf.byteLength)
-  } catch {
-    // Fall back: let node-unrar-js auto-locate its WASM (works in dev)
-  }
-
-  const extractor = await createExtractorFromData({
-    data: dataArr as any,
-    ...(wasmBinary ? { wasmBinary: wasmBinary as any } : {}),
-  })
-
-  const list = extractor.getFileList()
-  const fileHeaders: any[] = [...list.fileHeaders]
-
-  const extracted = extractor.extract({
-    files: fileHeaders.map((h: any) => h.name),
-  })
-
-  let totalDecompressed = 0
-
-  for (const file of extracted.files) {
-    const { fileHeader, extraction } = file as {
-      fileHeader: { name: string; flags?: { directory?: boolean } }
-      extraction?: Uint8Array
-    }
-
-    // Skip directories and failed extractions
-    if (!extraction) continue
-    if (fileHeader.flags?.directory) continue
-
-    const rawName = fileHeader.name
-    if (/\.(zip|rar)$/i.test(rawName)) continue
-
-    const name = sanitizeName(rawName)
-    if (!name) continue
-
-    const mime = mimeFromName(name)
-    if (!mime) continue
-
-    totalDecompressed += extraction.byteLength
-    if (totalDecompressed > MAX_DECOMPRESSED_BYTES) {
-      console.warn("[archive] RAR decompressed size limit reached — aborting extraction")
-      break
-    }
-
-    yield { name, buf: Buffer.from(extraction), mime }
-  }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function* extractRar(_buf: Buffer): AsyncIterable<ArchiveEntry> {
+  // Intentionally yields nothing — see comment above.
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +120,16 @@ export async function extractArchiveText(
     mimeType === "application/vnd.rar" ||
     mimeType === "application/x-rar-compressed"
 
-  const iterator = isRar ? extractRar(buf) : extractZip(buf)
+  if (isRar) {
+    return {
+      text: "",
+      truncated: false,
+      warning:
+        "RAR text extraction is not supported in this deployment. The file has been stored and can be downloaded, but its contents are not searchable via AI.",
+    }
+  }
+
+  const iterator = extractZip(buf)
 
   const parts: string[] = []
   let totalChars = 0

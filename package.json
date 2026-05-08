@@ -21,6 +21,7 @@
     "@aws-sdk/client-s3": "^3.1041.0",
     "@aws-sdk/s3-request-presigner": "^3.1045.0",
     "@hookform/resolvers": "^3.9.1",
+    "@napi-rs/canvas": "^1.0.0",
     "@radix-ui/react-accordion": "1.2.12",
     "@radix-ui/react-alert-dialog": "1.1.15",
     "@radix-ui/react-aspect-ratio": "1.1.8",
@@ -58,8 +59,8 @@
     "cmdk": "1.1.1",
     "date-fns": "4.1.0",
     "embla-carousel-react": "8.6.0",
-    "@napi-rs/canvas": "^1.0.0",
     "emoji-picker-react": "^4.19.1",
+    "fflate": "^0.8.2",
     "input-otp": "1.4.2",
     "ioredis": "^5.10.1",
     "lucide-react": "^0.564.0",
@@ -84,8 +85,6 @@
     "tailwind-merge": "^3.3.1",
     "unpdf": "^1.6.1",
     "vaul": "^1.1.2",
-    "fflate": "^0.8.2",
-    "node-unrar-js": "^2.0.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
