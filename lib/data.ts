@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { CAPABILITIES, hasCapability } from "@/lib/permissions"
 import type {
   ActivityLogEntry,
@@ -303,7 +304,7 @@ export async function listRules(profile: Profile): Promise<ValidationRule[]> {
 }
 
 export async function listTeamMembers(profile: Profile): Promise<Profile[]> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   let q = supabase
     .from("profiles")
@@ -332,7 +333,7 @@ export async function listTeamMembers(profile: Profile): Promise<Profile[]> {
  */
 export async function listAllProfiles(profile: Profile): Promise<Profile[]> {
   if (profile.role !== "main_admin") return []
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data } = await supabase
     .from("profiles")
     .select("*")
