@@ -118,9 +118,16 @@ export function MessageRow({
               )}
             >
               <p className="font-semibold truncate">
-                {message.reply_to?.sender?.full_name ?? "Someone"}
+                {message.reply_to?.sender?.full_name ?? message.reply_to?.sender?.email ?? "Unknown"}
               </p>
-              <p className="truncate">{message.reply_to?.content ?? "Media"}</p>
+              <p className="truncate">
+                {message.reply_to?.content
+                  ?? (message.reply_to?.type === "image" ? "📷 Photo"
+                    : message.reply_to?.type === "video" ? "🎥 Video"
+                    : message.reply_to?.type === "audio" ? "🎵 Audio"
+                    : message.reply_to?.type === "file"  ? "📄 File"
+                    : "…")}
+              </p>
             </div>
           )}
 

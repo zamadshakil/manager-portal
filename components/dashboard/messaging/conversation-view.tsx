@@ -52,6 +52,14 @@ export function ConversationView({
     return res.json() as Promise<Message[]>
   }, [conversation.id])
 
+  // Resolve reply_to from a local pool when the DB join returned null
+  const patchReplyTos = useCallback((msgs: Message[], pool: Message[]): Message[] => {
+    const byId = new Map(pool.map((m) => [m.id, m]))
+    return msgs.map((m) =>
+      m.reply_to_id && !m.reply_to ? { ...m, reply_to: byId.get(m.reply_to_id) ?? null } : m
+    )
+  }, [])
+
   // Initial load
   useEffect(() => {
     setLoadingInitial(true)
@@ -59,12 +67,12 @@ export function ConversationView({
     setHasMore(true)
     fetchMessages()
       .then((data) => {
-        setMessages(data)
+        setMessages(patchReplyTos(data, data))
         setHasMore(data.length === 50)
       })
       .catch(() => toast.error("Failed to load messages"))
       .finally(() => setLoadingInitial(false))
-  }, [fetchMessages])
+  }, [fetchMessages, patchReplyTos])
 
   // Mark as read whenever conversation is opened or new messages arrive
   useEffect(() => {
@@ -78,27 +86,41 @@ export function ConversationView({
     try {
       const oldest = messages[0]?.created_at
       const older = await fetchMessages(oldest)
-      setMessages((prev) => [...older, ...prev])
+      setMessages((prev) => {
+        const combined = [...older, ...prev]
+        return [...patchReplyTos(older, combined), ...prev]
+      })
       setHasMore(older.length === 50)
     } catch {
       toast.error("Failed to load older messages")
     } finally {
       setLoadingMore(false)
     }
-  }, [loadingMore, hasMore, messages, fetchMessages])
+  }, [loadingMore, hasMore, messages, fetchMessages, patchReplyTos])
 
   // Realtime: new message from Supabase
   const handleNewMessage = useCallback((msg: Message) => {
     setMessages((prev) => {
-      // Deduplicate — the optimistic tmpId is already replaced by handleSend's POST callback
       if (prev.some((m) => m.id === msg.id)) return prev
-      return [...prev, msg]
+      // Resolve reply_to from existing state when join returned null
+      const replyTo = msg.reply_to ?? (msg.reply_to_id ? (prev.find((m) => m.id === msg.reply_to_id) ?? null) : null)
+      return [...prev, { ...msg, reply_to: replyTo }]
     })
   }, [])
 
   const handleMessageUpdated = useCallback((partial: Partial<Message> & { id: string }) => {
     setMessages((prev) =>
-      prev.map((m) => (m.id === partial.id ? { ...m, ...partial } : m)),
+      prev.map((m) => {
+        if (m.id !== partial.id) return m
+        // Preserve joined fields (reply_to, sender, reactions) that raw DB rows omit
+        return {
+          ...m,
+          ...partial,
+          reply_to: partial.reply_to !== undefined ? partial.reply_to : m.reply_to,
+          sender:   partial.sender   !== undefined ? partial.sender   : m.sender,
+          reactions: partial.reactions !== undefined ? partial.reactions : m.reactions,
+        }
+      }),
     )
   }, [])
 
@@ -168,9 +190,12 @@ export function ConversationView({
       })
       if (!res.ok) throw new Error(await res.text())
       const real: Message = await res.json()
-      setMessages((prev) =>
-        prev.map((m) => (m.id === tmpId ? { ...real, status: "sent" } : m)),
-      )
+      setMessages((prev) => {
+        // Preserve reply_to from the optimistic message if the server join returned null
+        const optimistic = prev.find((m) => m.id === tmpId)
+        const replyTo = real.reply_to ?? optimistic?.reply_to ?? null
+        return prev.map((m) => (m.id === tmpId ? { ...real, reply_to: replyTo, status: "sent" } : m))
+      })
     } catch {
       setMessages((prev) =>
         prev.map((m) => (m.id === tmpId ? { ...m, status: "failed" } : m)),
