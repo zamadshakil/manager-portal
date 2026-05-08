@@ -1,5 +1,5 @@
-// Apply the three pending messaging migrations to the self-hosted
-// Supabase Postgres and reload the PostgREST schema cache.
+// Apply pending migrations to the self-hosted Supabase Postgres and
+// reload the PostgREST schema cache.
 //
 // Requires DATABASE_URL (or SUPABASE_DB_URL) in env, pointing at the
 // Railway public TCP proxy for Postgres.  See .env.local.example.
@@ -49,6 +49,11 @@ const FILES = [
   "20260511_messaging_perf.sql",
   // UX improvements (read receipts, soft-delete, reactions)
   "20260512_messaging_ux.sql",
+  // FIX: drops stale 1-param increment_ai_usage overload and creates the
+  // correct 5-param version; also adds ledger columns to ai_usage_log.
+  // Resolves: "Could not find the function public.increment_ai_usage
+  // (p_credits, p_event_type, p_model, p_thread_id, p_user_id)"
+  "20260513_fix_increment_ai_usage_rpc.sql",
 ];
 
 const pool = new Pool({ connectionString, ssl: false });
@@ -66,7 +71,7 @@ try {
 
   await pool.query("NOTIFY pgrst, 'reload schema'");
   console.log("✅ PostgREST schema cache reloaded");
-  console.log("\n🎉 Done. /api/messaging/conversations should work now.");
+  console.log("\n🎉 Done. All pending migrations applied successfully.");
 } catch (e) {
   console.error("❌ Migration FAILED:", e.message);
   process.exit(1);
