@@ -131,8 +131,13 @@ export function ConversationView({
   const handleNewMessage = useCallback((msg: Message) => {
     setMessages((prev) => {
       if (prev.some((m) => m.id === msg.id)) return prev
-      // Resolve reply_to from existing state when join returned null
-      const replyTo = msg.reply_to ?? (msg.reply_to_id ? (prev.find((m) => m.id === msg.reply_to_id) ?? null) : null)
+      // Resolve reply_to from existing state when join returned null.
+      // Also fill in a missing sender from the locally-cached copy of the
+      // reply target so the preview never shows "Unknown".
+      const localReplyMsg = msg.reply_to_id ? (prev.find((m) => m.id === msg.reply_to_id) ?? null) : null
+      const replyTo: Message["reply_to"] = msg.reply_to
+        ? { ...msg.reply_to, sender: msg.reply_to.sender ?? localReplyMsg?.sender ?? undefined }
+        : localReplyMsg
       return [...prev, { ...msg, reply_to: replyTo }]
     })
   }, [])
@@ -220,13 +225,32 @@ export function ConversationView({
       if (!res.ok) throw new Error(await res.text())
       const real: Message = await res.json()
       setMessages((prev) => {
-        const optimistic = prev.find((m) => m.id === tmpId)
-        const replyTo = real.reply_to ?? optimistic?.reply_to ?? null
+        const optimisticMsg = prev.find((m) => m.id === tmpId)
+        // Merge reply_to: prefer API data but fall back to the locally-known
+        // snapshot when the Supabase nested join returns null for sender/content.
+        const apiReplyTo  = real.reply_to
+        const localReplyTo = optimisticMsg?.reply_to
+        const replyTo: Message["reply_to"] = apiReplyTo
+          ? { ...apiReplyTo, sender: apiReplyTo.sender ?? localReplyTo?.sender ?? undefined }
+          : (localReplyTo ?? null)
         // Realtime may have delivered the real row before the POST response
         // arrived and already added it to state. If so, just drop the tmp
         // placeholder to avoid having two copies of the same message.
         if (prev.some((m) => m.id === real.id)) {
-          return prev.filter((m) => m.id !== tmpId)
+          // Patch sender on the already-present real message too, in case the
+          // realtime / poll copy also had a null nested-join sender.
+          return prev
+            .filter((m) => m.id !== tmpId)
+            .map((m) => {
+              if (m.id !== real.id) return m
+              const existingReplyTo = m.reply_to
+              return {
+                ...m,
+                reply_to: existingReplyTo
+                  ? { ...existingReplyTo, sender: existingReplyTo.sender ?? localReplyTo?.sender ?? undefined }
+                  : replyTo,
+              }
+            })
         }
         return prev.map((m) => (m.id === tmpId ? { ...real, reply_to: replyTo, status: "sent" } : m))
       })

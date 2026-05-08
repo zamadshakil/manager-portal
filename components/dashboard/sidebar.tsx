@@ -18,6 +18,7 @@ import {
   BrainCircuit,
   MessageSquare,
   KeyRound,
+  Monitor,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { roleLabel } from "@/lib/auth-shared"
@@ -134,6 +135,12 @@ const NAV: NavGroup[] = [
         roles: ["main_admin"],
       },
       {
+        label: "System Monitor",
+        icon: Monitor,
+        href: "/dashboard/system",
+        roles: ["main_admin"],
+      },
+      {
         label: "Settings",
         icon: Settings,
         href: "/dashboard/settings",
@@ -215,7 +222,7 @@ export function DashboardSidebar({ role }: { role: UserRole }) {
                       >
                         <Icon
                           className={cn(
-                            "h-[18px] w-[18px] shrink-0",
+                            "h-4.5 w-4.5 shrink-0",
                             active ? "text-primary" : "text-muted-foreground",
                           )}
                         />

@@ -127,6 +127,7 @@ export function ChatPanel({
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [loadingThread, setLoadingThread] = useState(false)
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const initializedRef = useRef(false)
 
@@ -322,9 +323,7 @@ export function ChatPanel({
 
   // Auto-stick to the bottom whenever new tokens arrive.
   useEffect(() => {
-    const el = scrollerRef.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
+    bottomRef.current?.scrollIntoView({ behavior: "instant" })
   }, [messages, status])
 
   // Honor a seed prompt jumped in from another tab.
@@ -606,6 +605,7 @@ export function ChatPanel({
               </button>
             </div>
           ) : null}
+          <div ref={bottomRef} />
         </div>
 
         {/* Composer */}

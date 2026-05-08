@@ -1,3 +1,5 @@
+import { withSentryConfig } from "@sentry/nextjs"
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
@@ -78,7 +80,7 @@ const nextConfig = {
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "img-src 'self' blob: data: https://*.r2.dev",
           "font-src 'self' https://fonts.gstatic.com https://frontend-cdn.perplexity.ai",
-          `connect-src 'self' ${supabaseOrigins.join(" ")} https://*.r2.dev`,
+          `connect-src 'self' ${supabaseOrigins.join(" ")} https://*.r2.dev https://*.sentry.io`,
           "frame-src 'none'",
           "frame-ancestors 'none'",
           "object-src 'none'",
@@ -125,4 +127,14 @@ async function withOptionalAnalyzer(config) {
   }
 }
 
-export default await withOptionalAnalyzer(nextConfig)
+const sentryConfig = {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  silent: !process.env.CI,
+  widenClientFileUpload: true,
+  hideSourceMaps: true,
+  disableLogger: true,
+  automaticVercelMonitors: false,
+}
+
+export default withSentryConfig(await withOptionalAnalyzer(nextConfig), sentryConfig)

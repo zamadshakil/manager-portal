@@ -806,6 +806,111 @@ export type Database = {
           { foreignKeyName: "user_permission_overrides_granted_by_fkey"; columns: ["granted_by"]; referencedRelation: "profiles"; referencedColumns: ["id"] }
         ]
       }
+      system_request_logs: {
+        Row: {
+          id: string
+          trace_id: string | null
+          method: string
+          path: string
+          status_code: number | null
+          duration_ms: number | null
+          user_id: string | null
+          ip_address: string | null
+          user_agent: string | null
+          error_message: string | null
+          request_size: number | null
+          response_size: number | null
+          metadata: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          trace_id?: string | null
+          method: string
+          path: string
+          status_code?: number | null
+          duration_ms?: number | null
+          user_id?: string | null
+          ip_address?: string | null
+          user_agent?: string | null
+          error_message?: string | null
+          request_size?: number | null
+          response_size?: number | null
+          metadata?: Json
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          trace_id?: string | null
+          method?: string
+          path?: string
+          status_code?: number | null
+          duration_ms?: number | null
+          user_id?: string | null
+          ip_address?: string | null
+          user_agent?: string | null
+          error_message?: string | null
+          request_size?: number | null
+          response_size?: number | null
+          metadata?: Json
+          created_at?: string
+        }
+        Relationships: []
+      }
+      system_error_logs: {
+        Row: {
+          id: string
+          trace_id: string | null
+          severity: "error" | "warning" | "info"
+          source: "api" | "server" | "cron" | "client" | "pipeline" | "ai"
+          error_message: string
+          error_code: string | null
+          stack_trace: string | null
+          path: string | null
+          method: string | null
+          user_id: string | null
+          ip_address: string | null
+          sentry_event_id: string | null
+          context: Json
+          resolved_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          trace_id?: string | null
+          severity?: "error" | "warning" | "info"
+          source?: "api" | "server" | "cron" | "client" | "pipeline" | "ai"
+          error_message: string
+          error_code?: string | null
+          stack_trace?: string | null
+          path?: string | null
+          method?: string | null
+          user_id?: string | null
+          ip_address?: string | null
+          sentry_event_id?: string | null
+          context?: Json
+          resolved_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          trace_id?: string | null
+          severity?: "error" | "warning" | "info"
+          source?: "api" | "server" | "cron" | "client" | "pipeline" | "ai"
+          error_message?: string
+          error_code?: string | null
+          stack_trace?: string | null
+          path?: string | null
+          method?: string | null
+          user_id?: string | null
+          ip_address?: string | null
+          sentry_event_id?: string | null
+          context?: Json
+          resolved_at?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

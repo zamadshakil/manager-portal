@@ -6,7 +6,7 @@
 
 ## 📦 Documentation Package
 
-This delivery package contains six comprehensive documents covering every aspect of the Hierarchia Manager Portal — from executive overview to deployment instructions.
+This delivery package contains seven comprehensive documents covering every aspect of the Hierarchia Manager Portal — from executive overview to deployment instructions and AI model strategy.
 
 | # | Document | Pages | What You'll Learn |
 |---|----------|-------|-------------------|
@@ -16,6 +16,7 @@ This delivery package contains six comprehensive documents covering every aspect
 | **04** | [Data Flows & User Journeys](./04_DATA_FLOWS.md) | 6 | Step-by-step flows for all operations, permission matrix |
 | **05** | [Deployment Guide](./05_DEPLOYMENT_GUIDE.md) | 5 | Environment setup, Railway deployment, security checklist |
 | **06** | [Presentation Guide](./06_PRESENTATION_GUIDE.md) | 6 | Demo script, talking points, FAQ, value propositions |
+| **07** | [AI Model Strategy](./07_AI_MODEL_STRATEGY.md) | 7 | Compatible models, cost/quality/speed comparison, recommended configs |
 
 ---
 
@@ -25,6 +26,7 @@ This delivery package contains six comprehensive documents covering every aspect
 2. **Follow** [06 — Presentation Guide](./06_PRESENTATION_GUIDE.md) for the 15-minute demo script
 3. **Reference** [03 — Glossary](./03_GLOSSARY.md) for any technical term definitions
 4. **Use** [04 — Data Flows](./04_DATA_FLOWS.md) to explain "how it works under the hood"
+5. **Show** [07 — AI Model Strategy](./07_AI_MODEL_STRATEGY.md) for the cost/quality/speed model comparison
 
 ## 🔧 Quick Start for Engineers
 
