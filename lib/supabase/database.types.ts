@@ -728,6 +728,84 @@ export type Database = {
           { foreignKeyName: "message_reactions_user_id_fkey"; columns: ["user_id"]; referencedRelation: "profiles"; referencedColumns: ["id"] }
         ]
       }
+      permission_definitions: {
+        Row: {
+          key: string
+          module: string
+          action: string
+          description: string
+          is_admin_only: boolean
+          created_at: string
+        }
+        Insert: {
+          key: string
+          module: string
+          action: string
+          description?: string
+          is_admin_only?: boolean
+          created_at?: string
+        }
+        Update: {
+          key?: string
+          module?: string
+          action?: string
+          description?: string
+          is_admin_only?: boolean
+        }
+        Relationships: []
+      }
+      role_permission_defaults: {
+        Row: {
+          role: string
+          capability_key: string
+          created_at: string
+        }
+        Insert: {
+          role: string
+          capability_key: string
+          created_at?: string
+        }
+        Update: {
+          role?: string
+          capability_key?: string
+        }
+        Relationships: [
+          { foreignKeyName: "role_permission_defaults_capability_key_fkey"; columns: ["capability_key"]; referencedRelation: "permission_definitions"; referencedColumns: ["key"] }
+        ]
+      }
+      user_permission_overrides: {
+        Row: {
+          id: string
+          user_id: string
+          capability_key: string
+          effect: "allow" | "deny"
+          granted_by: string | null
+          reason: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          capability_key: string
+          effect: "allow" | "deny"
+          granted_by?: string | null
+          reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          effect?: "allow" | "deny"
+          granted_by?: string | null
+          reason?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "user_permission_overrides_user_id_fkey"; columns: ["user_id"]; referencedRelation: "profiles"; referencedColumns: ["id"] },
+          { foreignKeyName: "user_permission_overrides_capability_key_fkey"; columns: ["capability_key"]; referencedRelation: "permission_definitions"; referencedColumns: ["key"] },
+          { foreignKeyName: "user_permission_overrides_granted_by_fkey"; columns: ["granted_by"]; referencedRelation: "profiles"; referencedColumns: ["id"] }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
