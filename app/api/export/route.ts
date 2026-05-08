@@ -74,6 +74,10 @@ const MIME_TO_EXT: Record<string, string> = {
   "image/webp": "webp",
   "text/plain": "txt",
   "text/markdown": "md",
+  "application/zip": "zip",
+  "application/x-zip-compressed": "zip",
+  "application/vnd.rar": "rar",
+  "application/x-rar-compressed": "rar",
 }
 
 function mimeToExt(mime: string): string {

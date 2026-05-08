@@ -41,6 +41,8 @@ const MIME_OPTIONS = [
   { value: "image/jpeg", label: "JPEG" },
   { value: "text/plain", label: "TXT" },
   { value: "text/markdown", label: "MD" },
+  { value: "application/zip", label: "ZIP" },
+  { value: "application/vnd.rar", label: "RAR" },
 ]
 
 const QUICK_RANGES = [

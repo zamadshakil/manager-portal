@@ -157,6 +157,13 @@ export async function extractText(buf: Buffer, mimeType: string): Promise<ParseR
       const txt = buf.toString("utf8")
       const clampedTxt = clamp(txt)
       return { text: clampedTxt.text, truncated: clampedTxt.truncated }
+    case "application/zip":
+    case "application/x-zip-compressed":
+    case "application/vnd.rar":
+    case "application/x-rar-compressed": {
+      const { extractArchiveText } = await import("@/lib/parse/archive")
+      return extractArchiveText(buf, mimeType)
+    }
     default:
       return { text: "", warning: `Unsupported MIME type: ${mimeType}`, truncated: false }
   }

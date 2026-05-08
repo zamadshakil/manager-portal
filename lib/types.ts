@@ -169,6 +169,7 @@ export interface Material {
   tags: string[]
   expires_at: string | null
   created_at: string
+  archive_status: "pending" | "processing" | "done" | "failed" | "na" | null
   // Join metadata
   teams?: { name: string } | null
 }
@@ -217,9 +218,21 @@ export const ACCEPTED_MIME_TYPES = [
   "image/jpeg",
   "text/plain",
   "text/markdown",
+  "application/zip",
+  "application/x-zip-compressed",
+  "application/vnd.rar",
+  "application/x-rar-compressed",
 ] as const
 
 export const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024 // 25 MB
+export const MAX_ARCHIVE_SIZE_BYTES = 100 * 1024 * 1024 // 100 MB
+
+export const ARCHIVE_MIME_TYPES = [
+  "application/zip",
+  "application/x-zip-compressed",
+  "application/vnd.rar",
+  "application/x-rar-compressed",
+] as const
 
 // ---------------------------------------------------------------------------
 // AI Credit System
