@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
   const messageSelect = `
     id, conversation_id, sender_id, content, type,
     media_url, media_metadata, reply_to_id, edited_at, deleted_at, created_at,
-    sender:profiles!sender_id ( id, full_name, email, avatar_url, deleted_at ),
+    sender:profiles!sender_id ( id, full_name, email, avatar_url ),
     reactions:message_reactions ( message_id, user_id, emoji, created_at ),
     reply_to:messages!reply_to_id (
       id, content, type,
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
       .from("messages")
       .select(messageSelect)
       .eq("conversation_id", conv)
-      .or(`edited_at.gt.${modifiedAfter},deleted_at.gt.${modifiedAfter}`)
+      .or(`edited_at.gt."${modifiedAfter}",deleted_at.gt."${modifiedAfter}"`)
       .order("created_at", { ascending: true })
       .limit(limit)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

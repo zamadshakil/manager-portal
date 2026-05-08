@@ -25,7 +25,7 @@ export async function GET() {
       id, type, name, created_by, avatar_url, created_at, updated_at,
       conversation_members (
         user_id, role, joined_at, last_read_at,
-        profiles:profiles!user_id ( id, full_name, email, avatar_url, deleted_at )
+        profiles:profiles!user_id ( id, full_name, email, avatar_url )
       )
     `)
     .in("id", convIds)
