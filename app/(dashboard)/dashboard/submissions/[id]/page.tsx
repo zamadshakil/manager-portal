@@ -32,7 +32,7 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
     .select("*")
     .eq("submission_id", id)
     .order("created_at", { ascending: false })
-  const runRows = (runs ?? []) as ValidationRun[]
+  const runRows = (runs ?? []) as unknown as ValidationRun[]
 
   // Resolve uploader display name (RLS allows reading profiles in same team / admins).
   const { data: uploader } = await supabase
