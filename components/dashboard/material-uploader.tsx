@@ -30,7 +30,7 @@ export function MaterialUploader({
   const [pending, start] = useTransition()
   // Large-archive presigned upload state
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
-  const [uploadStage, setUploadStage] = useState<"" | "presigning" | "uploading" | "registering" | "processing">("")
+  const [uploadStage, setUploadStage] = useState<"" | "presigning" | "uploading" | "processing">("")
 
   const effectiveTarget = role === "manager" && currentTeamId ? currentTeamId : target
   const isLargeArchive =
@@ -69,17 +69,18 @@ export function MaterialUploader({
         setError(presignData.error ?? "Could not get upload URL.")
         return
       }
-      const { uploadUrl, materialId } = presignData as {
-        uploadUrl: string
+      const { materialId } = presignData as {
         materialId: string
       }
 
-      // Step 2: Upload directly to R2 with progress tracking
+      // Step 2: Upload via server proxy (avoids browser-to-R2 CORS restriction)
       setUploadStage("uploading")
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest()
-        xhr.open("PUT", uploadUrl)
-        xhr.setRequestHeader("Content-Type", file.type)
+        const fd = new FormData()
+        fd.append("materialId", materialId)
+        fd.append("file", file)
+        xhr.open("POST", "/api/materials/upload-proxy")
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
             setUploadProgress(Math.round((e.loaded / e.total) * 100))
@@ -89,26 +90,18 @@ export function MaterialUploader({
           if (xhr.status >= 200 && xhr.status < 300) {
             resolve()
           } else {
-            reject(new Error(`R2 upload failed: HTTP ${xhr.status}`))
+            let msg = `Upload failed (HTTP ${xhr.status})`
+            try {
+              const data = JSON.parse(xhr.responseText)
+              if (data.error) msg = data.error
+            } catch {}
+            reject(new Error(msg))
           }
         }
         xhr.onerror = () => reject(new Error("Network error during upload"))
-        xhr.send(file)
+        xhr.send(fd)
       })
       setUploadProgress(100)
-
-      // Step 3: Register the upload (triggers background processing)
-      setUploadStage("registering")
-      const regRes = await fetch("/api/materials/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ materialId }),
-      })
-      const regData = await regRes.json()
-      if (!regRes.ok) {
-        setError(regData.error ?? "Could not finalize upload.")
-        return
-      }
 
       succeeded = true
       setUploadStage("processing")
@@ -274,7 +267,7 @@ export function MaterialUploader({
 
         {isLargeArchive && (
           <p className="text-[11px] text-muted-foreground">
-            Large archive (&gt;25 MB) — will upload directly to storage and extract content in the background.
+            Large archive (&gt;25 MB) — will upload to storage and extract content in the background.
           </p>
         )}
 
@@ -282,9 +275,8 @@ export function MaterialUploader({
           <div className="space-y-1">
             <div className="flex justify-between text-[11px] text-muted-foreground">
               <span>
-                {uploadStage === "presigning" && "Requesting upload URL…"}
+                {uploadStage === "presigning" && "Preparing upload…"}
                 {uploadStage === "uploading" && `Uploading… ${uploadProgress}%`}
-                {uploadStage === "registering" && "Finalising…"}
               </span>
               <span>{uploadProgress}%</span>
             </div>

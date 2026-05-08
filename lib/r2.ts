@@ -87,6 +87,25 @@ export async function presignPut(
   return { uploadUrl, publicUrl, key }
 }
 
+export async function putRaw(
+  key: string,
+  body: Buffer,
+  contentType: string,
+): Promise<{ url: string; pathname: string }> {
+  await r2.send(
+    new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    }),
+  )
+  return {
+    url: `${PUBLIC_URL}/${key}`,
+    pathname: key,
+  }
+}
+
 export async function get(url: string, options?: any) {
   if (!url) throw new Error("No URL provided");
   const key = url.replace(`${PUBLIC_URL}/`, "")
