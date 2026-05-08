@@ -1,10 +1,12 @@
 import Link from "next/link"
 import { Plus } from "lucide-react"
 import { requireProfile } from "@/lib/auth"
+import { createClient } from "@/lib/supabase/server"
 import { listSubmissions } from "@/lib/data"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { SubmissionsTable } from "@/components/dashboard/submissions-table"
 import { SubmissionsFilter } from "@/components/dashboard/submissions-filter"
+import { BulkExportDialog } from "@/components/dashboard/bulk-export-dialog"
 import type { SubmissionStatus } from "@/lib/types"
 
 interface PageProps {
@@ -24,6 +26,13 @@ const VALID: SubmissionStatus[] = [
 
 export default async function SubmissionsPage({ searchParams }: PageProps) {
   const profile = await requireProfile()
+  const canExport = profile.role === "main_admin" || profile.role === "manager"
+
+  const supabase = await createClient()
+  const { data: teams } = canExport
+    ? await supabase.from("teams").select("id, name").order("name")
+    : { data: [] }
+
   const params = await searchParams
   const status =
     params.status && (VALID as string[]).includes(params.status)
@@ -52,6 +61,13 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
               <Plus className="h-4 w-4" aria-hidden="true" />
               Open tasks
             </Link>
+          ) : canExport ? (
+            <BulkExportDialog
+              type="submissions"
+              teams={teams ?? []}
+              role={profile.role as "main_admin" | "manager"}
+              currentTeamId={profile.team_id}
+            />
           ) : null
         }
       />
