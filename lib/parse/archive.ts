@@ -1,5 +1,5 @@
 import "server-only"
-import { extractText, type ParseResult } from "@/lib/parse"
+import type { ParseResult } from "@/lib/parse"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -140,6 +140,7 @@ export async function extractArchiveText(
     for await (const entry of iterator) {
       let result: ParseResult
       try {
+        const { extractText } = await import("@/lib/parse")
         result = await extractText(entry.buf, entry.mime)
       } catch (err: any) {
         warnings.push(`${entry.name}: extraction failed (${err?.message ?? err})`)

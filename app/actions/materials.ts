@@ -8,7 +8,6 @@ import { requireRole } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
 import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES, ARCHIVE_MIME_TYPES } from "@/lib/types"
 import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
-import { processArchiveBackground } from "@/lib/archive-processor"
 
 const MetaSchema = z.object({
   title: z.string().trim().min(2).max(200),
@@ -126,14 +125,11 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
 
   // For small archives, kick off background text extraction + RAG indexing.
   if (isArchive) {
-    void processArchiveBackground(
-      data.id,
-      blob.url,
-      file.type,
-      teamId,
-      profile.id,
-      parsed.data.title,
-    )
+    void import("@/lib/archive-processor")
+      .then(({ processArchiveBackground }) =>
+        processArchiveBackground(data.id, blob.url, file.type, teamId, profile.id, parsed.data.title),
+      )
+      .catch((err) => console.error("[materials] archive-processor load failed:", err))
   }
 
   // Index title + description + tags. The file itself is *not* yet parsed
