@@ -164,10 +164,9 @@ export async function provisionUser(formData: FormData) {
 
 /**
  * Delete a user account. Only main_admin can do this.
- * Handles multiple scenarios:
- *  - Normal user (exists in auth + profiles): deletes from auth, then cleans up profile
- *  - Orphaned profile (exists in profiles but not auth): deletes profile directly
- *  - Logs the action to the audit trail
+ * Uses soft-delete on profiles to preserve chat history (messages remain
+ * with sender attribution). The user is removed from Supabase Auth to
+ * prevent login, but the profile row persists with deleted_at set.
  */
 export async function deleteUser(userId: string): Promise<{ ok: boolean; error?: string }> {
   const actor = await requireRole(["main_admin"])
@@ -183,8 +182,7 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
 
   const admin = createAdminClient()
 
-  // Fetch the target profile for logging — use maybeSingle() to avoid
-  // throwing when the profile row is missing or has a query error.
+  // Fetch the target profile for logging
   const { data: targetProfile, error: profileError } = await admin
     .from("profiles")
     .select("email, full_name, role")
@@ -195,29 +193,24 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
     console.error("[deleteUser] profile lookup error:", profileError.message)
   }
 
-  // Try to delete from Supabase Auth first (this cascades if FK is set up).
-  // If the user only exists in profiles (orphan row), this will fail — that's OK.
+  // Delete from Supabase Auth — prevents login, does NOT cascade to profiles
   const { error: authError } = await admin.auth.admin.deleteUser(userId)
   if (authError) {
-    console.warn("[deleteUser] auth delete failed (may be orphan profile):", authError.message)
+    console.warn("[deleteUser] auth delete failed:", authError.message)
+    // Continue with soft-delete even if auth fails (may be orphan profile)
   }
 
-  // Always try to delete the profile row directly — handles orphaned rows
-  // and cases where the FK cascade didn't fire.
-  const { error: deleteProfileError } = await admin
+  // Soft-delete the profile row — preserves FK integrity + message attribution
+  const { error: softDeleteError } = await admin
     .from("profiles")
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq("id", userId)
 
-  if (deleteProfileError) {
-    console.error("[deleteUser] profile delete error:", deleteProfileError.message)
-  }
-
-  // If both auth and profile deletes failed, the user truly can't be removed
-  if (authError && deleteProfileError) {
+  if (softDeleteError) {
+    console.error("[deleteUser] profile soft-delete error:", softDeleteError.message)
     return {
       ok: false,
-      error: `Could not delete user: ${deleteProfileError.message}`,
+      error: `Could not delete user: ${softDeleteError.message}`,
     }
   }
 

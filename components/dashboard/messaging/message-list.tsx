@@ -27,7 +27,7 @@ interface MessageListProps {
   hasMore: boolean
   onLoadMore: () => void
   onReact: (msgId: string, emoji: string) => void
-  onEdit: (msg: Message) => void
+  onEdit: (msg: Message, newContent: string) => void
   onDelete: (msgId: string) => void
   onReply: (msg: Message) => void
   onRetry: (msg: Message) => void
@@ -129,6 +129,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
           </div>
         )
       },
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       [messages, currentUserId, onReact, onEdit, onDelete, onReply, onRetry, setItemSize],
     )
 
@@ -179,7 +180,7 @@ interface MeasuredRowProps {
   index: number
   currentUserId: string
   onReact: (msgId: string, emoji: string) => void
-  onEdit: (msg: Message) => void
+  onEdit: (msg: Message, newContent: string) => void
   onDelete: (msgId: string) => void
   onReply: (msg: Message) => void
   onRetry: (msg: Message) => void
@@ -261,6 +262,7 @@ function MeasuredRow({
       <MessageRow
         message={message}
         isOwn={message.sender_id === currentUserId}
+        currentUserId={currentUserId}
         onReact={onReact}
         onEdit={onEdit}
         onDelete={onDelete}

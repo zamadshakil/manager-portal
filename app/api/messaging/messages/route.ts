@@ -8,10 +8,11 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const conv = searchParams.get("conv")
-  const before = searchParams.get("before") // ISO cursor — load older messages
-  const after  = searchParams.get("after")  // ISO cursor — poll for newer messages
-  const limit  = Math.min(parseInt(searchParams.get("limit") ?? "50"), 100)
+  const conv          = searchParams.get("conv")
+  const before        = searchParams.get("before")        // ISO cursor — load older messages
+  const after         = searchParams.get("after")         // ISO cursor — poll for newer messages
+  const modifiedAfter = searchParams.get("modifiedAfter") // ISO cursor — poll for edits/deletes
+  const limit         = Math.min(parseInt(searchParams.get("limit") ?? "50"), 100)
 
   if (!conv) return NextResponse.json({ error: "conv is required" }, { status: 400 })
 
@@ -26,22 +27,37 @@ export async function GET(req: NextRequest) {
     .maybeSingle()
   if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
+  const messageSelect = `
+    id, conversation_id, sender_id, content, type,
+    media_url, media_metadata, reply_to_id, edited_at, deleted_at, created_at,
+    sender:profiles!sender_id ( id, full_name, email, avatar_url, deleted_at ),
+    reactions:message_reactions ( message_id, user_id, emoji, created_at ),
+    reply_to:messages!reply_to_id (
+      id, content, type,
+      sender:profiles!sender_id ( id, full_name, email, avatar_url )
+    )
+  `
+
+  // modifiedAfter: return messages edited or deleted after the cursor (include deleted ones)
+  if (modifiedAfter) {
+    const { data, error } = await admin
+      .from("messages")
+      .select(messageSelect)
+      .eq("conversation_id", conv)
+      .or(`edited_at.gt.${modifiedAfter},deleted_at.gt.${modifiedAfter}`)
+      .order("created_at", { ascending: true })
+      .limit(limit)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json(data ?? [])
+  }
+
   // after-cursor polls return ascending (oldest-first already); before-cursor
   // returns descending then we reverse client-side to get oldest-first.
   const ascending = !!after
 
   let query = admin
     .from("messages")
-    .select(`
-      id, conversation_id, sender_id, content, type,
-      media_url, media_metadata, reply_to_id, edited_at, deleted_at, created_at,
-      sender:profiles!sender_id ( id, full_name, email, avatar_url ),
-      reactions:message_reactions ( message_id, user_id, emoji, created_at ),
-      reply_to:messages!reply_to_id (
-        id, content, type,
-        sender:profiles!sender_id ( id, full_name, email, avatar_url )
-      )
-    `)
+    .select(messageSelect)
     .eq("conversation_id", conv)
     .is("deleted_at", null)
     .order("created_at", { ascending })

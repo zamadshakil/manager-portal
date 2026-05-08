@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { format, isToday, isYesterday } from "date-fns"
 import { Clock, AlertCircle, Pencil, Trash2, SmilePlus, CornerUpRight, FileText, CheckCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -17,8 +17,9 @@ import type { Message } from "@/lib/types"
 interface MessageRowProps {
   message: Message
   isOwn: boolean
+  currentUserId: string
   onReact: (msgId: string, emoji: string) => void
-  onEdit: (msg: Message) => void
+  onEdit: (msg: Message, newContent: string) => void
   onDelete: (msgId: string) => void
   onReply: (msg: Message) => void
   onRetry?: (msg: Message) => void
@@ -36,6 +37,7 @@ const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"]
 export function MessageRow({
   message,
   isOwn,
+  currentUserId,
   onReact,
   onEdit,
   onDelete,
@@ -44,6 +46,8 @@ export function MessageRow({
 }: MessageRowProps) {
   const [hovered, setHovered] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const editRef = useRef<HTMLTextAreaElement>(null)
   // Keep actions visible while any dropdown is open to prevent flickering
   const showActions = hovered || emojiOpen
 
@@ -55,14 +59,17 @@ export function MessageRow({
     )
   }
 
-  const senderName = message.sender?.full_name ?? message.sender?.email ?? "Unknown"
+  const isDeletedUser = !!(message.sender as any)?.deleted_at
+  const senderName = isDeletedUser
+    ? (message.sender?.full_name ?? message.sender?.email ?? "Deleted User")
+    : (message.sender?.full_name ?? message.sender?.email ?? "Unknown")
   const initials = senderName.slice(0, 2).toUpperCase()
 
   // Group reactions by emoji
   const reactionMap = new Map<string, { count: number; mine: boolean }>()
   for (const r of message.reactions ?? []) {
     const existing = reactionMap.get(r.emoji) ?? { count: 0, mine: false }
-    reactionMap.set(r.emoji, { count: existing.count + 1, mine: existing.mine })
+    reactionMap.set(r.emoji, { count: existing.count + 1, mine: existing.mine || r.user_id === currentUserId })
   }
 
   return (
@@ -86,8 +93,8 @@ export function MessageRow({
       <div className={cn("flex flex-col min-w-0 max-w-[65%]", isOwn ? "items-end" : "items-start")}>
         {/* Sender name — only for incoming messages */}
         {!isOwn && (
-          <span className="text-[11px] font-semibold text-primary px-1 mb-0.5 truncate max-w-full">
-            {senderName}
+          <span className={cn("text-[11px] font-semibold px-1 mb-0.5 truncate max-w-full", isDeletedUser ? "text-muted-foreground italic" : "text-primary")}>
+            {isDeletedUser ? `${senderName} (removed)` : senderName}
           </span>
         )}
 
@@ -117,8 +124,17 @@ export function MessageRow({
             </div>
           )}
 
-          {/* Message content */}
-          <MessageContent message={message} isOwn={isOwn} />
+          {/* Inline edit or message content */}
+          {editing ? (
+            <InlineEditArea
+              initialText={message.content ?? ""}
+              editRef={editRef}
+              onSave={(text) => { onEdit(message, text); setEditing(false) }}
+              onCancel={() => setEditing(false)}
+            />
+          ) : (
+            <MessageContent message={message} isOwn={isOwn} />
+          )}
 
           {/* Timestamp + delivery status row (inside bubble) */}
           <div className="flex items-center justify-end gap-1 mt-1">
@@ -218,9 +234,11 @@ export function MessageRow({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onEdit(message)}>
-                <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
-              </DropdownMenuItem>
+              {message.type === "text" && (
+                <DropdownMenuItem onClick={() => setEditing(true)}>
+                  <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={() => onDelete(message.id)}
                 className="text-destructive focus:text-destructive"
@@ -291,5 +309,49 @@ function MessageContent({ message, isOwn }: { message: Message; isOwn: boolean }
         {meta?.size ? ` (${(meta.size / 1024).toFixed(0)} KB)` : ""}
       </span>
     </a>
+  )
+}
+
+interface InlineEditAreaProps {
+  initialText: string
+  editRef: React.RefObject<HTMLTextAreaElement | null>
+  onSave: (text: string) => void
+  onCancel: () => void
+}
+
+function InlineEditArea({ initialText, editRef, onSave, onCancel }: InlineEditAreaProps) {
+  const [value, setValue] = useState(initialText)
+
+  useEffect(() => {
+    editRef.current?.focus()
+    const len = editRef.current?.value.length ?? 0
+    editRef.current?.setSelectionRange(len, len)
+  }, [editRef])
+
+  const handleKey = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      const trimmed = value.trim()
+      if (trimmed) onSave(trimmed)
+    }
+    if (e.key === "Escape") onCancel()
+  }, [value, onSave, onCancel])
+
+  return (
+    <div className="flex flex-col gap-1 w-full">
+      <textarea
+        ref={editRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={handleKey}
+        rows={2}
+        className="w-full resize-none bg-transparent text-sm outline-none border-b border-primary-foreground/30 focus:border-primary-foreground leading-relaxed"
+        style={{ minHeight: "2rem" }}
+      />
+      <div className="flex gap-2 text-[10px] opacity-70">
+        <span>Enter to save</span>
+        <span>Esc to cancel</span>
+      </div>
+    </div>
   )
 }

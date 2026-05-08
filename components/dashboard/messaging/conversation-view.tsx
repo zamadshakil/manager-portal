@@ -90,18 +90,10 @@ export function ConversationView({
   // Realtime: new message from Supabase
   const handleNewMessage = useCallback((msg: Message) => {
     setMessages((prev) => {
-      // Reconcile optimistic message if it came from us
-      const idx = prev.findIndex((m) => m.status === "sending" && m.sender_id === msg.sender_id)
-      if (idx !== -1) {
-        const next = [...prev]
-        next[idx] = { ...msg, status: "sent" }
-        return next
-      }
-      // Deduplicate real-time duplicates
+      // Deduplicate — the optimistic tmpId is already replaced by handleSend's POST callback
       if (prev.some((m) => m.id === msg.id)) return prev
       return [...prev, msg]
     })
-    // Auto-scroll handled inside MessageList
   }, [])
 
   const handleMessageUpdated = useCallback((partial: Partial<Message> & { id: string }) => {
@@ -207,9 +199,11 @@ export function ConversationView({
     })
   }, [])
 
-  const handleEdit = useCallback((msg: Message) => {
-    const newContent = window.prompt("Edit message:", msg.content ?? "")
-    if (newContent === null || newContent === msg.content) return
+  const handleEdit = useCallback((msg: Message, newContent: string) => {
+    if (!newContent.trim() || newContent === msg.content) return
+    setMessages((prev) =>
+      prev.map((m) => m.id === msg.id ? { ...m, content: newContent, edited_at: new Date().toISOString() } : m)
+    )
     fetch(`/api/messaging/messages/${msg.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -241,6 +235,7 @@ export function ConversationView({
   // Conversation header info
   const isGroup = conversation.type === "group"
   const otherMember = isGroup ? null : conversation.members?.find((m) => m.user_id !== currentUserId)
+  const otherMemberDeleted = !isGroup && !!(otherMember?.profile as any)?.deleted_at
   const headerName = isGroup
     ? (conversation.name ?? "Group")
     : (otherMember?.profile?.full_name ?? otherMember?.profile?.email ?? "DM")
@@ -294,13 +289,21 @@ export function ConversationView({
 
       <TypingIndicator users={typingUsers} />
 
-      <MessageComposer
-        conversationId={conversation.id}
-        replyTo={replyTo}
-        onClearReply={() => setReplyTo(null)}
-        onSend={handleSend}
-        onTyping={sendTyping}
-      />
+      {otherMemberDeleted ? (
+        <div className="shrink-0 px-4 py-3 border-t border-border bg-muted/40 text-center">
+          <p className="text-xs text-muted-foreground">
+            This user has been removed and can no longer receive messages.
+          </p>
+        </div>
+      ) : (
+        <MessageComposer
+          conversationId={conversation.id}
+          replyTo={replyTo}
+          onClearReply={() => setReplyTo(null)}
+          onSend={handleSend}
+          onTyping={sendTyping}
+        />
+      )}
 
       {isGroup ? (
         <GroupInfoSheet

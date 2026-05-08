@@ -1,15 +1,15 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import { createClient } from "@/lib/supabase/client"
 import type { Message, MessageReaction, TypingUser } from "@/lib/types"
 
-// Supabase postgres_changes requires per-table realtime to be enabled in the
-// Supabase dashboard — a setup step that is often skipped.  Instead we use
-// reliable HTTP polling so messages and the typing indicator work immediately
-// without any Supabase Realtime configuration.
-
-const MSG_POLL_MS     = 2500  // new-message poll interval
-const TYPING_POLL_MS  = 1500  // typing-indicator poll interval
+// Poll intervals — active only when Supabase Realtime is unavailable
+const MSG_POLL_MS    = 2000
+const MOD_POLL_MS    = 3000
+const REACT_POLL_MS  = 2500
+const TYPING_POLL_MS = 1500
+const FULL_SYNC_MS   = 30_000
 
 interface UseConversationRealtimeOptions {
   conversationId: string | null
@@ -22,56 +22,89 @@ interface UseConversationRealtimeOptions {
 export function useConversationRealtime({
   conversationId,
   onNewMessage,
-  onMessageUpdated,  // kept for API compat — used by periodic sync below
+  onMessageUpdated,
+  onReactionChange,
   onTyping,
 }: UseConversationRealtimeOptions) {
-  // Stable callback refs — updating these never restarts intervals
-  const onNewMessageRef    = useRef(onNewMessage)
+  // Stable callback refs — updating these never restarts the effect
+  const onNewMessageRef     = useRef(onNewMessage)
   const onMessageUpdatedRef = useRef(onMessageUpdated)
-  const onTypingRef        = useRef(onTyping)
+  const onReactionChangeRef = useRef(onReactionChange)
+  const onTypingRef         = useRef(onTyping)
 
   onNewMessageRef.current     = onNewMessage
   onMessageUpdatedRef.current = onMessageUpdated
+  onReactionChangeRef.current = onReactionChange
   onTypingRef.current         = onTyping
-
-  // ISO timestamp cursor — we only request messages newer than this
-  const cursorRef = useRef<string>("")
 
   useEffect(() => {
     if (!conversationId) return
 
-    // Start 5 s in the past so we never miss a message that arrived between
-    // the initial page-load fetch and the first poll tick.
-    cursorRef.current = new Date(Date.now() - 5_000).toISOString()
+    const startTs = new Date(Date.now() - 5_000).toISOString()
+    // Cursors track the latest timestamp seen per data type
+    let msgCursor   = startTs
+    let modCursor   = startTs
+    let reactCursor = startTs
 
-    let active = true
+    let active          = true
+    let realtimeActive  = false
 
-    // ── Poll: new messages ────────────────────────────────────────────────────
-    async function pollMessages() {
+    // ── Fetch helpers ─────────────────────────────────────────────────────────
+
+    async function fetchNewMessages() {
       if (!active) return
       try {
         const url =
           `/api/messaging/messages` +
           `?conv=${encodeURIComponent(conversationId!)}` +
-          `&after=${encodeURIComponent(cursorRef.current)}` +
+          `&after=${encodeURIComponent(msgCursor)}` +
           `&limit=50`
         const res = await fetch(url, { cache: "no-store" })
         if (!res.ok || !active) return
         const msgs: Message[] = await res.json()
         for (const msg of msgs) {
           onNewMessageRef.current(msg)
-          // Advance cursor so we never re-fetch the same messages
-          if (msg.created_at > cursorRef.current) {
-            cursorRef.current = msg.created_at
-          }
+          if (msg.created_at > msgCursor) msgCursor = msg.created_at
         }
-      } catch {
-        // Network hiccup — silent, will retry on next tick
-      }
+      } catch { /* silent — will retry */ }
     }
 
-    // ── Poll: typing indicators ───────────────────────────────────────────────
-    async function pollTyping() {
+    async function fetchModified() {
+      if (!active) return
+      try {
+        const url =
+          `/api/messaging/messages` +
+          `?conv=${encodeURIComponent(conversationId!)}` +
+          `&modifiedAfter=${encodeURIComponent(modCursor)}` +
+          `&limit=50`
+        const res = await fetch(url, { cache: "no-store" })
+        if (!res.ok || !active) return
+        const msgs: Message[] = await res.json()
+        for (const msg of msgs) {
+          onMessageUpdatedRef.current(msg)
+          const ts = msg.edited_at ?? msg.deleted_at ?? msg.created_at
+          if (ts > modCursor) modCursor = ts
+        }
+      } catch { /* silent */ }
+    }
+
+    async function fetchReactions() {
+      if (!active) return
+      try {
+        const url =
+          `/api/messaging/conversations/${conversationId}/reactions` +
+          `?after=${encodeURIComponent(reactCursor)}`
+        const res = await fetch(url, { cache: "no-store" })
+        if (!res.ok || !active) return
+        const items: (MessageReaction & { action: "added" | "removed" })[] = await res.json()
+        for (const r of items) {
+          onReactionChangeRef.current(r)
+          if (r.created_at > reactCursor) reactCursor = r.created_at
+        }
+      } catch { /* silent */ }
+    }
+
+    async function fetchTyping() {
       if (!active) return
       try {
         const res = await fetch(
@@ -81,22 +114,127 @@ export function useConversationRealtime({
         if (!res.ok || !active) return
         const users: TypingUser[] = await res.json()
         onTypingRef.current(users)
-      } catch {
-        // Silent
-      }
+      } catch { /* silent */ }
     }
 
-    const msgTimer    = setInterval(pollMessages, MSG_POLL_MS)
-    const typingTimer = setInterval(pollTyping,   TYPING_POLL_MS)
+    async function fullSync() {
+      if (!active || realtimeActive) return
+      try {
+        const url =
+          `/api/messaging/messages` +
+          `?conv=${encodeURIComponent(conversationId!)}` +
+          `&limit=50`
+        const res = await fetch(url, { cache: "no-store" })
+        if (!res.ok || !active) return
+        const msgs: Message[] = await res.json()
+        for (const msg of msgs) onMessageUpdatedRef.current(msg)
+      } catch { /* silent */ }
+    }
 
-    // Kick off immediately so the first tick doesn't wait a full interval
-    void pollMessages()
-    void pollTyping()
+    // ── Polling timers (only active when Realtime is down) ───────────────────
+
+    let msgTimer:      ReturnType<typeof setInterval> | null = null
+    let modTimer:      ReturnType<typeof setInterval> | null = null
+    let reactTimer:    ReturnType<typeof setInterval> | null = null
+    let typingTimer:   ReturnType<typeof setInterval> | null = null
+    let fullSyncTimer: ReturnType<typeof setInterval> | null = null
+
+    function startPolling() {
+      realtimeActive = false
+      if (!msgTimer)      msgTimer      = setInterval(fetchNewMessages, MSG_POLL_MS)
+      if (!modTimer)      modTimer      = setInterval(fetchModified,    MOD_POLL_MS)
+      if (!reactTimer)    reactTimer    = setInterval(fetchReactions,   REACT_POLL_MS)
+      if (!fullSyncTimer) fullSyncTimer = setInterval(fullSync,         FULL_SYNC_MS)
+      void fetchNewMessages()
+      void fetchModified()
+      void fetchReactions()
+    }
+
+    function stopPolling() {
+      if (msgTimer)      { clearInterval(msgTimer);      msgTimer      = null }
+      if (modTimer)      { clearInterval(modTimer);      modTimer      = null }
+      if (reactTimer)    { clearInterval(reactTimer);    reactTimer    = null }
+      if (fullSyncTimer) { clearInterval(fullSyncTimer); fullSyncTimer = null }
+    }
+
+    // Typing always uses HTTP (Redis-backed, not in Realtime publication)
+    typingTimer = setInterval(fetchTyping, TYPING_POLL_MS)
+    void fetchTyping()
+
+    // ── Supabase Realtime ─────────────────────────────────────────────────────
+
+    const supabase = createClient()
+
+    const channel = supabase
+      .channel(`conv:${conversationId}`)
+      .on(
+        "postgres_changes" as any,
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          // Realtime INSERT payload lacks joined data — use fetch to get full message
+          if (active) void fetchNewMessages()
+        },
+      )
+      .on(
+        "postgres_changes" as any,
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload: any) => {
+          if (!active) return
+          onMessageUpdatedRef.current(payload.new as Message)
+        },
+      )
+      .on(
+        "postgres_changes" as any,
+        { event: "INSERT", schema: "public", table: "message_reactions" },
+        (payload: any) => {
+          if (!active) return
+          const r = payload.new as MessageReaction
+          onReactionChangeRef.current({ ...r, action: "added" })
+        },
+      )
+      .on(
+        "postgres_changes" as any,
+        { event: "DELETE", schema: "public", table: "message_reactions" },
+        (payload: any) => {
+          if (!active) return
+          const r = payload.old as MessageReaction
+          onReactionChangeRef.current({ ...r, action: "removed" })
+        },
+      )
+      .subscribe((status: string) => {
+        if (!active) return
+        if (status === "SUBSCRIBED") {
+          realtimeActive = true
+          stopPolling()  // Realtime takes over — no polling needed
+        } else if (
+          status === "CHANNEL_ERROR" ||
+          status === "TIMED_OUT" ||
+          status === "CLOSED"
+        ) {
+          // Fall back to polling if Realtime drops
+          startPolling()
+        }
+      })
+
+    // Start polling immediately; Realtime will disable it once connected
+    startPolling()
 
     return () => {
       active = false
-      clearInterval(msgTimer)
-      clearInterval(typingTimer)
+      realtimeActive = false
+      stopPolling()
+      if (typingTimer) clearInterval(typingTimer)
+      supabase.removeChannel(channel)
     }
   }, [conversationId])
 }

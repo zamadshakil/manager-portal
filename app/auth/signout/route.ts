@@ -4,7 +4,9 @@ import { createClient } from "@/lib/supabase/server"
 export async function POST(request: Request) {
   // H-7: CSRF protection — reject cross-site POST requests.
   // Next.js Route Handlers do not get automatic CSRF protection (unlike Server Actions).
-  const canonicalOrigin = process.env.NEXT_PUBLIC_SITE_URL
+  // Strip any trailing slash: the browser Origin header never includes one, so a
+  // mismatch here would silently return 403 on every sign-out attempt.
+  const canonicalOrigin = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "")
   if (canonicalOrigin) {
     const reqOrigin = request.headers.get("origin")
     const reqReferer = request.headers.get("referer")
@@ -16,7 +18,12 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient()
-  await supabase.auth.signOut()
+  // scope:'local' clears session cookies immediately without a blocking HTTP
+  // round-trip to the self-hosted GoTrue service on Railway (~300-800 ms saved).
+  // The server-side JWT record expires naturally on its own TTL. If hard
+  // server-side revocation is ever required, add a fire-and-forget background
+  // call here using scope:'global' without await.
+  await supabase.auth.signOut({ scope: "local" })
 
   // M-7 / C-3: Always redirect to the pinned canonical origin — never derive
   // from x-forwarded-host to prevent host-header injection on logout.

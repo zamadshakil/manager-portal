@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { MessageSquareDashed } from "lucide-react"
 import { toast } from "sonner"
+import { createClient } from "@/lib/supabase/client"
 import { ConversationSidebar } from "./conversation-sidebar"
 import { ConversationView } from "./conversation-view"
 import type { Conversation, Profile } from "@/lib/types"
@@ -40,9 +41,10 @@ export function MessagingLayout({
     fetchConversations().finally(() => setLoading(false))
   }, [fetchConversations])
 
-  // Background poll — refresh sidebar (last_message + unread_count) every 5 s.
+  // Background poll — refresh sidebar (last_message + unread_count) every 2 s.
   // Only the non-selected conversations are fully replaced; the selected one
   // keeps unread_count = 0 since it is currently being viewed.
+  // This runs as a fallback when Realtime is unavailable.
   useEffect(() => {
     const timer = setInterval(async () => {
       try {
@@ -62,9 +64,80 @@ export function MessagingLayout({
       } catch {
         // silent — stale data is acceptable
       }
-    }, 5_000)
+    }, 2_000)
     return () => clearInterval(timer)
   }, [selectedId])
+
+  // Supabase Realtime: sidebar channel for new conversations and message updates
+  useEffect(() => {
+    const supabase = createClient()
+    let active = true
+    let realtimeActive = false
+
+    const channel = supabase
+      .channel(`sidebar:${currentUserId}`)
+      .on(
+        "postgres_changes" as any,
+        { event: "INSERT", schema: "public", table: "conversation_members" },
+        async (payload: any) => {
+          if (!active || payload.new.user_id !== currentUserId) return
+          // New conversation added — refresh full list
+          try {
+            const res = await fetch("/api/messaging/conversations")
+            if (res.ok) {
+              const fresh: Conversation[] = await res.json()
+              setConversations(fresh)
+            }
+          } catch {}
+        },
+      )
+      .on(
+        "postgres_changes" as any,
+        { event: "INSERT", schema: "public", table: "messages" },
+        async (payload: any) => {
+          if (!active) return
+          const convId = payload.new.conversation_id
+          // Refresh the specific conversation to get updated last_message and unread_count
+          try {
+            const res = await fetch("/api/messaging/conversations")
+            if (res.ok) {
+              const fresh: Conversation[] = await res.json()
+              setConversations((prev) => {
+                const updated = fresh.find((c) => c.id === convId)
+                if (!updated) return prev
+                return prev.map((c) => {
+                  if (c.id === convId) {
+                    return {
+                      ...updated,
+                      unread_count: c.id === selectedId ? 0 : updated.unread_count,
+                    }
+                  }
+                  return c
+                })
+              })
+            }
+          } catch {}
+        },
+      )
+      .subscribe((status: string) => {
+        if (!active) return
+        if (status === "SUBSCRIBED") {
+          realtimeActive = true
+        } else if (
+          status === "CHANNEL_ERROR" ||
+          status === "TIMED_OUT" ||
+          status === "CLOSED"
+        ) {
+          realtimeActive = false
+        }
+      })
+
+    return () => {
+      active = false
+      realtimeActive = false
+      supabase.removeChannel(channel)
+    }
+  }, [currentUserId, selectedId])
 
   // Presence heartbeat every 30 s
   useEffect(() => {

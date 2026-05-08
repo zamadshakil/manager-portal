@@ -136,8 +136,12 @@ export function ConversationSidebar({
           </div>
         )}
         {filtered.map((conv) => {
-          const name = convDisplayName(conv, currentUserId)
-          const avatarSrc = convAvatar(conv, currentUserId)
+          const isGroup = conv.type === "group"
+          const otherMember = conv.members?.find((m) => m.user_id !== currentUserId)
+          const otherMemberDeleted = !isGroup && !!(otherMember?.profile as any)?.deleted_at
+          const name = isGroup
+            ? (conv.name ?? "Group")
+            : (otherMember?.profile?.full_name ?? otherMember?.profile?.email ?? "DM")
           const initials = name.slice(0, 2).toUpperCase()
           const isSelected = conv.id === selectedId
           const unread = conv.unread_count ?? 0
@@ -155,7 +159,7 @@ export function ConversationSidebar({
               {/* Avatar */}
               <div className="relative shrink-0">
                 <Avatar className="h-9 w-9">
-                  <AvatarImage src={avatarSrc} />
+                  <AvatarImage src={convAvatar(conv, currentUserId)} />
                   <AvatarFallback className="text-[11px]">{initials}</AvatarFallback>
                 </Avatar>
                 {conv.type === "group" && (
@@ -167,28 +171,29 @@ export function ConversationSidebar({
 
               {/* Text */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-1">
-                  <span className={cn("text-[13px] font-medium truncate", unread > 0 && "font-semibold")}>
-                    {name}
-                  </span>
-                  {lastMsg && (
-                    <span className="text-[10px] text-muted-foreground shrink-0">
-                      {formatConvTs(lastMsg.created_at)}
-                    </span>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-sm font-medium truncate">{name}</p>
+                  {otherMemberDeleted && (
+                    <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Removed</span>
                   )}
                 </div>
-                <div className="flex items-center justify-between gap-1 mt-0.5">
-                  <p className="text-[12px] text-muted-foreground truncate">
-                    {lastMsg
-                      ? lastMsg.type !== "text"
-                        ? `[${lastMsg.type}]`
-                        : lastMsg.content ?? ""
-                      : "No messages yet"}
-                  </p>
-                  {unread > 0 && (
-                    <Badge className="h-4 min-w-4 px-1 text-[10px] shrink-0">{unread}</Badge>
-                  )}
-                </div>
+                <p className="text-xs text-muted-foreground truncate">
+                  {lastMsg
+                    ? lastMsg.type !== "text"
+                      ? `[${lastMsg.type}]`
+                      : lastMsg.content ?? ""
+                    : "No messages yet"}
+                </p>
+              </div>
+
+              {/* Timestamp */}
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-muted-foreground shrink-0">
+                  {lastMsg ? formatConvTs(lastMsg.created_at) : ""}
+                </span>
+                {unread > 0 && (
+                  <Badge className="h-4 min-w-4 px-1 text-[10px] shrink-0">{unread}</Badge>
+                )}
               </div>
             </button>
           )

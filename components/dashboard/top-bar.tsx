@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Plus, LogOut } from "lucide-react"
+import { Plus, LogOut, Loader2 } from "lucide-react"
 import { roleLabel } from "@/lib/auth-shared"
 import type { UserRole } from "@/lib/types"
 
@@ -14,6 +14,19 @@ interface TopBarProps {
 
 export function TopBar({ name, email, role }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [isSigningOut, setIsSigningOut] = useState(false)
+
+  async function handleSignOut() {
+    setIsSigningOut(true)
+    setMenuOpen(false)
+    try {
+      await fetch("/auth/signout", { method: "POST", redirect: "manual" })
+    } finally {
+      // Hard navigation: clears the Next.js client-side router cache entirely
+      // so no stale authenticated RSC payloads survive after sign-out.
+      window.location.href = "/auth/login"
+    }
+  }
   const initials = name
     .split(/\s+/)
     .map((p) => p[0])
@@ -95,16 +108,18 @@ export function TopBar({ name, email, role }: TopBarProps) {
               >
                 Settings
               </Link>
-              <form action="/auth/signout" method="post">
-                <button
-                  type="submit"
-                  role="menuitem"
-                  className="w-full flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] hover:bg-muted"
-                >
-                  <span>Sign out</span>
-                  <LogOut className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-                </button>
-              </form>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={handleSignOut}
+                disabled={isSigningOut}
+                className="w-full flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] hover:bg-muted disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <span>{isSigningOut ? "Signing out…" : "Sign out"}</span>
+                {isSigningOut
+                  ? <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" aria-hidden="true" />
+                  : <LogOut className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />}
+              </button>
             </div>
           ) : null}
         </div>

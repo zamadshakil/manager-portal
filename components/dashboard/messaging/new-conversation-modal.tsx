@@ -40,7 +40,7 @@ export function NewConversationModal({
   const [groupName, setGroupName] = useState("")
   const [loading, setLoading] = useState(false)
 
-  const others = profiles.filter((p) => p.id !== currentUserId)
+  const others = profiles.filter((p) => p.id !== currentUserId && !(p as any).deleted_at)
   const filtered = others.filter((p) =>
     (p.full_name ?? p.email).toLowerCase().includes(search.toLowerCase()),
   )
