@@ -75,10 +75,15 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
       [],
     )
 
-    const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const scrollToBottom = useCallback((_behavior: ScrollBehavior = "smooth") => {
       if (messages.length === 0) return
       listRef.current?.scrollToItem(messages.length - 1, "end")
-      void behavior // react-window doesn't accept behavior; kept for API compat
+      // After react-window positions the last item using estimated heights,
+      // force a native scroll so any measurement delta doesn't leave us short.
+      requestAnimationFrame(() => {
+        const outer = outerRef.current
+        if (outer) outer.scrollTop = outer.scrollHeight
+      })
     }, [messages.length])
 
     useImperativeHandle(ref, () => ({
@@ -93,20 +98,24 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
     // On initial load + new messages: auto-scroll to bottom unless user scrolled up
     useEffect(() => {
       if (messages.length === 0) return
+      const prevCount = prevMessageCount.current
+      const isInitialLoad = prevCount === 0
+      prevMessageCount.current = messages.length
       const outer = outerRef.current
-      if (!outer) {
+      // Always scroll to bottom on first load or when DOM isn't ready yet.
+      if (!outer || isInitialLoad) {
         scrollToBottom("auto")
+        setShowScrollBadge(false)
         return
       }
       const distanceFromBottom = outer.scrollHeight - outer.scrollTop - outer.clientHeight
-      const isNewMessage = messages.length > prevMessageCount.current
+      const isNewMessage = messages.length > prevCount
       if (!isNewMessage || distanceFromBottom < 150) {
         scrollToBottom("auto")
         setShowScrollBadge(false)
       } else if (isNewMessage) {
         setShowScrollBadge(true)
       }
-      prevMessageCount.current = messages.length
     }, [messages.length, scrollToBottom])
 
     // Infinite scroll sentinel

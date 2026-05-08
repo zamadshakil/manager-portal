@@ -68,6 +68,15 @@ export async function getSystemHealthSummary(): Promise<SystemHealthSummary> {
   const now = new Date()
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
 
+  const EMPTY: SystemHealthSummary = {
+    requests_24h: 0,
+    errors_24h: 0,
+    avg_latency_ms_24h: null,
+    error_events_24h: 0,
+    unresolved_errors_24h: 0,
+    ai_calls_24h: 0,
+  }
+
   const [reqResult, errResult, aiResult] = await Promise.all([
     admin
       .from("system_request_logs")
@@ -82,6 +91,8 @@ export async function getSystemHealthSummary(): Promise<SystemHealthSummary> {
       .select("id", { count: "exact" })
       .gte("created_at", since) as any,
   ])
+
+  if (reqResult.error || errResult.error) return EMPTY
 
   const rows: { status_code: number | null; duration_ms: number | null }[] =
     reqResult.data ?? []
@@ -137,7 +148,7 @@ export async function listRequestLogs(filter: RequestLogsFilter = {}): Promise<{
   if (filter.since) q = q.gte("created_at", filter.since)
 
   const { data, count, error } = await q
-  if (error) throw new Error(`listRequestLogs: ${error.message}`)
+  if (error) return { rows: [], total: 0 }
 
   return { rows: (data as SystemRequestLog[]) ?? [], total: count ?? 0 }
 }
@@ -174,7 +185,7 @@ export async function listErrorLogs(filter: ErrorLogsFilter = {}): Promise<{
   if (filter.since) q = q.gte("created_at", filter.since)
 
   const { data, count, error } = await q
-  if (error) throw new Error(`listErrorLogs: ${error.message}`)
+  if (error) return { rows: [], total: 0 }
 
   return { rows: (data as SystemErrorLog[]) ?? [], total: count ?? 0 }
 }
@@ -187,20 +198,19 @@ export async function getRequestVolumeByHour(): Promise<RequestVolumePoint[]> {
   const admin = createAdminClient()
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-  const { data, error } = await (admin.from("system_request_logs") as any)
-    .select("created_at, status_code")
-    .gte("created_at", since)
-    .order("created_at", { ascending: true })
-
-  if (error) throw new Error(`getRequestVolumeByHour: ${error.message}`)
-
   const buckets: Record<string, { total: number; errors: number }> = {}
-
   for (let i = 23; i >= 0; i--) {
     const d = new Date(Date.now() - i * 60 * 60 * 1000)
     const key = `${d.getUTCHours().toString().padStart(2, "0")}:00`
     buckets[key] = { total: 0, errors: 0 }
   }
+
+  const { data, error } = await (admin.from("system_request_logs") as any)
+    .select("created_at, status_code")
+    .gte("created_at", since)
+    .order("created_at", { ascending: true })
+
+  if (error) return Object.entries(buckets).map(([hour]) => ({ hour, total: 0, errors: 0 }))
 
   for (const row of data ?? []) {
     const h = new Date(row.created_at).getUTCHours()
@@ -226,7 +236,7 @@ export async function getTopPaths(limit = 10): Promise<TopPath[]> {
     .select("path, status_code, duration_ms")
     .gte("created_at", since)
 
-  if (error) throw new Error(`getTopPaths: ${error.message}`)
+  if (error) return []
 
   const map: Record<string, { count: number; latencies: number[]; errors: number }> = {}
 
@@ -291,7 +301,7 @@ export async function getErrorGroups(since?: string): Promise<ErrorGroup[]> {
     .order("created_at", { ascending: false })
     .limit(2000)
 
-  if (error) throw new Error(`getErrorGroups: ${error.message}`)
+  if (error) return []
 
   const map: Record<string, {
     error_message: string
@@ -371,7 +381,7 @@ export async function getPerformanceMetrics(since?: string): Promise<PathPerform
     .not("duration_ms", "is", null)
     .limit(5000)
 
-  if (error) throw new Error(`getPerformanceMetrics: ${error.message}`)
+  if (error) return []
 
   const map: Record<string, { latencies: number[]; errors: number }> = {}
 
@@ -416,18 +426,18 @@ export async function getErrorTrend(): Promise<ErrorTrendPoint[]> {
   const admin = createAdminClient()
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-  const { data, error } = await (admin.from("system_error_logs") as any)
-    .select("created_at, severity")
-    .gte("created_at", since)
-
-  if (error) throw new Error(`getErrorTrend: ${error.message}`)
-
   const buckets: Record<string, ErrorTrendPoint> = {}
   for (let i = 23; i >= 0; i--) {
     const h = new Date(Date.now() - i * 60 * 60 * 1000).getUTCHours()
     const key = `${h.toString().padStart(2, "0")}:00`
     buckets[key] = { hour: key, error: 0, warning: 0, info: 0 }
   }
+
+  const { data, error } = await (admin.from("system_error_logs") as any)
+    .select("created_at, severity")
+    .gte("created_at", since)
+
+  if (error) return Object.values(buckets)
 
   for (const row of data ?? []) {
     const key = `${new Date(row.created_at).getUTCHours().toString().padStart(2, "0")}:00`
@@ -455,7 +465,7 @@ export async function getStatusBreakdown(): Promise<StatusBreakdown[]> {
     .select("status_code")
     .gte("created_at", since)
 
-  if (error) throw new Error(`getStatusBreakdown: ${error.message}`)
+  if (error) return []
 
   const buckets: Record<string, number> = { "2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0 }
   for (const row of data ?? []) {
