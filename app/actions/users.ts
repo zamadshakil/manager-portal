@@ -280,7 +280,11 @@ export async function updateUserProfile(
     .eq("id", parsed.data.userId)
     .maybeSingle()
 
-  if (targetErr || !targetProfile) {
+  if (targetErr) {
+    console.error("[updateUserProfile] profile lookup error:", targetErr.message)
+    return { ok: false, error: `Database error: ${targetErr.message}` }
+  }
+  if (!targetProfile) {
     return { ok: false, error: "User not found." }
   }
 

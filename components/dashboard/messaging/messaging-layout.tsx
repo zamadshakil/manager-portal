@@ -40,6 +40,32 @@ export function MessagingLayout({
     fetchConversations().finally(() => setLoading(false))
   }, [fetchConversations])
 
+  // Background poll — refresh sidebar (last_message + unread_count) every 5 s.
+  // Only the non-selected conversations are fully replaced; the selected one
+  // keeps unread_count = 0 since it is currently being viewed.
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch("/api/messaging/conversations")
+        if (!res.ok) return
+        const fresh: Conversation[] = await res.json()
+        setConversations((prev) => {
+          return fresh.map((fc) => {
+            if (fc.id === selectedId) {
+              // Preserve the selected conv's member data but keep unread = 0
+              const existing = prev.find((c) => c.id === fc.id)
+              return { ...fc, members: existing?.members ?? fc.members, unread_count: 0 }
+            }
+            return fc
+          })
+        })
+      } catch {
+        // silent — stale data is acceptable
+      }
+    }, 5_000)
+    return () => clearInterval(timer)
+  }, [selectedId])
+
   // Presence heartbeat every 30 s
   useEffect(() => {
     const beat = () =>

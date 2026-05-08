@@ -101,7 +101,7 @@ export function MessageRow({
           )}
         >
           {/* Reply-to preview inside bubble */}
-          {message.reply_to && (
+          {message.reply_to_id && (
             <div
               className={cn(
                 "border-l-2 pl-2 pr-1 mb-2 py-1 rounded text-[11px] leading-snug",
@@ -111,9 +111,9 @@ export function MessageRow({
               )}
             >
               <p className="font-semibold truncate">
-                {message.reply_to.sender?.full_name ?? "Someone"}
+                {message.reply_to?.sender?.full_name ?? "Someone"}
               </p>
-              <p className="truncate">{message.reply_to.content ?? "Media"}</p>
+              <p className="truncate">{message.reply_to?.content ?? "Media"}</p>
             </div>
           )}
 
