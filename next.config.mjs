@@ -6,7 +6,7 @@ const nextConfig = {
   // intend to move to a client-token flow that streams browser→
   // Blob without traversing the server, but until then this prevents 413s.
   experimental: {
-    serverActions: { bodySizeLimit: "30mb" },
+    serverActions: { bodySizeLimit: "110mb" },
     // ------------------------------------------------------------------
     // Client-side Router Cache TTLs.
     //
