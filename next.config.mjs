@@ -34,6 +34,23 @@ const nextConfig = {
   async headers() {
     const isDev = process.env.NODE_ENV === "development"
 
+    // Derive the Supabase origin (and matching ws origin) from the public env
+    // var so CSP works for both hosted Supabase (*.supabase.co) and a
+    // self-hosted gateway (e.g. Kong on Railway). Falls back to the hosted
+    // wildcards when the var is unset (e.g. during `next lint`).
+    const supabaseOrigins = (() => {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+      if (!url) return ["https://*.supabase.co", "wss://*.supabase.co"]
+      try {
+        const u = new URL(url)
+        const httpOrigin = `${u.protocol}//${u.host}`
+        const wsOrigin = `${u.protocol === "https:" ? "wss:" : "ws:"}//${u.host}`
+        return [httpOrigin, wsOrigin]
+      } catch {
+        return ["https://*.supabase.co", "wss://*.supabase.co"]
+      }
+    })()
+
     const security = [
       {
         key: "Strict-Transport-Security",
@@ -61,7 +78,7 @@ const nextConfig = {
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "img-src 'self' blob: data: https://*.r2.dev",
           "font-src 'self' https://fonts.gstatic.com https://frontend-cdn.perplexity.ai",
-          "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.r2.dev",
+          `connect-src 'self' ${supabaseOrigins.join(" ")} https://*.r2.dev`,
           "frame-src 'none'",
           "frame-ancestors 'none'",
           "object-src 'none'",
