@@ -12,6 +12,9 @@ next.user-config.*
 .local.env
 local.env
 
+# Real credentials file — contains all production secrets, NEVER commit
+env_manager_portal.txt
+
 # Common ignores
 node_modules
 .next/
