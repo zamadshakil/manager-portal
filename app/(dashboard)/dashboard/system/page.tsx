@@ -6,12 +6,18 @@ import {
   getRequestVolumeByHour,
   getTopPaths,
   listErrorLogs,
+  getErrorTrend,
+  getStatusBreakdown,
+  getErrorGroups,
 } from "@/lib/system"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { HealthStats } from "@/components/dashboard/system/health-stats"
 import { RequestChart } from "@/components/dashboard/system/request-chart"
 import { TopPathsTable } from "@/components/dashboard/system/top-paths-table"
 import { ErrorLogsTable } from "@/components/dashboard/system/error-logs-table"
+import { ErrorTrendChart } from "@/components/dashboard/system/error-trend-chart"
+import { StatusChart } from "@/components/dashboard/system/status-chart"
+import { ErrorGroupsTable } from "@/components/dashboard/system/error-groups-table"
 
 export default async function SystemOverviewPage() {
   await requireRole(["main_admin"])
@@ -61,7 +67,48 @@ export default async function SystemOverviewPage() {
         </div>
       </div>
 
-      {/* Recent Errors */}
+      {/* Error Trend + Status Codes */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 lg:gap-6">
+        <div className="xl:col-span-2 rounded-xl border border-border bg-card shadow-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[14px] font-semibold">Error Trend (last 24h)</h2>
+            <Link
+              href="/dashboard/system/errors"
+              className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              View logs →
+            </Link>
+          </div>
+          <Suspense fallback={<ChartSkeleton />}>
+            <ErrorTrendSection />
+          </Suspense>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card shadow-card p-5">
+          <h2 className="text-[14px] font-semibold mb-4">Status Codes (24h)</h2>
+          <Suspense fallback={<ChartSkeleton />}>
+            <StatusSection />
+          </Suspense>
+        </div>
+      </div>
+
+      {/* Top Issues */}
+      <div className="rounded-xl border border-border bg-card shadow-card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-[14px] font-semibold">Top Issues (7d)</h2>
+          <Link
+            href="/dashboard/system/issues"
+            className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            View all →
+          </Link>
+        </div>
+        <Suspense fallback={<ListSkeleton />}>
+          <TopIssuesSection />
+        </Suspense>
+      </div>
+
+      {/* Recent Raw Errors */}
       <div className="rounded-xl border border-border bg-card shadow-card p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[14px] font-semibold">Recent Errors</h2>
@@ -97,6 +144,24 @@ async function RequestChartSection() {
 async function TopPathsSection() {
   const paths = await getTopPaths(8)
   return <TopPathsTable paths={paths} />
+}
+
+async function ErrorTrendSection() {
+  const data = await getErrorTrend()
+  return <ErrorTrendChart data={data} />
+}
+
+async function StatusSection() {
+  const [data, summary] = await Promise.all([
+    getStatusBreakdown(),
+    getSystemHealthSummary(),
+  ])
+  return <StatusChart data={data} total={summary.requests_24h} />
+}
+
+async function TopIssuesSection() {
+  const groups = await getErrorGroups()
+  return <ErrorGroupsTable groups={groups.filter((g) => !g.resolved).slice(0, 5)} />
 }
 
 async function RecentErrorsSection() {

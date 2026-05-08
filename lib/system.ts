@@ -31,7 +31,7 @@ export interface SystemErrorLog {
   path: string | null
   method: string | null
   user_id: string | null
-  sentry_event_id: string | null
+  fingerprint: string | null
   context: Record<string, unknown>
   resolved_at: string | null
   created_at: string
@@ -261,4 +261,219 @@ export async function resolveErrorLog(id: string): Promise<void> {
     .update({ resolved_at: new Date().toISOString() })
     .eq("id", id)
   if (error) throw new Error(`resolveErrorLog: ${error.message}`)
+}
+
+// ---------------------------------------------------------------------------
+// Error groups — Sentry-style issue list grouped by fingerprint
+// ---------------------------------------------------------------------------
+
+export interface ErrorGroup {
+  fingerprint: string
+  error_message: string
+  source: string
+  severity: "error" | "warning" | "info"
+  occurrences: number
+  affected_users: number
+  first_seen: string
+  last_seen: string
+  resolved: boolean
+  sample_id: string
+  sample_path: string | null
+}
+
+export async function getErrorGroups(since?: string): Promise<ErrorGroup[]> {
+  const admin = createAdminClient()
+  const cutoff = since ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+
+  const { data, error } = await (admin.from("system_error_logs") as any)
+    .select("id, fingerprint, error_message, source, severity, user_id, resolved_at, created_at, path")
+    .gte("created_at", cutoff)
+    .order("created_at", { ascending: false })
+    .limit(2000)
+
+  if (error) throw new Error(`getErrorGroups: ${error.message}`)
+
+  const map: Record<string, {
+    error_message: string
+    source: string
+    severity: "error" | "warning" | "info"
+    count: number
+    users: Set<string>
+    first_seen: string
+    last_seen: string
+    any_unresolved: boolean
+    sample_id: string
+    sample_path: string | null
+  }> = {}
+
+  for (const row of data ?? []) {
+    const key = row.fingerprint ?? row.error_message.slice(0, 80)
+    if (!map[key]) {
+      map[key] = {
+        error_message: row.error_message,
+        source: row.source,
+        severity: row.severity,
+        count: 0,
+        users: new Set(),
+        first_seen: row.created_at,
+        last_seen: row.created_at,
+        any_unresolved: false,
+        sample_id: row.id,
+        sample_path: row.path,
+      }
+    }
+    const g = map[key]
+    g.count++
+    if (row.user_id) g.users.add(row.user_id)
+    if (row.created_at < g.first_seen) g.first_seen = row.created_at
+    if (row.created_at > g.last_seen) g.last_seen = row.created_at
+    if (!row.resolved_at) g.any_unresolved = true
+  }
+
+  return Object.entries(map)
+    .map(([fingerprint, g]) => ({
+      fingerprint,
+      error_message: g.error_message,
+      source: g.source,
+      severity: g.severity,
+      occurrences: g.count,
+      affected_users: g.users.size,
+      first_seen: g.first_seen,
+      last_seen: g.last_seen,
+      resolved: !g.any_unresolved,
+      sample_id: g.sample_id,
+      sample_path: g.sample_path,
+    }))
+    .sort((a, b) => b.occurrences - a.occurrences)
+}
+
+// ---------------------------------------------------------------------------
+// Performance metrics — p50 / p95 / p99 per path
+// ---------------------------------------------------------------------------
+
+export interface PathPerformance {
+  path: string
+  count: number
+  p50: number
+  p95: number
+  p99: number
+  max: number
+  error_rate: number
+}
+
+export async function getPerformanceMetrics(since?: string): Promise<PathPerformance[]> {
+  const admin = createAdminClient()
+  const cutoff = since ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
+  const { data, error } = await (admin.from("system_request_logs") as any)
+    .select("path, duration_ms, status_code")
+    .gte("created_at", cutoff)
+    .not("duration_ms", "is", null)
+    .limit(5000)
+
+  if (error) throw new Error(`getPerformanceMetrics: ${error.message}`)
+
+  const map: Record<string, { latencies: number[]; errors: number }> = {}
+
+  for (const row of data ?? []) {
+    if (!map[row.path]) map[row.path] = { latencies: [], errors: 0 }
+    map[row.path].latencies.push(row.duration_ms)
+    if ((row.status_code ?? 0) >= 400) map[row.path].errors++
+  }
+
+  function percentile(arr: number[], p: number): number {
+    const sorted = [...arr].sort((a, b) => a - b)
+    const idx = Math.max(0, Math.ceil((p / 100) * sorted.length) - 1)
+    return sorted[idx] ?? 0
+  }
+
+  return Object.entries(map)
+    .filter(([, v]) => v.latencies.length >= 3)
+    .map(([path, v]) => ({
+      path,
+      count: v.latencies.length,
+      p50: percentile(v.latencies, 50),
+      p95: percentile(v.latencies, 95),
+      p99: percentile(v.latencies, 99),
+      max: Math.max(...v.latencies),
+      error_rate: v.errors / v.latencies.length,
+    }))
+    .sort((a, b) => b.p95 - a.p95)
+}
+
+// ---------------------------------------------------------------------------
+// Error trend — hourly breakdown of error severity over 24h (for charts)
+// ---------------------------------------------------------------------------
+
+export interface ErrorTrendPoint {
+  hour: string
+  error: number
+  warning: number
+  info: number
+}
+
+export async function getErrorTrend(): Promise<ErrorTrendPoint[]> {
+  const admin = createAdminClient()
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
+  const { data, error } = await (admin.from("system_error_logs") as any)
+    .select("created_at, severity")
+    .gte("created_at", since)
+
+  if (error) throw new Error(`getErrorTrend: ${error.message}`)
+
+  const buckets: Record<string, ErrorTrendPoint> = {}
+  for (let i = 23; i >= 0; i--) {
+    const h = new Date(Date.now() - i * 60 * 60 * 1000).getUTCHours()
+    const key = `${h.toString().padStart(2, "0")}:00`
+    buckets[key] = { hour: key, error: 0, warning: 0, info: 0 }
+  }
+
+  for (const row of data ?? []) {
+    const key = `${new Date(row.created_at).getUTCHours().toString().padStart(2, "0")}:00`
+    if (buckets[key]) buckets[key][row.severity as "error" | "warning" | "info"]++
+  }
+
+  return Object.values(buckets)
+}
+
+// ---------------------------------------------------------------------------
+// Status code breakdown (for doughnut / bar chart)
+// ---------------------------------------------------------------------------
+
+export interface StatusBreakdown {
+  label: string
+  count: number
+  color: string
+}
+
+export async function getStatusBreakdown(): Promise<StatusBreakdown[]> {
+  const admin = createAdminClient()
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
+  const { data, error } = await (admin.from("system_request_logs") as any)
+    .select("status_code")
+    .gte("created_at", since)
+
+  if (error) throw new Error(`getStatusBreakdown: ${error.message}`)
+
+  const buckets: Record<string, number> = { "2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0 }
+  for (const row of data ?? []) {
+    const s = row.status_code ?? 0
+    if (s >= 500) buckets["5xx"]++
+    else if (s >= 400) buckets["4xx"]++
+    else if (s >= 300) buckets["3xx"]++
+    else if (s >= 200) buckets["2xx"]++
+  }
+
+  const colors: Record<string, string> = {
+    "2xx": "#10b981",
+    "3xx": "#6366f1",
+    "4xx": "#f59e0b",
+    "5xx": "#ef4444",
+  }
+
+  return Object.entries(buckets)
+    .filter(([, count]) => count > 0)
+    .map(([label, count]) => ({ label, count, color: colors[label] }))
 }

@@ -870,7 +870,7 @@ export type Database = {
           method: string | null
           user_id: string | null
           ip_address: string | null
-          sentry_event_id: string | null
+          fingerprint: string | null
           context: Json
           resolved_at: string | null
           created_at: string
@@ -887,7 +887,7 @@ export type Database = {
           method?: string | null
           user_id?: string | null
           ip_address?: string | null
-          sentry_event_id?: string | null
+          fingerprint?: string | null
           context?: Json
           resolved_at?: string | null
           created_at?: string
@@ -904,7 +904,7 @@ export type Database = {
           method?: string | null
           user_id?: string | null
           ip_address?: string | null
-          sentry_event_id?: string | null
+          fingerprint?: string | null
           context?: Json
           resolved_at?: string | null
           created_at?: string

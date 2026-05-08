@@ -43,7 +43,7 @@ export interface ErrorLogParams {
   method?: string | null
   userId?: string | null
   ipAddress?: string | null
-  sentryEventId?: string | null
+  fingerprint?: string | null
   context?: Record<string, unknown>
 }
 
@@ -52,8 +52,32 @@ export interface ErrorLogParams {
 // ---------------------------------------------------------------------------
 
 export function generateTraceId(): string {
-  // Produces a W3C trace-id-compatible 32-char hex string
   return crypto.randomUUID().replace(/-/g, "")
+}
+
+/**
+ * Deterministic fingerprint for error grouping.
+ * Groups identical errors regardless of which user/request triggered them.
+ * Strips UUIDs and long numeric IDs so the same error on different resources
+ * maps to the same group (same behaviour as Sentry's issue fingerprinting).
+ */
+function buildFingerprint(
+  params: Pick<ErrorLogParams, "errorMessage" | "source" | "path" | "errorCode">,
+): string {
+  const raw = [
+    params.source ?? "server",
+    params.errorCode ?? "",
+    params.path ?? "",
+    (params.errorMessage ?? "")
+      .replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, "<uuid>")
+      .replace(/\b\d{4,}\b/g, "<id>"),
+  ]
+    .join("|")
+    .toLowerCase()
+  // djb2 hash — no crypto overhead, deterministic
+  let h = 5381
+  for (let i = 0; i < raw.length; i++) h = ((h << 5) + h) ^ raw.charCodeAt(i)
+  return (h >>> 0).toString(16).padStart(8, "0")
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +134,7 @@ export function logError(params: ErrorLogParams): void {
       method: params.method ?? null,
       user_id: params.userId ?? null,
       ip_address: params.ipAddress ?? null,
-      sentry_event_id: params.sentryEventId ?? null,
+      fingerprint: params.fingerprint ?? buildFingerprint(params),
       context: (params.context ?? {}) as any,
     } as any)
     .then(({ error }) => {

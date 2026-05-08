@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS public.system_error_logs (
   method          TEXT,
   user_id         UUID        REFERENCES auth.users(id) ON DELETE SET NULL,
   ip_address      TEXT,
-  sentry_event_id TEXT,                                           -- deep-link to Sentry dashboard
+  fingerprint     TEXT,                                           -- djb2 hash for error grouping (stable across occurrences)
   context         JSONB       NOT NULL DEFAULT '{}',              -- request body, params, etc.
   resolved_at     TIMESTAMPTZ,                                    -- non-null = acknowledged
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -60,6 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_sel_severity     ON public.system_error_logs(seve
 CREATE INDEX IF NOT EXISTS idx_sel_source       ON public.system_error_logs(source);
 CREATE INDEX IF NOT EXISTS idx_sel_resolved_at  ON public.system_error_logs(resolved_at);
 CREATE INDEX IF NOT EXISTS idx_sel_trace_id     ON public.system_error_logs(trace_id);
+CREATE INDEX IF NOT EXISTS idx_sel_fingerprint  ON public.system_error_logs(fingerprint);
 
 -- ---------------------------------------------------------------------------
 -- 3. RLS Policies — read: main_admin only; write: service-role only (bypasses RLS)

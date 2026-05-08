@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils"
 
 const TABS = [
   { href: "/dashboard/system", label: "Overview", exact: true },
+  { href: "/dashboard/system/issues", label: "Issues", exact: false },
+  { href: "/dashboard/system/performance", label: "Performance", exact: false },
   { href: "/dashboard/system/requests", label: "Request Logs", exact: false },
   { href: "/dashboard/system/errors", label: "Error Logs", exact: false },
 ]

@@ -118,15 +118,13 @@ function RowDetail({
       )}
 
       <div className="flex items-center gap-3 pt-1">
-        {row.sentry_event_id && (
+        {row.fingerprint && (
           <a
-            href={`https://sentry.io/issues/?query=${row.sentry_event_id}`}
-            target="_blank"
-            rel="noopener noreferrer"
+            href={`/dashboard/system/issues?fingerprint=${row.fingerprint}`}
             className="inline-flex items-center gap-1.5 text-[12px] text-indigo-500 hover:underline"
           >
             <ExternalLink className="h-3.5 w-3.5" />
-            View in Sentry
+            View issue group
           </a>
         )}
         {!row.resolved_at && onResolve && (
