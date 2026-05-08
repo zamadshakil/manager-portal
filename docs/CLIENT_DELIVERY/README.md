@@ -1,6 +1,6 @@
 # Hierarchia Manager Portal — Client Delivery Package
 
-> **Version 1.0** | May 2, 2026 | Prepared by JobFlowAI Engineering
+> **Version 2.0** | May 8, 2026 | Prepared by JobFlowAI Engineering
 
 ---
 
@@ -14,7 +14,7 @@ This delivery package contains six comprehensive documents covering every aspect
 | **02** | [Technical Architecture](./02_TECHNICAL_ARCHITECTURE.md) | 8 | System design, database schema, security model, AI pipeline |
 | **03** | [Glossary of Terms](./03_GLOSSARY.md) | 4 | Every term and technology explained A-Z |
 | **04** | [Data Flows & User Journeys](./04_DATA_FLOWS.md) | 6 | Step-by-step flows for all operations, permission matrix |
-| **05** | [Deployment Guide](./05_DEPLOYMENT_GUIDE.md) | 5 | Environment setup, Vercel deployment, security checklist |
+| **05** | [Deployment Guide](./05_DEPLOYMENT_GUIDE.md) | 5 | Environment setup, Railway deployment, security checklist |
 | **06** | [Presentation Guide](./06_PRESENTATION_GUIDE.md) | 6 | Demo script, talking points, FAQ, value propositions |
 
 ---
@@ -37,14 +37,15 @@ This delivery package contains six comprehensive documents covering every aspect
 
 ## 📊 At a Glance
 
-- **11 database tables** with Row-Level Security
-- **7 sequential SQL migrations** for reproducible schema
-- **9 server action modules** covering all CRUD operations
-- **5 API routes** (cron, pipeline, download, inngest, vitals)
-- **10 dashboard pages** with role-adaptive content
-- **3 AI models** (DeepSeek V3 text, DeepSeek V3 summary, Nemotron VL vision)
-- **4-layer security** (Edge → Route → Action → RLS)
-- **40+ UI components** via Shadcn/ui + Radix
+- **15+ database tables** with Row-Level Security on every table
+- **Two-stage migrations** — foundational `scripts/001–007` + timestamped `supabase/migrations/20260501–-20260512`
+- **11 server action modules** covering all CRUD operations
+- **API routes** for Smart AI (chat/upload/threads/analytics/health), Messaging (conversations/messages/typing/presence/upload), AI credits, downloads, pipeline, cron, vitals
+- **12 dashboard pages** with role-adaptive content (incl. Smart AI, Messaging, AI Usage)
+- **3-layer authorisation** (Middleware → Server Action → Postgres RLS)
+- **OpenRouter → Gemini 2.0 Flash** for validation + summary + vision OCR
+- **OpenRouter → GPT-4o-mini** (configurable) + native pgvector RAG for the Smart AI chat
+- **50+ UI components** via shadcn/ui + Radix
 
 ---
 

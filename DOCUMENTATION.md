@@ -128,6 +128,12 @@ If you're deploying or managing the production system:
 - [lib/llm/validate.ts](./lib/llm/validate.ts) — Rule runner + summariser + vision (Gemini 2.0 Flash)
 - [lib/parse/](./lib/parse/) — Document parsers (PDF via unpdf, DOCX, PPTX, images via Gemini Vision)
 
+### Messaging
+- [app/api/messaging/](./app/api/messaging/) — REST endpoints for conversations, messages, presence, typing, upload
+- [components/dashboard/messaging/](./components/dashboard/messaging/) — Conversation sidebar, message list/composer, info sheets, typing indicator
+- [hooks/use-conversation-realtime.ts](./hooks/use-conversation-realtime.ts) — Supabase Realtime subscription hook
+- `supabase/migrations/20260508_messaging.sql` (+ `20260509_*`, `20260510_*`, `20260511_*`, `20260512_*`) — Schema, RLS, realtime publication, perf, UX patches
+
 ### Security
 - [docs/PROJECT_STATUS.md#3-roles-rls](./docs/PROJECT_STATUS.md#3-roles-rls-and-the-principle-of-defence-in-depth) — 3-layer defense
 - [next.config.mjs](./next.config.mjs) — CSP, HSTS, security headers
@@ -214,5 +220,5 @@ All documentation should include:
 
 ---
 
-**Last Updated:** May 7, 2026
+**Last Updated:** May 8, 2026
 **Status:** All documentation updated to reflect current codebase

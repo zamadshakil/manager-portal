@@ -1,7 +1,7 @@
 # Hierarchia Manager Portal — Deployment Checklist
 
 **Platform:** Railway (all services in a single project)
-**Last Updated:** May 7, 2026
+**Last Updated:** May 8, 2026
 
 ---
 
@@ -48,13 +48,16 @@
 
 ### Database (Railway Postgres)
 
-- [x] All migrations applied (001–009 + RAG + chat schema)
+- [x] All foundational migrations applied (`scripts/001–007` + `smart-ai-chat-followup.sql`)
+- [x] All incremental migrations applied (`supabase/migrations/20260501–-20260512`)
 - [x] pgvector extension enabled
 - [x] `rag_documents` table with HNSW index
 - [x] `chat_threads`, `chat_messages`, `chat_documents` tables
 - [x] `ai_credit_limits`, `ai_usage_log` tables
+- [x] `conversations`, `conversation_members`, `messages`, `message_reactions` tables
 - [x] RLS enabled on all tables
-- [x] Triggers: `handle_new_user`, `touch_updated_at`, `bump_thread_updated_at`, `rag_documents_tsv_update`
+- [x] Realtime publication includes `messages`, `message_reactions`, `conversation_members`
+- [x] Triggers: `handle_new_user`, `touch_updated_at`, `bump_thread_updated_at`, `bump_conversation_updated_at`, `rag_documents_tsv_update`
 
 ### UI/UX
 
@@ -66,6 +69,7 @@
 - [x] Accessible markup with ARIA labels
 - [x] Smart AI chat with tool-call rendering
 - [x] Department management CRUD
+- [x] Messaging UI (DMs + groups, typing, reactions, replies, attachments)
 
 ---
 
@@ -84,8 +88,7 @@
 | `R2_SECRET_ACCESS_KEY` | [ ] | Cloudflare R2 |
 | `R2_BUCKET_NAME` | [ ] | Cloudflare R2 |
 | `R2_PUBLIC_URL` | [ ] | Cloudflare R2 |
-| `UPSTASH_REDIS_REST_URL` | [ ] | Rate limiting + cron |
-| `UPSTASH_REDIS_REST_TOKEN` | [ ] | Rate limiting + cron |
+| `REDIS_URL` | [ ] | Railway Redis — rate limiting, idempotency locks, cron observability (reference variable from the Redis plugin) |
 | `OPENAI_API_KEY` | [ ] | Optional — preferred for embeddings (falls back to OpenRouter) |
 | `EMBEDDING_MODEL` | [ ] | Defaults to `openai/text-embedding-3-small` |
 | `SMART_AI_MODEL` | [ ] | Defaults to `openai/gpt-4o-mini` |
@@ -154,6 +157,18 @@ Railway monitors the `main` branch and auto-deploys on push. Monitor the deploy 
 - [ ] Chat threads persist and appear in history
 - [ ] File upload works (to R2 → indexed in pgvector)
 - [ ] AI credit limits are enforced
+
+### Messaging
+
+- [ ] `/dashboard/messages` loads and lists conversations
+- [ ] Can start a new DM with another user
+- [ ] Can create a group conversation and add members
+- [ ] Sending a message appears in real time on a second client (Supabase Realtime)
+- [ ] Typing indicators show / clear correctly
+- [ ] Reactions, replies, edit, soft-delete all work
+- [ ] File / image attachments upload via `/api/messaging/upload` and render in the message list
+- [ ] Unread counts update from `last_read_at`
+- [ ] RLS prevents reading conversations the user is not a member of
 
 ### Department Management
 
@@ -232,7 +247,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 
 1. **No bulk rule reassignment** — Must update task `rule_ids` manually
 2. **No team archiving** — Can only delete empty teams
-3. **No realtime submission status** — Members must refresh to see pipeline progress
+3. **No realtime submission status** — Members must refresh to see pipeline progress (messaging uses realtime, but submissions do not yet)
 4. **No PDF report export** — CSV export available for some data
 5. **`database.types.ts` is a stub** — Using `Database = any` shim
 
