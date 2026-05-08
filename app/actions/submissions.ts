@@ -179,7 +179,6 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   // has already verified ownership and deadline above, so a service-role
   // write is safe and authoritative.
   if (taskAssignmentId) {
-    const adminClient = createAdminClient()
     await adminClient
       .from("task_assignments")
       .update({

@@ -29,7 +29,7 @@ const nextConfig = {
     // ------------------------------------------------------------------
     optimizePackageImports: ["lucide-react", "date-fns", "recharts"],
   },
-  serverExternalPackages: ["unpdf", "mammoth", "officeparser", "tesseract.js", "@napi-rs/canvas"],
+  serverExternalPackages: ["unpdf", "mammoth", "officeparser"],
 
   async headers() {
     const isDev = process.env.NODE_ENV === "development"
@@ -61,7 +61,7 @@ const nextConfig = {
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "img-src 'self' blob: data: https://*.r2.dev",
           "font-src 'self' https://fonts.gstatic.com https://frontend-cdn.perplexity.ai",
-          "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.up.railway.app wss://*.up.railway.app https://*.r2.dev",
+          "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.r2.dev",
           "frame-src 'none'",
           "frame-ancestors 'none'",
           "object-src 'none'",

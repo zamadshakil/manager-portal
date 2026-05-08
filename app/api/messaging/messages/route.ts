@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { messageLimiter } from "@/lib/redis"
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -105,6 +106,9 @@ export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  const { success: allowed } = await messageLimiter().limit(user.id)
+  if (!allowed) return NextResponse.json({ error: "Too many requests" }, { status: 429 })
 
   const body = await req.json()
   const { conversation_id, content, type = "text", media_url, media_metadata, reply_to_id } = body as {

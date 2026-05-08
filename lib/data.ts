@@ -329,6 +329,7 @@ export async function listAllProfiles(profile: Profile): Promise<Profile[]> {
   const { data } = await supabase
     .from("profiles")
     .select("*")
+    .is("deleted_at", null)
     .order("created_at", { ascending: true })
   return (data ?? []) as Profile[]
 }

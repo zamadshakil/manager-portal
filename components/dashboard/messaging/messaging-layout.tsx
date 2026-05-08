@@ -64,11 +64,12 @@ export function MessagingLayout({
     fetchConversations(true).finally(() => setLoading(false))
   }, [fetchConversations])
 
-  // Safety-net poll at 5 s (down from 2 s).
+  // Safety-net poll at 30 s.
   // Realtime is the primary delivery path; this catches any events that slip
-  // through when the channel is degraded.
+  // through when the channel is degraded. 30 s matches the presence heartbeat
+  // cadence and avoids a constant per-user background request every 5 s.
   useEffect(() => {
-    const timer = setInterval(() => void fetchConversations(), 5_000)
+    const timer = setInterval(() => void fetchConversations(), 30_000)
     return () => clearInterval(timer)
   }, [fetchConversations]) // stable — no selectedId dep needed
 

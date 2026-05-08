@@ -12,6 +12,14 @@ export async function POST(_req: NextRequest, { params }: Params) {
 
   const admin = createAdminClient()
 
+  const { data: membership } = await admin
+    .from("conversation_members")
+    .select("user_id")
+    .eq("conversation_id", id)
+    .eq("user_id", user.id)
+    .maybeSingle()
+  if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
   await admin
     .from("conversation_members")
     .update({ last_read_at: new Date().toISOString() })

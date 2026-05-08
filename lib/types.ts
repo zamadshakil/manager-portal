@@ -25,6 +25,7 @@ export interface Profile {
   manager_id: string | null
   must_reset: boolean
   avatar_url: string | null
+  deleted_at: string | null
   created_at: string
   updated_at: string
   /** Admin-initiated email change pending the user's confirmation (sent to
