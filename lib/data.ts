@@ -337,7 +337,6 @@ export async function listAllProfiles(profile: Profile): Promise<Profile[]> {
   const { data, error } = await supabase
     .from("profiles")
     .select("*")
-    .not("role", "eq", "__nonexistent__")
     .order("created_at", { ascending: true })
   if (error) console.error("[listAllProfiles] error:", error.message)
   return ((data ?? []) as Profile[]).filter((p) => p.deleted_at == null)
