@@ -18,7 +18,6 @@ import {
   BrainCircuit,
   MessageSquare,
   KeyRound,
-  Monitor,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { roleLabel } from "@/lib/auth-shared"
@@ -132,12 +131,6 @@ const NAV: NavGroup[] = [
         label: "AI & Usage",
         icon: BrainCircuit,
         href: "/dashboard/ai-usage",
-        roles: ["main_admin"],
-      },
-      {
-        label: "System Monitor",
-        icon: Monitor,
-        href: "/system-monitor",
         roles: ["main_admin"],
       },
       {
