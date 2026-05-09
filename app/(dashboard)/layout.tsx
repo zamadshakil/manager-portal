@@ -4,6 +4,7 @@ import { requireProfile } from "@/lib/auth"
 import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { TopBar } from "@/components/dashboard/top-bar"
 import { MobileNav } from "@/components/dashboard/mobile-nav"
+import { OpsCollector } from "@/components/monitor/ops-collector"
 
 const PASSWORD_RESET_PATH = "/dashboard/settings"
 
@@ -42,6 +43,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </div>
 
       <MobileNav role={profile.role} />
+      <OpsCollector userId={profile.id} userEmail={profile.email} />
     </div>
   )
 }
