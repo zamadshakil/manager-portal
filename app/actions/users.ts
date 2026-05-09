@@ -102,14 +102,20 @@ async function releaseDeletedEmailReservation(
       }
     }
 
-    // Hard-delete the leftover auth record so the email is freed
-    const { error: deleteAuthError } = await admin.auth.admin.deleteUser(authUser.id, false)
-    if (deleteAuthError) {
-      console.error("[releaseDeletedEmailReservation] auth delete failed:", deleteAuthError.message)
+    // Instead of hard-deleting (which cascades via FK and may fail due to
+    // references from messages / activity_log), reassign the auth email to
+    // an archived placeholder so the original address becomes available.
+    const archivedEmail = `deleted-${authUser.id}@archived.local`
+    const { error: swapError } = await admin.auth.admin.updateUserById(authUser.id, {
+      email: archivedEmail,
+      email_confirm: true,
+    })
+    if (swapError) {
+      console.error("[releaseDeletedEmailReservation] auth email swap failed:", swapError.message)
       return {
         ok: false,
         released: false,
-        error: "Could not clear the deleted account. Try deleting the old user again.",
+        error: "Could not clear the deleted account. Please contact support.",
       }
     }
   }
@@ -308,12 +314,19 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
     return { ok: true }
   }
 
-  // Delete from Supabase Auth — prevents login and frees the email for reuse.
-  // Pass `false` for shouldSoftDelete so the auth record is fully removed.
-  const { error: authError } = await admin.auth.admin.deleteUser(userId, false)
-  if (authError && !authError.message.toLowerCase().includes("not found")) {
-    console.error("[deleteUser] auth delete failed:", authError.message)
-    return { ok: false, error: `Could not delete user from auth: ${authError.message}` }
+  // Free the email in Supabase Auth so it can be reused. We swap the email
+  // to an archived placeholder instead of hard-deleting the auth record,
+  // because ON DELETE CASCADE from auth.users → profiles would conflict with
+  // FK references from messages / activity_log.
+  const archivedEmail = `deleted-${userId}@archived.local`
+  const { error: authSwapError } = await admin.auth.admin.updateUserById(userId, {
+    email: archivedEmail,
+    email_confirm: true,
+    ban_duration: "876600h", // ~100 years – effectively permanent ban
+  })
+  if (authSwapError && !authSwapError.message.toLowerCase().includes("not found")) {
+    console.error("[deleteUser] auth email swap failed:", authSwapError.message)
+    return { ok: false, error: `Could not delete user: ${authSwapError.message}` }
   }
 
   // Soft-delete the profile row — preserves FK integrity + message attribution
@@ -321,6 +334,7 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
     .from("profiles")
     .update({
       deleted_at: new Date().toISOString(),
+      email: archivedEmail,
       pending_email: null,
       email_change_token_hash: null,
       email_change_token_expires_at: null,
