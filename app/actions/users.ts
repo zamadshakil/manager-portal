@@ -335,17 +335,13 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
     }
   }
 
-  // Soft-delete the profile row — preserves FK integrity + message attribution
+  // Soft-delete the profile row — preserves FK integrity + message attribution.
+  // Core fields (deleted_at, email) are guaranteed to exist; update them first.
   const { error: softDeleteError } = await admin
     .from("profiles")
     .update({
       deleted_at: new Date().toISOString(),
       email: archivedEmail,
-      pending_email: null,
-      email_change_token_hash: null,
-      email_change_token_expires_at: null,
-      email_change_requested_at: null,
-      email_change_requested_by: null,
     })
     .eq("id", userId)
 
@@ -355,6 +351,24 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
       ok: false,
       error: `Could not delete user: ${softDeleteError.message}`,
     }
+  }
+
+  // Best-effort: clear email-change pending fields. These columns are added by
+  // the 20260507_email_change_verification migration; if they don't yet exist
+  // in the schema we log a warning but do NOT fail the delete.
+  const { error: cleanupError } = await admin
+    .from("profiles")
+    .update({
+      pending_email: null,
+      email_change_token_hash: null,
+      email_change_token_expires_at: null,
+      email_change_requested_at: null,
+      email_change_requested_by: null,
+    })
+    .eq("id", userId)
+
+  if (cleanupError) {
+    console.warn("[deleteUser] email-change field cleanup skipped (columns may not exist yet):", cleanupError.message)
   }
 
   await logActivity({
