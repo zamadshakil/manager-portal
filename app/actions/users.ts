@@ -39,6 +39,99 @@ function buildVerifyLink(siteUrl: string, userId: string, rawToken: string): str
   return `${siteUrl}/auth/confirm-email-change?${params.toString()}`
 }
 
+// ---------------------------------------------------------------------------
+// Deleted-user email recovery helpers
+// ---------------------------------------------------------------------------
+
+type AdminClient = ReturnType<typeof createAdminClient>
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase()
+}
+
+function isEmailAlreadyRegisteredError(message?: string): boolean {
+  const normalized = (message ?? "").toLowerCase()
+  return (
+    normalized.includes("already been registered") ||
+    normalized.includes("already registered") ||
+    normalized.includes("already exists")
+  )
+}
+
+async function findAuthUserByEmail(admin: AdminClient, email: string) {
+  const target = normalizeEmail(email)
+  const perPage = 200
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage })
+    if (error) {
+      console.error("[findAuthUserByEmail] listUsers failed:", error.message)
+      return null
+    }
+    const match = data.users.find((u) => normalizeEmail(u.email ?? "") === target)
+    if (match) return match
+    if (data.users.length < perPage) break
+  }
+  return null
+}
+
+/**
+ * If the email is reserved by a soft-deleted profile (and/or a leftover auth
+ * record), release it so a fresh user can be provisioned with that address.
+ */
+async function releaseDeletedEmailReservation(
+  admin: AdminClient,
+  email: string,
+): Promise<{ ok: boolean; released: boolean; error?: string }> {
+  const target = normalizeEmail(email)
+  const authUser = await findAuthUserByEmail(admin, target)
+
+  if (authUser) {
+    // Verify the matching auth user actually belongs to a deleted profile
+    const { data: authProfile } = await admin
+      .from("profiles")
+      .select("id, deleted_at")
+      .eq("id", authUser.id)
+      .maybeSingle()
+
+    if (authProfile && !authProfile.deleted_at) {
+      // Active user still owns this email
+      return {
+        ok: false,
+        released: false,
+        error: "A user with this email address has already been registered.",
+      }
+    }
+
+    // Hard-delete the leftover auth record so the email is freed
+    const { error: deleteAuthError } = await admin.auth.admin.deleteUser(authUser.id, false)
+    if (deleteAuthError) {
+      console.error("[releaseDeletedEmailReservation] auth delete failed:", deleteAuthError.message)
+      return {
+        ok: false,
+        released: false,
+        error: "Could not clear the deleted account. Try deleting the old user again.",
+      }
+    }
+  }
+
+  // Also archive the email on any soft-deleted profile rows so the
+  // on_auth_user_created trigger can insert a fresh profile without conflict.
+  const { data: archivedProfiles } = await admin
+    .from("profiles")
+    .select("id")
+    .ilike("email", target)
+    .not("deleted_at", "is", null)
+
+  for (const p of archivedProfiles ?? []) {
+    await admin
+      .from("profiles")
+      .update({ email: `deleted-${p.id}@archived.local` })
+      .eq("id", p.id)
+  }
+
+  return { ok: true, released: Boolean(authUser) || (archivedProfiles?.length ?? 0) > 0 }
+}
+
 const Schema = z
   .object({
     email: z.string().email(),
@@ -90,7 +183,7 @@ export async function provisionUser(formData: FormData) {
     }
   }
 
-  const { data, error } = await admin.auth.admin.createUser({
+  const createUserInput = {
     email: parsed.data.email,
     password: parsed.data.password,
     email_confirm: true,
@@ -100,7 +193,24 @@ export async function provisionUser(formData: FormData) {
       team_id: parsed.data.team_id || null,
       must_reset: true,
     },
-  })
+  }
+
+  let { data, error } = await admin.auth.admin.createUser(createUserInput)
+
+  // If Supabase Auth says the email is taken, check whether it belongs to a
+  // soft-deleted user and automatically release the reservation before retrying.
+  if (error && isEmailAlreadyRegisteredError(error.message)) {
+    const recovered = await releaseDeletedEmailReservation(admin, parsed.data.email)
+    if (!recovered.ok) {
+      return { ok: false, error: recovered.error ?? error.message ?? "Could not create user." }
+    }
+    if (recovered.released) {
+      const retried = await admin.auth.admin.createUser(createUserInput)
+      data = retried.data
+      error = retried.error
+    }
+  }
+
   if (error || !data.user) return { ok: false, error: error?.message ?? "Could not create user." }
 
   // The on_auth_user_created trigger inserts the profile row; ensure team
@@ -185,7 +295,7 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
   // Fetch the target profile for logging
   const { data: targetProfile, error: profileError } = await admin
     .from("profiles")
-    .select("email, full_name, role")
+    .select("email, full_name, role, deleted_at")
     .eq("id", userId)
     .maybeSingle()
 
@@ -193,17 +303,30 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
     console.error("[deleteUser] profile lookup error:", profileError.message)
   }
 
-  // Delete from Supabase Auth — prevents login, does NOT cascade to profiles
-  const { error: authError } = await admin.auth.admin.deleteUser(userId)
-  if (authError) {
-    console.warn("[deleteUser] auth delete failed:", authError.message)
-    // Continue with soft-delete even if auth fails (may be orphan profile)
+  // Already soft-deleted — nothing to do
+  if (targetProfile?.deleted_at) {
+    return { ok: true }
+  }
+
+  // Delete from Supabase Auth — prevents login and frees the email for reuse.
+  // Pass `false` for shouldSoftDelete so the auth record is fully removed.
+  const { error: authError } = await admin.auth.admin.deleteUser(userId, false)
+  if (authError && !authError.message.toLowerCase().includes("not found")) {
+    console.error("[deleteUser] auth delete failed:", authError.message)
+    return { ok: false, error: `Could not delete user from auth: ${authError.message}` }
   }
 
   // Soft-delete the profile row — preserves FK integrity + message attribution
   const { error: softDeleteError } = await admin
     .from("profiles")
-    .update({ deleted_at: new Date().toISOString() })
+    .update({
+      deleted_at: new Date().toISOString(),
+      pending_email: null,
+      email_change_token_hash: null,
+      email_change_token_expires_at: null,
+      email_change_requested_at: null,
+      email_change_requested_by: null,
+    })
     .eq("id", userId)
 
   if (softDeleteError) {
@@ -334,6 +457,7 @@ export async function updateUserProfile(
     .from("profiles")
     .select("id")
     .ilike("email", parsed.data.email)
+    .is("deleted_at", null)
     .neq("id", parsed.data.userId)
     .maybeSingle()
   if (collidingProfile) {
@@ -345,6 +469,7 @@ export async function updateUserProfile(
     .from("profiles")
     .select("id")
     .ilike("pending_email", parsed.data.email)
+    .is("deleted_at", null)
     .neq("id", parsed.data.userId)
     .maybeSingle()
   if (collidingPending) {
@@ -606,6 +731,7 @@ export async function confirmEmailChange(
     .from("profiles")
     .select("id")
     .ilike("email", target.pending_email)
+    .is("deleted_at", null)
     .neq("id", userId)
     .maybeSingle()
   if (collidingProfile) {
@@ -691,6 +817,7 @@ export async function updateUserRole(userId: string, newRole: "main_admin" | "ma
       .from("profiles")
       .select("*", { count: "exact", head: true })
       .eq("role", "main_admin")
+      .is("deleted_at", null)
 
     if (countError) return { ok: false, error: "Failed to verify admin count." }
     if (count !== null && count <= 1) {
