@@ -14,6 +14,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { Message } from "@/lib/types"
 
+type MessageSenderWithDeletedAt = NonNullable<Message["sender"]> & {
+  deleted_at?: string | null
+}
+
 interface MessageRowProps {
   message: Message
   isOwn: boolean
@@ -59,7 +63,8 @@ export function MessageRow({
     )
   }
 
-  const isDeletedUser = !!(message.sender as any)?.deleted_at
+  const sender = message.sender as MessageSenderWithDeletedAt | undefined
+  const isDeletedUser = !!sender?.deleted_at
   const senderName = isDeletedUser
     ? (message.sender?.full_name ?? message.sender?.email ?? "Deleted User")
     : (message.sender?.full_name ?? message.sender?.email ?? "Unknown")
@@ -90,7 +95,7 @@ export function MessageRow({
       </div>
 
       {/* Bubble column */}
-      <div className={cn("flex flex-col min-w-0 max-w-[65%]", isOwn ? "items-end" : "items-start")}>
+      <div className={cn("flex flex-col min-w-0 max-w-[65%] ", isOwn ? "items-end" : "items-start")}>
         {/* Sender name — only for incoming messages */}
         {!isOwn && (
           <span className={cn("text-[11px] font-semibold px-1 mb-0.5 truncate max-w-full", isDeletedUser ? "text-muted-foreground italic" : "text-primary")}>
@@ -101,7 +106,7 @@ export function MessageRow({
         {/* Speech bubble */}
         <div
           className={cn(
-            "relative rounded-2xl px-3 py-2 text-sm shadow-sm break-words",
+            "relative rounded-2xl px-3 py-2 text-sm shadow-sm wrap-break-word",
             isOwn
               ? "bg-primary text-primary-foreground rounded-tr-sm"
               : "bg-muted text-foreground rounded-tl-sm",
@@ -260,14 +265,44 @@ export function MessageRow({
   )
 }
 
+const URL_SPLIT_REGEX = /(https?:\/\/[^\s]+)/g
+const URL_TEST_REGEX = /^https?:\/\//
+
+function TextWithLinks({ text, isOwn }: { text: string; isOwn: boolean }) {
+  const parts = text.split(URL_SPLIT_REGEX)
+  return (
+    <p className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">
+      {parts.map((part, i) =>
+        URL_TEST_REGEX.test(part) ? (
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={cn(
+              "underline underline-offset-2 break-all",
+              isOwn ? "text-primary-foreground/90 hover:text-primary-foreground" : "text-primary hover:text-primary/80",
+            )}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {part}
+          </a>
+        ) : (
+          part
+        ),
+      )}
+    </p>
+  )
+}
+
 function MessageContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
   if (message.type === "text") {
-    return <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</p>
+    return <TextWithLinks text={message.content ?? ""} isOwn={isOwn} />
   }
 
   if (message.type === "image") {
     return (
-      <div className="mt-1 max-w-[260px]">
+      <div className="mt-1 max-w-65">
         <img
           src={message.media_url ?? ""}
           alt="image"
@@ -288,7 +323,7 @@ function MessageContent({ message, isOwn }: { message: Message; isOwn: boolean }
 
   if (message.type === "video") {
     return (
-      <div className="mt-1 max-w-[260px]">
+      <div className="mt-1 max-w-65">
         <video controls src={message.media_url ?? ""} className="rounded-lg max-h-64 w-auto" />
       </div>
     )
@@ -311,7 +346,7 @@ function MessageContent({ message, isOwn }: { message: Message; isOwn: boolean }
           isOwn ? "text-primary-foreground/70" : "text-muted-foreground",
         )}
       />
-      <span className="truncate max-w-[200px]">
+      <span className="truncate max-w-50">
         {meta?.name ?? "File"}
         {meta?.size ? ` (${(meta.size / 1024).toFixed(0)} KB)` : ""}
       </span>

@@ -14,6 +14,12 @@ interface MessagingLayoutProps {
   profiles: Profile[]
 }
 
+type ConversationMemberInsertPayload = {
+  new: {
+    user_id: string
+  }
+}
+
 export function MessagingLayout({
   currentUserId,
   currentUserName,
@@ -27,7 +33,10 @@ export function MessagingLayout({
   // Stable ref so fetchConversations can zero unread for the active conversation
   // without taking selectedId as a hook dependency (which would restart effects).
   const selectedIdRef = useRef<string | null>(null)
-  selectedIdRef.current = selectedId
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId
+  }, [selectedId])
 
   // Fetch conversation list and merge into state.
   // When the currently-selected conversation is refreshed from the server its
@@ -85,15 +94,15 @@ export function MessagingLayout({
     const channel = supabase
       .channel(`sidebar:${currentUserId}`)
       .on(
-        "postgres_changes" as any,
+        "postgres_changes",
         { event: "INSERT", schema: "public", table: "conversation_members" },
-        (payload: any) => {
+        (payload: ConversationMemberInsertPayload) => {
           if (!active || payload.new.user_id !== currentUserId) return
           scheduleRefresh()
         },
       )
       .on(
-        "postgres_changes" as any,
+        "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
         () => {
           if (!active) return
@@ -138,8 +147,17 @@ export function MessagingLayout({
     )
   }, [])
 
+  const handleConversationUpdate = useCallback(
+    (id: string, patch: Partial<Pick<import("@/lib/types").Conversation, "name" | "avatar_url">>) => {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      )
+    },
+    [],
+  )
+
   return (
-    <div className="flex flex-1 min-h-0 -mx-4 lg:-mx-8 -my-6 lg:-my-8 overflow-hidden">
+    <div className="flex flex-1 min-h-0 -mx-4 lg:-mx-8 -mt-6 lg:-mt-8 -mb-24 lg:-mb-12 overflow-hidden">
       <ConversationSidebar
         conversations={conversations}
         selectedId={selectedId}
@@ -149,12 +167,21 @@ export function MessagingLayout({
         profiles={profiles}
       />
 
-      {selectedConversation ? (
+      {loading ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+          <MessageSquareDashed className="h-12 w-12 opacity-20 animate-pulse" />
+          <div className="text-center">
+            <p className="text-sm font-medium">Loading conversations</p>
+            <p className="text-[12px] mt-0.5">Please wait a moment…</p>
+          </div>
+        </div>
+      ) : selectedConversation ? (
         <ConversationView
           key={selectedConversation.id}
           conversation={selectedConversation}
           currentUserId={currentUserId}
           currentUserName={currentUserName}
+          onConversationUpdate={(patch) => handleConversationUpdate(selectedConversation.id, patch)}
         />
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">

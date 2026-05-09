@@ -1,13 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Search, Plus, Users, MessageSquare } from "lucide-react"
-import { format, isToday } from "date-fns"
+import { useState, useRef, useCallback } from "react"
+import { Search, Plus, Users, MessageSquare, Edit2 } from "lucide-react"
+import { format, isToday, isYesterday } from "date-fns"
 import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import { NewConversationModal } from "./new-conversation-modal"
 import type { Conversation, Profile } from "@/lib/types"
 
@@ -18,6 +17,10 @@ interface ConversationSidebarProps {
   onSelect: (id: string) => void
   onConversationCreated: (conv: Conversation) => void
   profiles: Profile[]
+}
+
+type MemberProfileWithDeletedAt = {
+  deleted_at?: string | null
 }
 
 function convDisplayName(conv: Conversation, currentUserId: string): string {
@@ -35,6 +38,7 @@ function convAvatar(conv: Conversation, currentUserId: string): string | undefin
 function formatConvTs(iso: string) {
   const d = new Date(iso)
   if (isToday(d)) return format(d, "HH:mm")
+  if (isYesterday(d)) return "Yesterday"
   return format(d, "d MMM")
 }
 
@@ -50,6 +54,7 @@ export function ConversationSidebar({
   const [filter, setFilter] = useState<"all" | "unread" | "groups">("all")
   const [modalOpen, setModalOpen] = useState(false)
   const [modalType, setModalType] = useState<"dm" | "group">("dm")
+  const listRef = useRef<HTMLDivElement>(null)
 
   const unreadCount = conversations.filter((c) => (c.unread_count ?? 0) > 0).length
   const groupCount = conversations.filter((c) => c.type === "group").length
@@ -62,142 +67,246 @@ export function ConversationSidebar({
     return true
   })
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = listRef.current?.querySelectorAll<HTMLButtonElement>("[role='option']")
+    if (!items || items.length === 0) return
+    const active = document.activeElement as HTMLButtonElement
+    const idx = Array.from(items).indexOf(active)
+    if (e.key === "ArrowDown") {
+      e.preventDefault()
+      items[Math.min(idx + 1, items.length - 1)]?.focus()
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault()
+      items[Math.max(idx - 1, 0)]?.focus()
+    }
+  }, [])
+
+  const FILTER_CONFIG = [
+    { key: "all" as const, label: "All", count: null },
+    { key: "unread" as const, label: "Unread", count: unreadCount },
+    { key: "groups" as const, label: "Groups", count: groupCount },
+  ]
+
   return (
-    <aside className="w-72 shrink-0 border-r border-border flex flex-col h-full bg-sidebar">
+    <aside
+      className="w-72 shrink-0 border-r border-border flex flex-col h-full bg-sidebar"
+      aria-label="Conversations"
+    >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <span className="text-[15px] font-semibold">Messages</span>
-        <div className="flex gap-1">
+      <div className="flex items-center justify-between px-4 py-3.5 border-b border-border shrink-0">
+        <span className="text-[15px] font-semibold tracking-tight">Messages</span>
+        <div className="flex gap-0.5">
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
-            title="New DM"
+            className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
+            title="New direct message"
+            aria-label="New direct message"
             onClick={() => { setModalType("dm"); setModalOpen(true) }}
           >
-            <MessageSquare className="h-4 w-4" />
+            <Edit2 className="h-3.5 w-3.5" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
-            title="New Group"
+            className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
+            title="New group"
+            aria-label="New group"
             onClick={() => { setModalType("group"); setModalOpen(true) }}
           >
-            <Users className="h-4 w-4" />
+            <Users className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
 
       {/* Search */}
-      <div className="px-3 pt-2 pb-1">
+      <div className="px-3 pt-3 pb-2 shrink-0">
         <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search conversations…"
-            className="pl-8 h-8 text-sm"
+            className="pl-8 h-8 text-sm bg-muted/50 border-transparent focus-visible:border-border focus-visible:bg-background rounded-lg"
+            aria-label="Search conversations"
           />
         </div>
       </div>
 
-      {/* Filter pills */}
-      <div className="flex gap-1.5 px-3 pb-2 overflow-x-auto scrollbar-none border-b border-border">
-        {(["all", "unread", "groups"] as const).map((f) => {
-          const badge = f === "unread" ? unreadCount : f === "groups" ? groupCount : null
-          const label =
-            f === "all" ? "All" :
-            f === "unread" ? `Unread${badge ? ` ${badge}` : ""}` :
-            `Groups${badge ? ` ${badge}` : ""}`
-          return (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={cn(
-                "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                filter === f
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              {label}
-            </button>
-          )
-        })}
+      {/* Filter tabs */}
+      <div
+        className="flex gap-1 px-3 pb-2.5 shrink-0"
+        role="tablist"
+        aria-label="Filter conversations"
+      >
+        {FILTER_CONFIG.map(({ key, label, count }) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={filter === key}
+            onClick={() => setFilter(key)}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-all",
+              filter === key
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent",
+            )}
+          >
+            {label}
+            {count !== null && count > 0 && (
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums",
+                  filter === key
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : "bg-primary text-primary-foreground",
+                )}
+              >
+                {count}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* List */}
-      <div className="flex-1 overflow-y-auto">
-        {filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-sm px-4 text-center">
-            <Plus className="h-8 w-8 opacity-30" />
-            <p>No conversations yet. Start a DM or create a group.</p>
+      {/* Conversation list */}
+      <div
+        ref={listRef}
+        role="listbox"
+        aria-label="Conversation list"
+        onKeyDown={handleKeyDown}
+        className="flex-1 overflow-y-auto"
+      >
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6 py-8">
+            <div className="rounded-full bg-muted p-3">
+              <MessageSquare className="h-5 w-5 text-muted-foreground/60" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-foreground/70">
+                {search ? "No results" : filter !== "all" ? `No ${filter} conversations` : "No conversations yet"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {search ? "Try a different search term" : "Start a DM or create a group"}
+              </p>
+            </div>
+            {!search && filter === "all" && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-1 text-xs h-7"
+                onClick={() => { setModalType("dm"); setModalOpen(true) }}
+              >
+                <Plus className="h-3 w-3 mr-1" /> New Message
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="py-1">
+            {filtered.map((conv) => {
+              const isGroup = conv.type === "group"
+              const otherMember = conv.members?.find((m) => m.user_id !== currentUserId)
+              const otherProfile = otherMember?.profile as ({
+                id: string
+                full_name: string | null
+                email: string
+                avatar_url: string | null
+              } & MemberProfileWithDeletedAt) | undefined
+              const otherMemberDeleted = !isGroup && !!otherProfile?.deleted_at
+              const name = isGroup
+                ? (conv.name ?? "Group")
+                : (otherMember?.profile?.full_name ?? otherMember?.profile?.email ?? "DM")
+              const initials = name.slice(0, 2).toUpperCase()
+              const isSelected = conv.id === selectedId
+              const unread = conv.unread_count ?? 0
+              const lastMsg = conv.last_message
+              const avatarSrc = convAvatar(conv, currentUserId)
+
+              const lastMsgPreview = lastMsg
+                ? lastMsg.type !== "text"
+                  ? `📎 ${lastMsg.type}`
+                  : lastMsg.content ?? ""
+                : ""
+
+              return (
+                <button
+                  key={conv.id}
+                  role="option"
+                  aria-selected={isSelected}
+                  aria-label={`${name}${unread > 0 ? `, ${unread} unread` : ""}${lastMsgPreview ? `, last message: ${lastMsgPreview}` : ""}`}
+                  onClick={() => onSelect(conv.id)}
+                  className={cn(
+                    "group w-full flex items-center gap-3 px-3 py-2.5 mx-1 rounded-xl transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    isSelected
+                      ? "bg-primary/10 text-foreground"
+                      : "hover:bg-accent/70 text-foreground",
+                  )}
+                  style={{ width: "calc(100% - 8px)" }}
+                >
+                  {/* Avatar with group indicator */}
+                  <div className="relative shrink-0">
+                    <Avatar className={cn("h-10 w-10 transition-transform", !isSelected && "group-hover:scale-[1.03]")}>
+                      <AvatarImage src={avatarSrc} alt={name} />
+                      <AvatarFallback
+                        className={cn(
+                          "text-[12px] font-semibold",
+                          isSelected ? "bg-primary/20 text-primary" : "bg-muted",
+                        )}
+                      >
+                        {initials}
+                      </AvatarFallback>
+                    </Avatar>
+                    {isGroup && (
+                      <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-sidebar border-2 border-sidebar p-0.5">
+                        <Users className="h-2.5 w-2.5 text-muted-foreground" />
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline justify-between gap-1.5 mb-0.5">
+                      <p className={cn("text-sm truncate leading-snug", unread > 0 ? "font-semibold" : "font-medium")}>
+                        {name}
+                      </p>
+                      <span className={cn("text-[10px] shrink-0 tabular-nums", unread > 0 ? "text-primary font-medium" : "text-muted-foreground")}>
+                        {lastMsg ? formatConvTs(lastMsg.created_at) : ""}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-1.5">
+                      <p className={cn("text-xs truncate leading-snug", unread > 0 ? "text-foreground/80 font-medium" : "text-muted-foreground")}>
+                        {otherMemberDeleted ? (
+                          <span className="italic">User removed</span>
+                        ) : lastMsgPreview || (
+                          <span className="italic">No messages yet</span>
+                        )}
+                      </p>
+                      {unread > 0 && (
+                        <span className="shrink-0 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none min-w-4.5 h-4.5 px-1 tabular-nums">
+                          {unread > 99 ? "99+" : unread}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
-        {filtered.map((conv) => {
-          const isGroup = conv.type === "group"
-          const otherMember = conv.members?.find((m) => m.user_id !== currentUserId)
-          const otherMemberDeleted = !isGroup && !!(otherMember?.profile as any)?.deleted_at
-          const name = isGroup
-            ? (conv.name ?? "Group")
-            : (otherMember?.profile?.full_name ?? otherMember?.profile?.email ?? "DM")
-          const initials = name.slice(0, 2).toUpperCase()
-          const isSelected = conv.id === selectedId
-          const unread = conv.unread_count ?? 0
-          const lastMsg = conv.last_message
+      </div>
 
-          return (
-            <button
-              key={conv.id}
-              onClick={() => onSelect(conv.id)}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-accent/60 transition-colors text-left",
-                isSelected && "bg-accent",
-              )}
-            >
-              {/* Avatar */}
-              <div className="relative shrink-0">
-                <Avatar className="h-9 w-9">
-                  <AvatarImage src={convAvatar(conv, currentUserId)} />
-                  <AvatarFallback className="text-[11px]">{initials}</AvatarFallback>
-                </Avatar>
-                {conv.type === "group" && (
-                  <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-muted border border-background p-0.5">
-                    <Users className="h-2.5 w-2.5 text-muted-foreground" />
-                  </span>
-                )}
-              </div>
-
-              {/* Text */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <p className="text-sm font-medium truncate">{name}</p>
-                  {otherMemberDeleted && (
-                    <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Removed</span>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground truncate">
-                  {lastMsg
-                    ? lastMsg.type !== "text"
-                      ? `[${lastMsg.type}]`
-                      : lastMsg.content ?? ""
-                    : "No messages yet"}
-                </p>
-              </div>
-
-              {/* Timestamp */}
-              <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] text-muted-foreground shrink-0">
-                  {lastMsg ? formatConvTs(lastMsg.created_at) : ""}
-                </span>
-                {unread > 0 && (
-                  <Badge className="h-4 min-w-4 px-1 text-[10px] shrink-0">{unread}</Badge>
-                )}
-              </div>
-            </button>
-          )
-        })}
+      {/* Footer new conversation shortcut */}
+      <div className="shrink-0 border-t border-border px-3 py-2.5">
+        <button
+          onClick={() => { setModalType("dm"); setModalOpen(true) }}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent/70 transition-colors text-sm"
+          aria-label="Start new conversation"
+        >
+          <span className="flex items-center justify-center h-7 w-7 rounded-lg bg-muted shrink-0">
+            <Plus className="h-3.5 w-3.5" />
+          </span>
+          <span className="font-medium">New conversation</span>
+        </button>
       </div>
 
       <NewConversationModal

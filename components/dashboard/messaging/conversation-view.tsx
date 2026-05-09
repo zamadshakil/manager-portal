@@ -17,6 +17,7 @@ interface ConversationViewProps {
   conversation: Conversation
   currentUserId: string
   currentUserName: string
+  onConversationUpdate?: (patch: Partial<Pick<Conversation, "name" | "avatar_url">>) => void
 }
 
 function mergeReplyMessage(
@@ -37,6 +38,7 @@ export function ConversationView({
   conversation,
   currentUserId,
   currentUserName,
+  onConversationUpdate,
 }: ConversationViewProps) {
   // Compute validity flag BEFORE hooks — used as a conditional render guard
   // at the bottom of the function.  We cannot do an early return here because
@@ -446,6 +448,7 @@ export function ConversationView({
           currentUserId={currentUserId}
           onClose={() => setInfoOpen(false)}
           onClearHistory={handleClearHistory}
+          onGroupUpdated={onConversationUpdate}
         />
       ) : (
         <DmInfoSheet

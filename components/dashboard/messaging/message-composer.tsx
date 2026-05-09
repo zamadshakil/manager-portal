@@ -1,7 +1,7 @@
 "use client"
 
-import { useRef, useState, useCallback } from "react"
-import { Send, Paperclip, Smile, X } from "lucide-react"
+import { useRef, useState, useCallback, useEffect } from "react"
+import { Send, Paperclip, Smile, X, Loader2 } from "lucide-react"
 import EmojiPicker, { EmojiStyle, type EmojiClickData } from "emoji-picker-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -44,6 +44,14 @@ export function MessageComposer({
   const fileRef = useRef<HTMLInputElement>(null)
   const textRef = useRef<HTMLTextAreaElement>(null)
 
+  // Auto-resize textarea on every text change
+  useEffect(() => {
+    const el = textRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, 144)}px`
+  }, [text])
+
   const handleSend = useCallback(() => {
     const trimmed = text.trim()
     if (!trimmed) return
@@ -54,6 +62,8 @@ export function MessageComposer({
     })
     setText("")
     onClearReply()
+    // Reset height after clearing
+    if (textRef.current) textRef.current.style.height = "auto"
     setTimeout(() => textRef.current?.focus(), 0)
   }, [text, replyTo, onSend, onClearReply])
 
@@ -165,8 +175,9 @@ export function MessageComposer({
           onKeyDown={handleKeyDown}
           placeholder="Message…"
           rows={1}
-          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground leading-relaxed max-h-36 overflow-y-auto"
-          style={{ minHeight: "1.5rem" }}
+          aria-label="Message input"
+          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground leading-relaxed overflow-hidden"
+          style={{ minHeight: "1.5rem", maxHeight: "9rem" }}
         />
 
         {/* Emoji picker */}
@@ -195,11 +206,12 @@ export function MessageComposer({
         <Button
           size="icon"
           className="h-8 w-8 shrink-0"
-          disabled={!text.trim() && !uploading}
+          disabled={!text.trim() || uploading}
           onClick={handleSend}
           type="button"
+          aria-label="Send message"
         >
-          <Send className="h-4 w-4" />
+          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </Button>
       </div>
     </div>
