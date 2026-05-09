@@ -137,7 +137,7 @@ const NAV: NavGroup[] = [
       {
         label: "System Monitor",
         icon: Monitor,
-        href: "/dashboard/system",
+        href: "/system-monitor",
         roles: ["main_admin"],
       },
       {

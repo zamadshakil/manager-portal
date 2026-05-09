@@ -59,7 +59,7 @@ export function generateTraceId(): string {
  * Deterministic fingerprint for error grouping.
  * Groups identical errors regardless of which user/request triggered them.
  * Strips UUIDs and long numeric IDs so the same error on different resources
- * maps to the same group (same behaviour as Sentry's issue fingerprinting).
+ * maps to the same issue group.
  */
 function buildFingerprint(
   params: Pick<ErrorLogParams, "errorMessage" | "source" | "path" | "errorCode">,
@@ -93,53 +93,60 @@ function buildFingerprint(
  *   return res
  */
 export function logRequest(params: RequestLogParams): void {
-  const admin = createAdminClient()
-  admin
-    .from("system_request_logs")
-    .insert({
-      trace_id: params.traceId ?? null,
-      method: params.method.toUpperCase(),
-      path: params.path,
-      status_code: params.statusCode,
-      duration_ms: params.durationMs,
-      user_id: params.userId ?? null,
-      ip_address: params.ipAddress ?? null,
-      user_agent: params.userAgent ?? null,
-      error_message: params.errorMessage ?? null,
-      request_size: params.requestSize ?? null,
-      response_size: params.responseSize ?? null,
-      metadata: (params.metadata ?? {}) as any,
-    } as any)
-    .then(({ error }) => {
-      if (error) console.error("[logger] logRequest failed", error.message)
-    })
+  try {
+    const admin = createAdminClient()
+    admin
+      .from("system_request_logs")
+      .insert({
+        trace_id: params.traceId ?? null,
+        method: params.method.toUpperCase(),
+        path: params.path,
+        status_code: params.statusCode,
+        duration_ms: params.durationMs,
+        user_id: params.userId ?? null,
+        ip_address: params.ipAddress ?? null,
+        user_agent: params.userAgent ?? null,
+        error_message: params.errorMessage ?? null,
+        request_size: params.requestSize ?? null,
+        response_size: params.responseSize ?? null,
+        metadata: (params.metadata ?? {}) as any,
+      } as any)
+      .then(({ error }) => {
+        if (error) console.error("[logger] logRequest failed", error.message)
+      })
+  } catch (err) {
+    console.error("[logger] logRequest init failed", err)
+  }
 }
 
 /**
  * Log a structured error. Can be called from any server-side context.
- * Sentry should also capture the error independently via SDK hooks.
  */
 export function logError(params: ErrorLogParams): void {
-  const admin = createAdminClient()
-  admin
-    .from("system_error_logs")
-    .insert({
-      trace_id: params.traceId ?? null,
-      severity: params.severity ?? "error",
-      source: params.source ?? "server",
-      error_message: params.errorMessage,
-      error_code: params.errorCode ?? null,
-      stack_trace: params.stackTrace ?? null,
-      path: params.path ?? null,
-      method: params.method ?? null,
-      user_id: params.userId ?? null,
-      ip_address: params.ipAddress ?? null,
-      fingerprint: params.fingerprint ?? buildFingerprint(params),
-      context: (params.context ?? {}) as any,
-    } as any)
-    .then(({ error }) => {
-      if (error) console.error("[logger] logError failed", error.message)
-    })
+  try {
+    const admin = createAdminClient()
+    admin
+      .from("system_error_logs")
+      .insert({
+        trace_id: params.traceId ?? null,
+        severity: params.severity ?? "error",
+        source: params.source ?? "server",
+        error_message: params.errorMessage,
+        error_code: params.errorCode ?? null,
+        stack_trace: params.stackTrace ?? null,
+        path: params.path ?? null,
+        method: params.method ?? null,
+        user_id: params.userId ?? null,
+        ip_address: params.ipAddress ?? null,
+        fingerprint: params.fingerprint ?? buildFingerprint(params),
+        context: (params.context ?? {}) as any,
+      } as any)
+      .then(({ error }) => {
+        if (error) console.error("[logger] logError failed", error.message)
+      })
+  } catch (err) {
+    console.error("[logger] logError init failed", err)
+  }
 }
 
 /**

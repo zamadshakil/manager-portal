@@ -11,7 +11,7 @@ import { useReportWebVitals } from "next/web-vitals"
  *
  * In production we POST to /api/vitals using `navigator.sendBeacon` when
  * available so the request survives page transitions. The endpoint is a
- * thin acknowledgement today; wire it to PostHog/Sentry when the
+ * thin acknowledgement today; wire it to the custom observability dashboard when the
  * analytics destination is decided.
  */
 export function WebVitalsReporter() {

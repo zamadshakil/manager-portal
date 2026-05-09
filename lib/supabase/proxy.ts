@@ -22,14 +22,18 @@ const PUBLIC_PATHS = ["/auth", "/_next", "/favicon", "/api/auth", "/api/cron"]
  */
 export async function updateSession(request: NextRequest) {
   const requestHeaders = new Headers(request.headers)
+  const traceId = request.headers.get("x-trace-id") ?? crypto.randomUUID().replace(/-/g, "")
   // Expose the current pathname to server components — Next does not
   // surface it natively in layouts/pages, and we need it for the
   // must-reset gate in the dashboard layout.
+  requestHeaders.set("x-trace-id", traceId)
   requestHeaders.set("x-pathname", request.nextUrl.pathname)
 
   let supabaseResponse = NextResponse.next({
     request: { headers: requestHeaders },
   })
+  supabaseResponse.headers.set("x-trace-id", traceId)
+  supabaseResponse.headers.set("x-pathname", request.nextUrl.pathname)
 
   // After the Railway migration, env vars on the new project may be empty
   // for a few minutes (key rotation, kong DNS warm-up, etc.). Crashing
@@ -56,6 +60,8 @@ export async function updateSession(request: NextRequest) {
           supabaseResponse = NextResponse.next({
             request: { headers: requestHeaders },
           })
+          supabaseResponse.headers.set("x-trace-id", traceId)
+          supabaseResponse.headers.set("x-pathname", request.nextUrl.pathname)
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options),
           )
@@ -75,7 +81,10 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = "/auth/login"
     url.searchParams.set("next", pathname)
-    return NextResponse.redirect(url)
+    const redirectResponse = NextResponse.redirect(url)
+    redirectResponse.headers.set("x-trace-id", traceId)
+    redirectResponse.headers.set("x-pathname", request.nextUrl.pathname)
+    return redirectResponse
   }
 
   return supabaseResponse

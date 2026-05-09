@@ -91,6 +91,7 @@ export async function putRaw(
   key: string,
   body: Buffer,
   contentType: string,
+  options?: { cacheControl?: string },
 ): Promise<{ url: string; pathname: string }> {
   await r2.send(
     new PutObjectCommand({
@@ -98,6 +99,7 @@ export async function putRaw(
       Key: key,
       Body: body,
       ContentType: contentType,
+      CacheControl: options?.cacheControl,
     }),
   )
   return {
