@@ -5,6 +5,7 @@ import { putRaw } from "@/lib/r2"
 import { processArchiveBackground } from "@/lib/archive-processor"
 import { logActivity } from "@/lib/activity"
 import { indexDocument, joinContent } from "@/lib/smart-ai/indexer"
+import { enforceApiRateLimit } from "@/lib/api-rate-limit"
 import { revalidatePath } from "next/cache"
 import {
   ARCHIVE_MIME_TYPES,
@@ -46,6 +47,13 @@ interface MaterialUploadRow {
  * background extraction job, exactly as /api/materials/register did before.
  */
 export async function POST(req: Request) {
+  const limited = await enforceApiRateLimit(req, {
+    prefix: "api:materials:upload-proxy",
+    limit: 20,
+    windowMs: 60_000,
+  })
+  if (limited) return limited
+
   let profile: Awaited<ReturnType<typeof requireRole>>
   try {
     profile = await requireRole(["main_admin", "manager"])

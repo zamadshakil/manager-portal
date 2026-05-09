@@ -2,27 +2,33 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Pencil, Loader2, XCircle, MailCheck, MailWarning, Send, Ban } from "lucide-react"
+import { Pencil, Loader2, XCircle, MailCheck, MailWarning, Send, Ban, KeyRound, Copy, Check, RefreshCw } from "lucide-react"
 import {
   updateUserProfile,
+  updateUserTeam,
+  resetUserPassword,
   cancelPendingEmailChange,
   resendEmailChangeVerification,
 } from "@/app/actions/users"
-import type { Profile } from "@/lib/types"
+import type { Profile, Team } from "@/lib/types"
 
 interface Props {
   user: Profile
+  teams: Team[]
   isOpen: boolean
   onClose: () => void
 }
 
-export function EditUserModal({ user, isOpen, onClose }: Props) {
+export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
   const router = useRouter()
   const [fullName, setFullName] = useState(user.full_name ?? "")
   const [email, setEmail] = useState(user.email ?? "")
+  const [teamId, setTeamId] = useState<string | null>(user.team_id ?? null)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [resetTempPassword, setResetTempPassword] = useState<string | null>(null)
+  const [copiedTemp, setCopiedTemp] = useState(false)
 
   if (!isOpen) return null
 
@@ -30,31 +36,91 @@ export function EditUserModal({ user, isOpen, onClose }: Props) {
   const pendingEmail = user.pending_email ?? null
   const expiresAt = user.email_change_token_expires_at ?? null
 
-  const isDirty =
-    fullName.trim() !== (user.full_name ?? "").trim() ||
+  // Team picker options: teams that are unowned, or owned by this user.
+  // For non-managers we show every team (plus "unassigned") since the
+  // uniqueness rule only applies to managers.
+  const selectableTeams =
+    user.role === "manager"
+      ? teams.filter((t) => !t.manager_id || t.manager_id === user.id)
+      : teams
+
+  const nameChanged = fullName.trim() !== (user.full_name ?? "").trim()
+  const emailChanged =
     email.trim().toLowerCase() !== (user.email ?? "").trim().toLowerCase()
+  const teamChanged = (teamId ?? null) !== (user.team_id ?? null)
+  const isDirty = nameChanged || emailChanged || teamChanged
 
-  const isEmailChange =
-    email.trim().toLowerCase() !== (user.email ?? "").trim().toLowerCase() && email.trim().length > 0
+  const isEmailChange = emailChanged && email.trim().length > 0
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!isDirty) return
     setError(null)
     setSuccess(null)
     startTransition(async () => {
-      const result = await updateUserProfile(user.id, fullName.trim(), email.trim())
-      if (result.ok) {
-        router.refresh()
-        if (result.pendingEmail) {
-          setSuccess(`Verification email sent to ${result.pendingEmail}. The change will take effect once they confirm.`)
-        } else {
-          onClose()
+      // 1. Apply name/email change first (this is the riskier flow).
+      let pendingEmailSent: string | undefined
+      if (nameChanged || emailChanged) {
+        const result = await updateUserProfile(user.id, fullName.trim(), email.trim().toLowerCase())
+        if (!result.ok) {
+          setError(result.error ?? "An unexpected error occurred.")
+          return
         }
+        pendingEmailSent = result.pendingEmail
+      }
+
+      // 2. Apply team change independently so a failure here surfaces its own
+      //    error without rolling back the name/email update.
+      if (teamChanged) {
+        const teamResult = await updateUserTeam(user.id, teamId)
+        if (!teamResult.ok) {
+          setError(teamResult.error ?? "Could not update team assignment.")
+          router.refresh()
+          return
+        }
+      }
+
+      router.refresh()
+      if (pendingEmailSent) {
+        setSuccess(`Verification email sent to ${pendingEmailSent}. The change will take effect once they confirm.`)
       } else {
-        setError(result.error ?? "An unexpected error occurred.")
+        setSuccess("Profile updated.")
+        window.setTimeout(onClose, 1500)
       }
     })
+  }
+
+  function handleResetPassword() {
+    setError(null)
+    setSuccess(null)
+    setResetTempPassword(null)
+    setCopiedTemp(false)
+    startTransition(async () => {
+      const res = await resetUserPassword(user.id)
+      if (res.ok && res.tempPassword) {
+        setResetTempPassword(res.tempPassword)
+        router.refresh()
+      } else {
+        setError(res.error ?? "Could not reset the password.")
+      }
+    })
+  }
+
+  async function handleCopyTempPassword() {
+    if (!resetTempPassword) return
+    try {
+      await navigator.clipboard.writeText(resetTempPassword)
+      setCopiedTemp(true)
+      window.setTimeout(() => setCopiedTemp(false), 1800)
+    } catch {
+      // Clipboard permissions may be denied; swallow — the value is still
+      // visible on-screen for manual selection.
+    }
+  }
+
+  function handleDismissResetBanner() {
+    setResetTempPassword(null)
+    setCopiedTemp(false)
   }
 
   function handleCancelPending() {
@@ -172,6 +238,97 @@ export function EditUserModal({ user, isOpen, onClose }: Props) {
                     they keep signing in with the current email.
                   </span>
                 </p>
+              )}
+            </div>
+
+            {/* Team field */}
+            <div className="space-y-1.5">
+              <label htmlFor="edit-team" className="text-[12px] font-semibold text-muted-foreground">
+                Team
+              </label>
+              <select
+                id="edit-team"
+                value={teamId ?? ""}
+                onChange={(e) => setTeamId(e.target.value || null)}
+                disabled={isPending}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              >
+                <option value="">
+                  {user.role === "manager" ? "— Select a team —" : "— Unassigned —"}
+                </option>
+                {selectableTeams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              {user.role === "manager" && (
+                <p className="text-[11px] text-muted-foreground">
+                  Managers must own exactly one team. Only teams without another
+                  manager are listed.
+                </p>
+              )}
+            </div>
+
+            {/* Password reset controls */}
+            <div className="rounded-xl border border-border bg-muted/20 p-3.5 space-y-2.5">
+              <div className="flex items-start gap-3">
+                <KeyRound className="h-4 w-4 text-muted-foreground shrink-0 mt-[2px]" aria-hidden="true" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12.5px] font-semibold">Password</p>
+                  <p className="text-[11.5px] text-muted-foreground leading-relaxed">
+                    Issue a new temporary password. The user will be prompted
+                    to set a fresh one on their next sign-in.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleResetPassword}
+                  disabled={isPending}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-[11.5px] font-semibold transition-colors hover:bg-muted disabled:opacity-50"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                  Reset password
+                </button>
+              </div>
+              {resetTempPassword && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800 dark:text-emerald-200 mb-1">
+                    Temporary password — share securely
+                  </p>
+                  <div className="flex items-stretch gap-2">
+                    <code className="flex-1 min-w-0 select-all truncate rounded-md bg-white/80 px-2 py-1.5 text-[12.5px] font-mono font-semibold text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-100">
+                      {resetTempPassword}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={handleCopyTempPassword}
+                      className="inline-flex items-center gap-1 rounded-md border border-emerald-300/70 bg-white/70 px-2.5 py-1 text-[11.5px] font-semibold text-emerald-900 hover:bg-white dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
+                    >
+                      {copiedTemp ? (
+                        <>
+                          <Check className="h-3 w-3" aria-hidden="true" /> Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-3 w-3" aria-hidden="true" /> Copy
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDismissResetBanner}
+                      className="inline-flex items-center rounded-md border border-emerald-300/70 bg-white/70 px-2 text-[11px] text-emerald-900 hover:bg-white dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
+                      aria-label="Dismiss temporary password"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[10.5px] text-emerald-800/80 dark:text-emerald-200/80">
+                    This value is shown once. Hand it off through a secure
+                    channel — the user must change it on first sign-in.
+                  </p>
+                </div>
               )}
             </div>
 

@@ -4,6 +4,7 @@ import { unstable_after as after } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { processSubmission } from "@/lib/llm/pipeline"
+import { enforceApiRateLimit } from "@/lib/api-rate-limit"
 
 /**
  * This route owns the AI pipeline lifecycle — parsing, LLM validation,
@@ -24,9 +25,16 @@ export const maxDuration = 60
  * the uploader, a manager of the same team, or a main_admin.
  */
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = await enforceApiRateLimit(request, {
+    prefix: "api:pipeline:post",
+    limit: 20,
+    windowMs: 60_000,
+  })
+  if (limited) return limited
+
   const { id: submissionId } = await params
 
   // Validate session.
@@ -113,9 +121,16 @@ export async function POST(
  * submission status without triggering any processing.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = await enforceApiRateLimit(request, {
+    prefix: "api:pipeline:get",
+    limit: 120,
+    windowMs: 60_000,
+  })
+  if (limited) return limited
+
   const { id: submissionId } = await params
 
   const supabase = await createClient()

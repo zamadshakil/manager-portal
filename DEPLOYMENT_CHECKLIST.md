@@ -95,7 +95,7 @@
 | `BREVO_API_KEY` | [ ] | Transactional emails |
 | `BREVO_SENDER_EMAIL` | [ ] | Sender address |
 | `CRON_SECRET` | [ ] | Cron endpoint auth |
-| `NEXT_PUBLIC_SITE_URL` | [ ] | Public portal URL |
+| `NEXT_PUBLIC_SITE_URL` | [ ] | `https://system.zamdevai.com` |
 | `NODE_ENV` | [ ] | `production` |
 | `SUPABASE_DB_URL` | [ ] | Optional — direct Postgres for RAG indexer |
 

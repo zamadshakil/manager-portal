@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { requireRole } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
 import { sendWelcomeEmail, sendEmailChangeVerification } from "@/lib/email"
+import { getConfiguredSiteUrl } from "@/lib/site-url"
 
 // ---------------------------------------------------------------------------
 // Email change verification helpers
@@ -28,10 +29,7 @@ function hashEmailChangeToken(raw: string): string {
 }
 
 function getCanonicalSiteUrl(): string | null {
-  return (
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    (process.env.NODE_ENV === "development" ? "http://localhost:3000" : null)
-  )
+  return getConfiguredSiteUrl()
 }
 
 function buildVerifyLink(siteUrl: string, userId: string, rawToken: string): string {
@@ -140,11 +138,15 @@ async function releaseDeletedEmailReservation(
 
 const Schema = z
   .object({
-    email: z.string().email(),
+    email: z
+      .string()
+      .email()
+      .transform((s) => s.trim().toLowerCase()),
     full_name: z.string().trim().min(1).max(200),
     role: z.enum(["main_admin", "manager", "member"]),
     team_id: z.string().uuid().optional().or(z.literal("")),
     password: z.string().min(12, "Password must be at least 12 characters").max(72),
+    monthly_ai_limit: z.coerce.number().int().min(1).max(10000).optional().default(100),
   })
   .superRefine((value, ctx) => {
     // Managers must own a team — without one they cannot create tasks,
@@ -167,6 +169,7 @@ export async function provisionUser(formData: FormData) {
     role: formData.get("role") || undefined,
     team_id: formData.get("team_id") ?? "",
     password: formData.get("password") || "",
+    monthly_ai_limit: formData.get("monthly_ai_limit") ?? undefined,
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
 
@@ -238,7 +241,7 @@ export async function provisionUser(formData: FormData) {
     await admin.from("ai_credit_limits").upsert(
       {
         user_id: data.user.id,
-        monthly_limit: 100,
+        monthly_limit: parsed.data.monthly_ai_limit,
         used_this_period: 0,
         period_type: "monthly",
         period_start: monthStart,
@@ -268,7 +271,6 @@ export async function provisionUser(formData: FormData) {
     email: parsed.data.email,
     fullName: parsed.data.full_name,
     role: parsed.data.role || "member",
-    password: parsed.data.password,
   }).catch((err) => {
     console.error("[provisionUser] Failed to send welcome email:", err)
   })
@@ -324,9 +326,13 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
     email_confirm: true,
     ban_duration: "876600h", // ~100 years – effectively permanent ban
   })
-  if (authSwapError && !authSwapError.message.toLowerCase().includes("not found")) {
-    console.error("[deleteUser] auth email swap failed:", authSwapError.message)
-    return { ok: false, error: `Could not delete user: ${authSwapError.message}` }
+  if (authSwapError) {
+    if (authSwapError.message.toLowerCase().includes("not found")) {
+      console.warn("[deleteUser] auth user not found for userId:", userId, "— proceeding with profile soft-delete (possible auth/profile drift).")
+    } else {
+      console.error("[deleteUser] auth email swap failed:", authSwapError.message)
+      return { ok: false, error: `Could not delete user: ${authSwapError.message}` }
+    }
   }
 
   // Soft-delete the profile row — preserves FK integrity + message attribution
@@ -372,7 +378,10 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
 const UpdateProfileSchema = z.object({
   userId: z.string().uuid(),
   full_name: z.string().trim().min(1, "Full name is required").max(200),
-  email: z.string().email("Invalid email address"),
+  email: z
+    .string()
+    .email("Invalid email address")
+    .transform((s) => s.trim().toLowerCase()),
 })
 
 /**
@@ -796,17 +805,34 @@ export async function confirmEmailChange(
 const RoleTransitionSchema = z.object({
   userId: z.string().uuid(),
   newRole: z.enum(["main_admin", "manager", "member"]),
+  teamId: z.string().uuid().nullable().optional(),
 })
 
 /**
  * Update a user's role. Only main_admin can do this.
- * Reconfigures ACL, validates last admin guardrail, updates metadata,
- * invalidates sessions, and logs the activity.
+ *
+ * Invariants enforced:
+ *   - Last main_admin cannot be demoted.
+ *   - A user transitioning INTO `manager` MUST be assigned an available team
+ *     (`teams.manager_id` null or already pointing at them). The server both
+ *     writes `profiles.team_id` and claims `teams.manager_id` in one pass.
+ *   - A user transitioning OUT of `manager` releases any team they owned
+ *     (`teams.manager_id` is cleared) so it can be reassigned. If moving to
+ *     `member`, their `profiles.team_id` is also cleared.
+ *   - AI credit `is_unlimited` flag is kept in sync with role: main_admin →
+ *     unlimited, everyone else → capped. A missing credit row is created.
+ *
+ * Side-effects: updates auth metadata, invalidates active sessions, writes
+ * an activity log entry, and revalidates the relevant dashboard routes.
  */
-export async function updateUserRole(userId: string, newRole: "main_admin" | "manager" | "member"): Promise<{ ok: boolean; error?: string }> {
+export async function updateUserRole(
+  userId: string,
+  newRole: "main_admin" | "manager" | "member",
+  teamId?: string | null,
+): Promise<{ ok: boolean; error?: string }> {
   const actor = await requireRole(["main_admin"])
-  const parsed = RoleTransitionSchema.safeParse({ userId, newRole })
-  
+  const parsed = RoleTransitionSchema.safeParse({ userId, newRole, teamId })
+
   if (!parsed.success) return { ok: false, error: "Invalid input" }
 
   if (userId === actor.id && newRole !== "main_admin") {
@@ -815,10 +841,9 @@ export async function updateUserRole(userId: string, newRole: "main_admin" | "ma
 
   const admin = createAdminClient()
 
-  // Last admin check
   const { data: currentProfile, error: profileError } = await admin
     .from("profiles")
-    .select("role")
+    .select("role, team_id")
     .eq("id", userId)
     .single()
 
@@ -826,6 +851,7 @@ export async function updateUserRole(userId: string, newRole: "main_admin" | "ma
     return { ok: false, error: "User not found." }
   }
 
+  // Last admin check
   if (currentProfile.role === "main_admin" && newRole !== "main_admin") {
     const { count, error: countError } = await admin
       .from("profiles")
@@ -839,40 +865,352 @@ export async function updateUserRole(userId: string, newRole: "main_admin" | "ma
     }
   }
 
-  if (currentProfile.role === newRole) {
-    return { ok: true } // No change needed
+  // Managers must own a team. Validate the selection up-front.
+  const normalizedTeamId = parsed.data.teamId ?? null
+  if (newRole === "manager") {
+    if (!normalizedTeamId) {
+      return {
+        ok: false,
+        error: "A team must be selected when assigning the Manager role.",
+      }
+    }
+    const { data: targetTeam, error: teamErr } = await admin
+      .from("teams")
+      .select("id, manager_id")
+      .eq("id", normalizedTeamId)
+      .maybeSingle()
+    if (teamErr) return { ok: false, error: "Could not verify the selected team." }
+    if (!targetTeam) return { ok: false, error: "Selected team does not exist." }
+    if (targetTeam.manager_id && targetTeam.manager_id !== userId) {
+      return {
+        ok: false,
+        error: "Selected team already has a manager. Reassign the existing manager first.",
+      }
+    }
   }
 
-  // 1. Update the profile row
+  // No-op when nothing changes (including team, for manager-stays-manager case).
+  const roleUnchanged = currentProfile.role === newRole
+  const teamUnchanged =
+    newRole !== "manager" || normalizedTeamId === currentProfile.team_id
+  if (roleUnchanged && teamUnchanged) {
+    return { ok: true }
+  }
+
+  // 1. If leaving manager, release any team we were pointing at.
+  if (currentProfile.role === "manager" && newRole !== "manager") {
+    const { error: clearTeamErr } = await admin
+      .from("teams")
+      .update({ manager_id: null })
+      .eq("manager_id", userId)
+    if (clearTeamErr) {
+      console.error("[updateUserRole] failed to release old manager team:", clearTeamErr.message)
+    }
+  }
+
+  // 2. If moving manager between teams, release the old one first.
+  if (
+    currentProfile.role === "manager" &&
+    newRole === "manager" &&
+    currentProfile.team_id &&
+    currentProfile.team_id !== normalizedTeamId
+  ) {
+    const { error: releaseErr } = await admin
+      .from("teams")
+      .update({ manager_id: null })
+      .eq("id", currentProfile.team_id)
+      .eq("manager_id", userId)
+    if (releaseErr) {
+      console.error("[updateUserRole] failed to release previous team:", releaseErr.message)
+    }
+  }
+
+  // 3. Build and apply the profile row update.
+  const profileUpdate: { role: typeof newRole; team_id?: string | null } = {
+    role: newRole,
+  }
+  if (newRole === "manager") {
+    profileUpdate.team_id = normalizedTeamId
+  } else if (currentProfile.role === "manager" && newRole === "member") {
+    // Demoted manager becomes unassigned — they no longer "own" the team.
+    profileUpdate.team_id = null
+  }
+  // main_admin: leave team_id as-is (admins are cross-team by convention).
+
   const { error: updateError } = await admin
     .from("profiles")
-    .update({ role: newRole })
+    .update(profileUpdate)
     .eq("id", userId)
 
   if (updateError) return { ok: false, error: "Could not update user role." }
 
-  // 2. Sync the role into Supabase Auth metadata
+  // 4. Claim the new team's manager pointer.
+  if (newRole === "manager" && normalizedTeamId) {
+    const { error: claimErr } = await admin
+      .from("teams")
+      .update({ manager_id: userId })
+      .eq("id", normalizedTeamId)
+    if (claimErr) {
+      console.error("[updateUserRole] failed to claim new team:", claimErr.message)
+    }
+  }
+
+  // 5. Sync Supabase Auth metadata (role + team).
+  const effectiveTeamId =
+    "team_id" in profileUpdate ? profileUpdate.team_id ?? null : currentProfile.team_id ?? null
   await admin.auth.admin.updateUserById(userId, {
-    user_metadata: { role: newRole },
+    user_metadata: {
+      role: newRole,
+      team_id: effectiveTeamId,
+    },
   })
 
-  // 3. Real-time session invalidation (kills active tokens)
+  // 6. Kill active sessions so the new role takes effect immediately.
   await admin.rpc("invalidate_user_sessions", { target_user_id: userId })
 
-  // 4. Immutable Audit Trail
+  // 7. Keep AI credit unlimited flag in sync with role.
+  try {
+    const { data: existingCredit } = await admin
+      .from("ai_credit_limits")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle()
+
+    if (existingCredit) {
+      await admin
+        .from("ai_credit_limits")
+        .update({
+          is_unlimited: newRole === "main_admin",
+          updated_by: actor.id,
+        })
+        .eq("user_id", userId)
+    } else {
+      const now = new Date()
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10)
+      await admin.from("ai_credit_limits").insert({
+        user_id: userId,
+        monthly_limit: 100,
+        used_this_period: 0,
+        period_type: "monthly",
+        period_start: monthStart,
+        period_end: monthEnd,
+        is_unlimited: newRole === "main_admin",
+        updated_by: actor.id,
+      })
+    }
+  } catch (credErr: any) {
+    console.warn("[updateUserRole] could not sync AI credit row:", credErr?.message ?? credErr)
+  }
+
+  // 8. Immutable audit trail.
   await logActivity({
     actorId: actor.id,
-    teamId: null,
+    teamId: effectiveTeamId,
     action: "user.role_changed",
     entityType: "profile",
     entityId: userId,
     metadata: {
       old_role: currentProfile.role,
       new_role: newRole,
+      old_team_id: currentProfile.team_id,
+      new_team_id: effectiveTeamId,
     },
   })
 
   revalidatePath("/dashboard/team")
   revalidatePath("/dashboard/admin/users")
+  revalidatePath("/dashboard/departments")
   return { ok: true }
+}
+
+// ---------------------------------------------------------------------------
+// Team reassignment (main_admin only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Move a user to a different team (or clear their team). Enforces the
+ * "managers own exactly one team" invariant: a manager cannot be reassigned
+ * to a team that already has a different manager, and cannot be left
+ * team-less. Only main_admin can do this.
+ */
+export async function updateUserTeam(
+  userId: string,
+  teamId: string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  const actor = await requireRole(["main_admin"])
+
+  if (!z.string().uuid().safeParse(userId).success) {
+    return { ok: false, error: "Invalid user ID." }
+  }
+  if (teamId !== null && !z.string().uuid().safeParse(teamId).success) {
+    return { ok: false, error: "Invalid team selection." }
+  }
+
+  const admin = createAdminClient()
+
+  const { data: currentProfile, error: profileError } = await admin
+    .from("profiles")
+    .select("role, team_id")
+    .eq("id", userId)
+    .maybeSingle()
+
+  if (profileError || !currentProfile) {
+    return { ok: false, error: "User not found." }
+  }
+
+  if ((currentProfile.team_id ?? null) === teamId) {
+    return { ok: true }
+  }
+
+  // Managers must own a team, and the destination team must not already
+  // belong to a different manager.
+  if (currentProfile.role === "manager") {
+    if (!teamId) {
+      return {
+        ok: false,
+        error: "Managers must own a team. Demote the user first if they should not lead a team.",
+      }
+    }
+    const { data: targetTeam, error: teamErr } = await admin
+      .from("teams")
+      .select("id, manager_id")
+      .eq("id", teamId)
+      .maybeSingle()
+    if (teamErr) return { ok: false, error: "Could not verify the selected team." }
+    if (!targetTeam) return { ok: false, error: "Selected team does not exist." }
+    if (targetTeam.manager_id && targetTeam.manager_id !== userId) {
+      return {
+        ok: false,
+        error: "Selected team already has a manager. Reassign the existing manager first.",
+      }
+    }
+  }
+
+  // Release the current team's manager pointer if the user owned it.
+  if (currentProfile.role === "manager" && currentProfile.team_id) {
+    await admin
+      .from("teams")
+      .update({ manager_id: null })
+      .eq("id", currentProfile.team_id)
+      .eq("manager_id", userId)
+  }
+
+  const { error: updateErr } = await admin
+    .from("profiles")
+    .update({ team_id: teamId })
+    .eq("id", userId)
+  if (updateErr) return { ok: false, error: "Could not update team assignment." }
+
+  // Claim the new team for managers.
+  if (currentProfile.role === "manager" && teamId) {
+    await admin.from("teams").update({ manager_id: userId }).eq("id", teamId)
+  }
+
+  // Keep auth metadata in sync so client-side role checks stay accurate.
+  await admin.auth.admin.updateUserById(userId, {
+    user_metadata: { team_id: teamId },
+  })
+
+  await logActivity({
+    actorId: actor.id,
+    teamId,
+    action: "user.team_changed",
+    entityType: "profile",
+    entityId: userId,
+    metadata: {
+      old_team_id: currentProfile.team_id,
+      new_team_id: teamId,
+    },
+  })
+
+  revalidatePath("/dashboard/team")
+  revalidatePath("/dashboard/admin/users")
+  revalidatePath("/dashboard/departments")
+  return { ok: true }
+}
+
+// ---------------------------------------------------------------------------
+// Admin-initiated password reset (temporary password handed back to the admin)
+// ---------------------------------------------------------------------------
+
+const TEMP_PASSWORD_ALPHABET =
+  "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*"
+
+function generateTempPassword(length = 16): string {
+  const bytes = randomBytes(length)
+  let out = ""
+  for (let i = 0; i < length; i++) {
+    out += TEMP_PASSWORD_ALPHABET[bytes[i] % TEMP_PASSWORD_ALPHABET.length]
+  }
+  return out
+}
+
+/**
+ * Generates a fresh temporary password for `userId`, writes it to Supabase
+ * Auth, flags the profile with `must_reset = true`, and returns the plaintext
+ * password back to the admin caller so they can share it through a secure
+ * out-of-band channel. Only main_admin may invoke this.
+ *
+ * Self-reset is rejected — the admin should use the normal sign-in /
+ * settings flow to change their own password.
+ */
+export async function resetUserPassword(
+  userId: string,
+): Promise<{ ok: boolean; error?: string; tempPassword?: string }> {
+  const actor = await requireRole(["main_admin"])
+
+  if (!z.string().uuid().safeParse(userId).success) {
+    return { ok: false, error: "Invalid user ID." }
+  }
+  if (userId === actor.id) {
+    return {
+      ok: false,
+      error: "Use your profile settings to change your own password.",
+    }
+  }
+
+  const admin = createAdminClient()
+
+  const { data: target, error: targetErr } = await admin
+    .from("profiles")
+    .select("id, email, deleted_at")
+    .eq("id", userId)
+    .maybeSingle()
+  if (targetErr || !target) return { ok: false, error: "User not found." }
+  if (target.deleted_at) {
+    return { ok: false, error: "Cannot reset password for a deleted account." }
+  }
+
+  const tempPassword = generateTempPassword(16)
+
+  const { error: authErr } = await admin.auth.admin.updateUserById(userId, {
+    password: tempPassword,
+    user_metadata: { must_reset: true },
+  })
+  if (authErr) {
+    console.error("[resetUserPassword] auth update failed:", authErr.message)
+    return { ok: false, error: "Could not reset the password. Please try again." }
+  }
+
+  const { error: profileErr } = await admin
+    .from("profiles")
+    .update({ must_reset: true })
+    .eq("id", userId)
+  if (profileErr) {
+    console.warn("[resetUserPassword] could not flag profile must_reset:", profileErr.message)
+  }
+
+  await logActivity({
+    actorId: actor.id,
+    teamId: null,
+    action: "user.password_reset",
+    entityType: "profile",
+    entityId: userId,
+    metadata: { email: target.email },
+  })
+
+  revalidatePath("/dashboard/team")
+  revalidatePath("/dashboard/admin/users")
+  return { ok: true, tempPassword }
 }

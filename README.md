@@ -285,7 +285,7 @@ See [`.env.local.example`](./.env.local.example) for the complete list with docu
 | **Redis** | `REDIS_URL` | Railway-native Redis — rate limiting, idempotency locks, cron observability |
 | **Email** | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | Transactional emails |
 | **Security** | `CRON_SECRET` | Cron endpoint authentication |
-| **App** | `NEXT_PUBLIC_SITE_URL`, `NODE_ENV` | Application configuration |
+| **App** | `NEXT_PUBLIC_SITE_URL`, `NODE_ENV` | Application configuration. Production canonical URL: `https://system.zamdevai.com` |
 | **Database** | `SUPABASE_DB_URL` (optional) | Direct Postgres for RAG indexer (bypasses PostgREST) |
 
 ## Deployment
@@ -303,6 +303,11 @@ The self-hosted Supabase stack (Postgres, Kong, GoTrue, PostgREST, Storage, Real
 
 ### Post-Deployment Checklist
 - [ ] Verify all environment variables are set on each Railway service
+- [ ] Set `NEXT_PUBLIC_SITE_URL=https://system.zamdevai.com` in the Railway `manager-portal` service variables
+- [ ] Set `REDIS_URL` and `CRON_SECRET` in Railway variables
+- [ ] Point `system.zamdevai.com` Cloudflare DNS to the Railway app origin (proxy enabled)
+- [ ] Add Cloudflare WAF rule: block requests where `http.host` is not `system.zamdevai.com`
+- [ ] Add Cloudflare rate-limit rules for `/auth/*`, `/api/smart-ai/*`, `/api/pipeline/*`, `/api/messaging/*`, `/api/uploads/*`, `/api/vitals`
 - [ ] Run database migrations via Supabase Studio SQL Editor
 - [ ] Configure Railway cron to hit `GET /api/cron/mark-missed` every 15 minutes with `Authorization: Bearer $CRON_SECRET`
 - [ ] Test Smart AI chat with a sample query

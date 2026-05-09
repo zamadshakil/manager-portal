@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import { requireProfile } from "@/lib/auth"
 import { putRaw, del } from "@/lib/r2"
 import { createHash } from "node:crypto"
+import { enforceApiRateLimit } from "@/lib/api-rate-limit"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -18,6 +19,13 @@ function isWebp(buffer: Buffer) {
 }
 
 export async function POST(req: Request) {
+  const limited = await enforceApiRateLimit(req, {
+    prefix: "api:uploads:avatar",
+    limit: 20,
+    windowMs: 60_000,
+  })
+  if (limited) return limited
+
   let profile
   try {
     profile = await requireProfile()

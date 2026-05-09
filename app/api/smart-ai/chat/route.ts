@@ -15,6 +15,7 @@ import {
 import { applySlidingWindow, type SimpleMessage } from "@/lib/smart-ai/sliding-window"
 import { chatLimiter } from "@/lib/redis"
 import { logActivity } from "@/lib/activity"
+import { getCanonicalSiteUrl } from "@/lib/site-url"
 
 // ---------------------------------------------------------------------------
 // Resilience helpers
@@ -98,8 +99,7 @@ function resolveModel() {
       apiKey: OPENROUTER_API_KEY,
       baseURL: OPENROUTER_BASE_URL,
       headers: {
-        "HTTP-Referer":
-          process.env.NEXT_PUBLIC_SITE_URL ?? "https://hierarchia.app",
+        "HTTP-Referer": getCanonicalSiteUrl(),
         "X-Title": "Hierarchia Smart AI",
       },
     })

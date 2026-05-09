@@ -14,9 +14,14 @@ export default async function TeamPage() {
       <>
         <PageHeader
           title="Team members"
-          description="Members on your team and their submission performance."
+          description="People on your team."
         />
-        <TeamMembers members={members} teams={teams} />
+        <TeamMembers
+          members={members}
+          teams={teams}
+          actorId={profile.id}
+          isManager
+        />
       </>
     )
   }
@@ -37,7 +42,12 @@ export default async function TeamPage() {
 
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-[minmax(0,1fr)_420px] items-start">
         <div className="min-w-0">
-          <TeamMembers members={allProfiles} teams={teams} isMainAdmin />
+          <TeamMembers
+            members={allProfiles}
+            teams={teams}
+            actorId={profile.id}
+            isMainAdmin
+          />
         </div>
         <div className="min-w-0 lg:sticky lg:top-6">
           <ProvisionUserForm teams={teams} />

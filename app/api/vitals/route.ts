@@ -1,4 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { enforceApiRateLimit } from "@/lib/api-rate-limit"
+import { getConfiguredSiteUrl } from "@/lib/site-url"
 
 /**
  * Web Vitals collector.
@@ -18,7 +20,14 @@ import { type NextRequest, NextResponse } from "next/server"
 const MAX_VITALS_BODY = 16 * 1024 // 16 KB is plenty for a CWV beacon
 
 export async function POST(request: NextRequest) {
-  const canonical = process.env.NEXT_PUBLIC_SITE_URL
+  const limited = await enforceApiRateLimit(request, {
+    prefix: "api:vitals",
+    limit: 60,
+    windowMs: 60_000,
+  })
+  if (limited) return limited
+
+  const canonical = getConfiguredSiteUrl()
   if (canonical) {
     const origin = request.headers.get("origin")
     const referer = request.headers.get("referer")

@@ -39,7 +39,7 @@
 | `BREVO_SENDER_EMAIL` | Brevo verified sender | Sender address |
 | `BREVO_SENDER_NAME` | Self-defined | Sender display name |
 | `CRON_SECRET` | Self-generated random string | Authenticates Railway cron requests |
-| `NEXT_PUBLIC_SITE_URL` | Public app URL | Used for absolute URLs in emails / OAuth |
+| `NEXT_PUBLIC_SITE_URL` | `https://system.zamdevai.com` | Canonical public app URL — used for emails, OAuth redirects, CSRF checks, and OpenRouter referers |
 | `NODE_ENV` | `production` | Standard Node env |
 
 ### Optional / Advanced Variables

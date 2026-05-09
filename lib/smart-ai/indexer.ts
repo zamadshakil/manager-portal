@@ -25,6 +25,7 @@ import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { isDirectPgConfigured, pgQuery } from "@/lib/smart-ai/pg-client"
 import { ensureRagSchema } from "@/lib/smart-ai/bootstrap"
+import { getCanonicalSiteUrl } from "@/lib/site-url"
 
 // ---------------------------------------------------------------------------
 // Config
@@ -183,7 +184,7 @@ async function embedTexts(texts: string[]): Promise<number[][]> {
       modelForProvider("openrouter"),
       texts,
       {
-        "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL ?? "https://hierarchia.app",
+        "HTTP-Referer": getCanonicalSiteUrl(),
         "X-Title": "Hierarchia Smart AI",
       },
     )

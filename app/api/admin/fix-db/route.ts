@@ -1,8 +1,16 @@
 import { NextResponse } from "next/server"
 import { pgQuery, isDirectPgConfigured } from "@/lib/smart-ai/pg-client"
 import { requireRole } from "@/lib/auth"
+import { enforceApiRateLimit } from "@/lib/api-rate-limit"
 
-export async function GET() {
+export async function GET(req: Request) {
+  const limited = await enforceApiRateLimit(req, {
+    prefix: "api:admin",
+    limit: 5,
+    windowMs: 60_000,
+  })
+  if (limited) return limited
+
   try {
     await requireRole(["main_admin"])
   } catch {

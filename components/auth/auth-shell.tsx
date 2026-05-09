@@ -46,7 +46,7 @@ export function AuthShell({ children, eyebrow }: AuthShellProps) {
           </Link>
 
           <Link
-            href="https://hierarchia.app"
+            href="/"
             className="hidden sm:inline-flex text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
           >
             Back to website

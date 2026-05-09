@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { getConfiguredSiteUrl } from "@/lib/site-url"
 
 function sanitizeNext(raw: string | null): string {
   if (!raw) return "/dashboard"
@@ -16,11 +17,7 @@ export async function GET(request: Request) {
 
   // M-7 / C-3: Always use the pinned canonical origin — never derive from
   // x-forwarded-host which can be spoofed by an attacker.
-  const origin =
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    (process.env.NODE_ENV === "development"
-      ? `${new URL(request.url).protocol}//${new URL(request.url).host}`
-      : null)
+  const origin = getConfiguredSiteUrl()
 
   if (!origin) {
     console.error("[callback] NEXT_PUBLIC_SITE_URL is not set — cannot build a safe redirect.")

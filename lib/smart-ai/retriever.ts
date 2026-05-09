@@ -18,6 +18,7 @@ import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { isDirectPgConfigured, pgQuery } from "@/lib/smart-ai/pg-client"
 import { isRerankerConfigured, crossEncoderRerank } from "@/lib/smart-ai/reranker"
+import { getCanonicalSiteUrl } from "@/lib/site-url"
 
 // ---------------------------------------------------------------------------
 // Config
@@ -77,7 +78,7 @@ async function embedQueryOnce(
     authorization: `Bearer ${apiKey}`,
   }
   if (provider === "openrouter") {
-    headers["HTTP-Referer"] = process.env.NEXT_PUBLIC_SITE_URL ?? "https://hierarchia.app"
+    headers["HTTP-Referer"] = getCanonicalSiteUrl()
     headers["X-Title"] = "Hierarchia Smart AI"
   }
 

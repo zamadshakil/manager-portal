@@ -3,6 +3,7 @@ import { requireRole } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { presignPut } from "@/lib/r2"
 import { logActivity } from "@/lib/activity"
+import { enforceApiRateLimit } from "@/lib/api-rate-limit"
 import {
   ARCHIVE_MIME_TYPES,
   MAX_MATERIAL_UPLOAD_SIZE_BYTES,
@@ -27,6 +28,13 @@ const ARCHIVE_MIMES = new Set<string>(ARCHIVE_MIME_TYPES as readonly string[])
  *   { uploadUrl, publicUrl, materialId, key }
  */
 export async function POST(req: Request) {
+  const limited = await enforceApiRateLimit(req, {
+    prefix: "api:materials:presign",
+    limit: 30,
+    windowMs: 60_000,
+  })
+  if (limited) return limited
+
   let profile: Awaited<ReturnType<typeof requireRole>>
   try {
     profile = await requireRole(["main_admin", "manager"])

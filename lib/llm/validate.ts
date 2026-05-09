@@ -3,6 +3,7 @@ import { generateObject, generateText } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
 import { z } from "zod"
 import type { ValidationRule } from "@/lib/types"
+import { getCanonicalSiteUrl } from "@/lib/site-url"
 
 // ── Model configuration ────────────────────────────────────────────────────
 // Uses OpenRouter as the LLM provider for validation, summarisation, and
@@ -15,7 +16,7 @@ const provider = createOpenAI({
   baseURL: process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
   apiKey: process.env.OPENROUTER_API_KEY || process.env.DO_AI_API_KEY || "",
   headers: {
-    "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL ?? "https://manager-portal-production-55a7.up.railway.app",
+    "HTTP-Referer": getCanonicalSiteUrl(),
 
     "X-Title": "Hierarchia Validation Pipeline",
   },

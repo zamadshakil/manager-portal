@@ -30,6 +30,13 @@ export function ProvisionUserForm({ teams }: { teams: Team[] }) {
   const [success, setSuccess] = useState<string | null>(null)
   const [pending, start] = useTransition()
   const [copied, setCopied] = useState(false)
+  const [role, setRole] = useState<"member" | "manager" | "main_admin">("member")
+  const teamIsRequired = role === "manager"
+
+  function clearBanners() {
+    if (error) setError(null)
+    if (success) setSuccess(null)
+  }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -46,6 +53,7 @@ export function ProvisionUserForm({ teams }: { teams: Team[] }) {
       const email = String(fd.get("email") || "")
       setSuccess(`Account created for ${email}. Share the temporary password securely.`)
       form.reset()
+      setRole("member")
       router.refresh()
     })
   }
@@ -91,7 +99,7 @@ export function ProvisionUserForm({ teams }: { teams: Team[] }) {
           </p>
         </div>
       </header>
-      <form onSubmit={onSubmit} className="p-4 lg:p-5 space-y-3">
+      <form onSubmit={onSubmit} onChange={clearBanners} className="p-4 lg:p-5 space-y-3">
         <div className="grid gap-3 md:grid-cols-2">
           <label className="block">
             <span className="text-[12px] font-semibold text-muted-foreground">Full name</span>
@@ -117,7 +125,8 @@ export function ProvisionUserForm({ teams }: { teams: Team[] }) {
             <select
               name="role"
               required
-              defaultValue="member"
+              value={role}
+              onChange={(e) => setRole(e.target.value as typeof role)}
               className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="member">Team Member</option>
@@ -126,20 +135,49 @@ export function ProvisionUserForm({ teams }: { teams: Team[] }) {
             </select>
           </label>
           <label className="block">
-            <span className="text-[12px] font-semibold text-muted-foreground">Team</span>
+            <span className="text-[12px] font-semibold text-muted-foreground">
+              Team{teamIsRequired ? <span className="text-destructive"> *</span> : null}
+            </span>
             <select
               name="team_id"
+              required={teamIsRequired}
               defaultValue=""
               className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              <option value="">— Unassigned —</option>
+              <option value="">
+                {teamIsRequired ? "— Select a team —" : "— Unassigned —"}
+              </option>
               {teams.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
                 </option>
               ))}
             </select>
+            {teamIsRequired && (
+              <span className="mt-1 block text-[11px] text-muted-foreground">
+                Managers must own exactly one team.
+              </span>
+            )}
           </label>
+          {/* AI credit limit — hidden for main_admin who are always unlimited */}
+          {role !== "main_admin" && (
+            <label className="block">
+              <span className="text-[12px] font-semibold text-muted-foreground">
+                Monthly AI message limit
+              </span>
+              <input
+                name="monthly_ai_limit"
+                type="number"
+                min={1}
+                max={10000}
+                defaultValue={100}
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <span className="mt-1 block text-[11px] text-muted-foreground">
+                Smart AI messages per month (1–10,000). Main Admins always have unlimited access.
+              </span>
+            </label>
+          )}
           <div className="md:col-span-2">
             <div className="flex items-center justify-between">
               <label
@@ -164,8 +202,10 @@ export function ProvisionUserForm({ teams }: { teams: Team[] }) {
                 name="password"
                 type="text"
                 required
-                minLength={8}
+                minLength={12}
                 maxLength={72}
+                autoComplete="off"
+                spellCheck={false}
                 onChange={() => setCopied(false)}
                 className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-ring"
               />
@@ -189,7 +229,8 @@ export function ProvisionUserForm({ teams }: { teams: Team[] }) {
               </button>
             </div>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              The user will be prompted to change it on first login. Share over a secure channel.
+              Minimum 12 characters. The user will be prompted to change it on
+              first login — share over a secure channel.
             </p>
           </div>
         </div>

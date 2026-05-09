@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { getConfiguredSiteUrl } from "@/lib/site-url"
 
 export async function POST(request: Request) {
   // H-7: CSRF protection — reject cross-site POST requests.
   // Next.js Route Handlers do not get automatic CSRF protection (unlike Server Actions).
   // Strip any trailing slash: the browser Origin header never includes one, so a
   // mismatch here would silently return 403 on every sign-out attempt.
-  const canonicalOrigin = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "")
+  const canonicalOrigin = getConfiguredSiteUrl()
   if (canonicalOrigin) {
     const reqOrigin = request.headers.get("origin")
     const reqReferer = request.headers.get("referer")

@@ -1,3 +1,5 @@
+import { getCanonicalSiteUrl } from "@/lib/site-url"
+
 /**
  * Brevo email integration using native fetch
  */
@@ -20,14 +22,13 @@ export interface WelcomeEmailProps {
   email: string
   fullName: string
   role: string
-  password?: string
 }
 
-export async function sendWelcomeEmail({ email, fullName, role, password }: WelcomeEmailProps) {
+export async function sendWelcomeEmail({ email, fullName, role }: WelcomeEmailProps) {
   const apiKey = process.env.BREVO_API_KEY
   const senderEmail = process.env.BREVO_SENDER_EMAIL
   const senderName = process.env.BREVO_SENDER_NAME || "AI Manager Portal"
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? ""
+  const siteUrl = getCanonicalSiteUrl()
   const companyAddress = process.env.COMPANY_ADDRESS || "Johar Town, Lahore"
 
   if (!apiKey || !senderEmail) {

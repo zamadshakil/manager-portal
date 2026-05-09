@@ -2,8 +2,16 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getRedis } from "@/lib/redis"
+import { enforceApiRateLimit } from "@/lib/api-rate-limit"
 
 export async function POST(req: NextRequest) {
+  const limited = await enforceApiRateLimit(req, {
+    prefix: "api:messaging:typing:post",
+    limit: 120,
+    windowMs: 60_000,
+  })
+  if (limited) return limited
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -30,6 +38,13 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  const limited = await enforceApiRateLimit(req, {
+    prefix: "api:messaging:typing:get",
+    limit: 180,
+    windowMs: 60_000,
+  })
+  if (limited) return limited
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

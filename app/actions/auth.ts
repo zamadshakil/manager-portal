@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { sendPasswordResetEmail } from "@/lib/email"
 import { authLimiter } from "@/lib/redis"
+import { getConfiguredSiteUrl } from "@/lib/site-url"
 
 export async function requestPasswordReset(email: string) {
   // Rate-limit by normalised email to deter enumeration and credential-stuffing
@@ -15,9 +16,7 @@ export async function requestPasswordReset(email: string) {
   // C-3: Never derive the site URL from request headers — always use the
   // pinned canonical origin. Falls back to localhost only in development so
   // the dev flow keeps working without a NEXT_PUBLIC_SITE_URL set.
-  const siteUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    (process.env.NODE_ENV === "development" ? "http://localhost:3000" : null)
+  const siteUrl = getConfiguredSiteUrl()
 
   if (!siteUrl) {
     console.error("[auth] NEXT_PUBLIC_SITE_URL is not set — cannot generate a safe reset link.")

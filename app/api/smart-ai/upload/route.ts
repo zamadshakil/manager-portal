@@ -6,6 +6,7 @@ import { extractText } from "@/lib/parse"
 import { indexDocument } from "@/lib/smart-ai/indexer"
 import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES, ARCHIVE_MIME_TYPES } from "@/lib/types"
 import { uploadLimiter } from "@/lib/redis"
+import { enforceApiRateLimit } from "@/lib/api-rate-limit"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -31,6 +32,13 @@ export const dynamic = "force-dynamic"
 const ACCEPTED = new Set<string>(ACCEPTED_MIME_TYPES as readonly string[])
 
 export async function POST(req: Request) {
+  const limited = await enforceApiRateLimit(req, {
+    prefix: "api:smart-ai:upload",
+    limit: 20,
+    windowMs: 60_000,
+  })
+  if (limited) return limited
+
   let profile: Awaited<ReturnType<typeof requireProfile>>
   try {
     profile = await requireProfile()
