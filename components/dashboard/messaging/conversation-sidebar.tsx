@@ -87,6 +87,8 @@ export function ConversationSidebar({
     { key: "groups" as const, label: "Groups", count: groupCount },
   ]
 
+  const listPanelId = "conv-list-panel"
+
   return (
     <aside
       className="w-72 shrink-0 border-r border-border flex flex-col h-full bg-sidebar"
@@ -143,10 +145,12 @@ export function ConversationSidebar({
           <button
             key={key}
             role="tab"
+            id={`conv-tab-${key}`}
             aria-selected={filter === key}
+            aria-controls={listPanelId}
             onClick={() => setFilter(key)}
             className={cn(
-              "flex-1 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-all",
+              "flex-1 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               filter === key
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground hover:bg-accent",
@@ -158,9 +162,10 @@ export function ConversationSidebar({
                 className={cn(
                   "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums",
                   filter === key
-                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    ? "bg-white/20 text-primary-foreground"
                     : "bg-primary text-primary-foreground",
                 )}
+                aria-label={`${count} ${label.toLowerCase()}`}
               >
                 {count}
               </span>
@@ -172,8 +177,10 @@ export function ConversationSidebar({
       {/* Conversation list */}
       <div
         ref={listRef}
+        id={listPanelId}
         role="listbox"
         aria-label="Conversation list"
+        aria-live="polite"
         onKeyDown={handleKeyDown}
         className="flex-1 overflow-y-auto"
       >
@@ -236,12 +243,11 @@ export function ConversationSidebar({
                   aria-label={`${name}${unread > 0 ? `, ${unread} unread` : ""}${lastMsgPreview ? `, last message: ${lastMsgPreview}` : ""}`}
                   onClick={() => onSelect(conv.id)}
                   className={cn(
-                    "group w-full flex items-center gap-3 px-3 py-2.5 mx-1 rounded-xl transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "group w-[calc(100%-8px)] flex items-center gap-3 px-3 py-2.5 mx-1 min-h-12 rounded-xl transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
                     isSelected
                       ? "bg-primary/10 text-foreground"
                       : "hover:bg-accent/70 text-foreground",
                   )}
-                  style={{ width: "calc(100% - 8px)" }}
                 >
                   {/* Avatar with group indicator */}
                   <div className="relative shrink-0">

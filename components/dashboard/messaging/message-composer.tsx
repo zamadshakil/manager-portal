@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState, useCallback, useEffect } from "react"
-import { Send, Paperclip, Smile, X, Loader2 } from "lucide-react"
+import { Send, Paperclip, Smile, X, Loader2, CornerUpRight } from "lucide-react"
 import EmojiPicker, { EmojiStyle, type EmojiClickData } from "emoji-picker-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -128,16 +128,30 @@ export function MessageComposer({
     }
   }
 
+  const replyPreviewId = replyTo ? "reply-preview" : undefined
+
   return (
-    <div className="border-t border-border bg-background px-4 py-3">
-      {/* Reply preview */}
+    <div className="border-t border-border bg-background px-4 pt-2.5 pb-3">
+      {/* Reply preview card */}
       {replyTo && (
-        <div className="flex items-center gap-2 mb-2 rounded-lg bg-accent/50 px-3 py-1.5 text-sm">
-          <span className="text-muted-foreground flex-1 truncate">
-            Replying to <strong>{replyTo.sender?.full_name ?? "…"}</strong>:{" "}
-            {replyTo.content ?? "media"}
-          </span>
-          <button onClick={onClearReply} className="text-muted-foreground hover:text-foreground">
+        <div
+          id="reply-preview"
+          className="flex items-start gap-2 mb-2 rounded-lg border-l-[3px] border-primary bg-primary/5 dark:bg-primary/10 px-3 py-2"
+        >
+          <CornerUpRight className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-semibold text-primary truncate">
+              {replyTo.sender?.full_name ?? replyTo.sender?.email ?? "Unknown"}
+            </p>
+            <p className="text-xs text-muted-foreground truncate">
+              {replyTo.type !== "text" ? `📎 ${replyTo.type}` : (replyTo.content ?? "media")}
+            </p>
+          </div>
+          <button
+            onClick={onClearReply}
+            className="text-muted-foreground hover:text-foreground transition-colors shrink-0 mt-0.5"
+            aria-label="Cancel reply"
+          >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -145,7 +159,7 @@ export function MessageComposer({
 
       <div
         className={cn(
-          "flex items-end gap-2 rounded-xl border border-border bg-background px-3 py-2 focus-within:border-primary transition-colors",
+          "flex items-end gap-2 rounded-xl border border-border bg-background px-3 py-2 shadow-sm focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 transition-all",
           uploading && "opacity-60 pointer-events-none",
         )}
       >
@@ -176,6 +190,7 @@ export function MessageComposer({
           placeholder="Message…"
           rows={1}
           aria-label="Message input"
+          aria-describedby={replyPreviewId}
           className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground leading-relaxed overflow-hidden"
           style={{ minHeight: "1.5rem", maxHeight: "9rem" }}
         />

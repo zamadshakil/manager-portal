@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
-import { Info } from "lucide-react"
+import { Info, Users } from "lucide-react"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { MessageList, type MessageListHandle, ESTIMATED_ITEM_SIZE } from "./message-list"
@@ -387,28 +388,58 @@ export function ConversationView({
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0 bg-background/95 backdrop-blur-sm shadow-sm">
         <div className="flex items-center gap-3">
-          <Avatar className="h-8 w-8">
-            <AvatarImage src={headerAvatarSrc} />
-            <AvatarFallback className="text-[11px]">{headerInitials}</AvatarFallback>
-          </Avatar>
+          <div className="relative">
+            <Avatar className="h-9 w-9">
+              <AvatarImage src={headerAvatarSrc} alt={headerName} />
+              <AvatarFallback className="text-[11px] font-semibold">{headerInitials}</AvatarFallback>
+            </Avatar>
+            {!isGroup && !otherMemberDeleted && (
+              <span
+                className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-background"
+                aria-label="Online"
+                title="Online"
+              />
+            )}
+            {isGroup && (
+              <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-background border border-border p-0.5">
+                <Users className="h-2.5 w-2.5 text-muted-foreground" aria-hidden="true" />
+              </span>
+            )}
+          </div>
           <div>
             <p className="text-[14px] font-semibold leading-tight">{headerName}</p>
-            {isGroup && (
-              <p className="text-[11px] text-muted-foreground">{memberCount} members</p>
+            {isGroup ? (
+              <p className="text-[11px] text-muted-foreground">{memberCount} member{memberCount !== 1 ? "s" : ""}</p>
+            ) : !otherMemberDeleted ? (
+              <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">Active now</p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground italic">User removed</p>
             )}
           </div>
         </div>
-        <Button variant="ghost" size="icon" onClick={() => setInfoOpen(true)}>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setInfoOpen(true)}
+          aria-label={isGroup ? "Group info" : "Conversation info"}
+          title={isGroup ? "Group info" : "Conversation info"}
+        >
           <Info className="h-4 w-4" />
         </Button>
       </div>
 
       {/* Messages */}
       {loadingInitial ? (
-        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-          Loading messages…
+        <div className="flex-1 overflow-hidden px-4 py-3 flex flex-col gap-3">
+          <MessageSkeleton isOwn={false} width="w-48" />
+          <MessageSkeleton isOwn={false} width="w-64" />
+          <MessageSkeleton isOwn={true} width="w-52" />
+          <MessageSkeleton isOwn={false} width="w-40" />
+          <MessageSkeleton isOwn={true} width="w-72" />
+          <MessageSkeleton isOwn={true} width="w-36" />
+          <MessageSkeleton isOwn={false} width="w-56" />
         </div>
       ) : (
         <MessageList
@@ -464,6 +495,21 @@ export function ConversationView({
           onClearHistory={handleClearHistory}
         />
       )}
+    </div>
+  )
+}
+
+function MessageSkeleton({ isOwn, width }: { isOwn: boolean; width: string }) {
+  return (
+    <div className={cn("flex items-end gap-2", isOwn ? "flex-row-reverse" : "flex-row")}>
+      <div className="h-7 w-7 rounded-full bg-muted animate-pulse shrink-0" />
+      <div
+        className={cn(
+          "h-9 rounded-2xl bg-muted animate-pulse",
+          width,
+          isOwn ? "rounded-tr-sm" : "rounded-tl-sm",
+        )}
+      />
     </div>
   )
 }

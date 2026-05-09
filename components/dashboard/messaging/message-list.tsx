@@ -5,12 +5,14 @@ import {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   forwardRef,
   useImperativeHandle,
 } from "react"
 import { VariableSizeList } from "react-window"
 import type { ListChildComponentProps } from "react-window"
 import { ArrowDown, Loader2 } from "lucide-react"
+import { format, isToday, isYesterday } from "date-fns"
 import { Button } from "@/components/ui/button"
 import { MessageRow } from "./message-row"
 import type { Message } from "@/lib/types"
@@ -41,6 +43,73 @@ interface MessageListProps {
 }
 
 export const ESTIMATED_ITEM_SIZE = 72
+const SEPARATOR_HEIGHT = 36
+
+// ── List item union ──────────────────────────────────────────────────────────
+
+type MessageListItem = {
+  kind: "message"
+  id: string
+  message: Message
+  isFirstInGroup: boolean
+  isLastInGroup: boolean
+}
+
+type SeparatorListItem = {
+  kind: "separator"
+  id: string
+  label: string
+}
+
+type ListItem = MessageListItem | SeparatorListItem
+
+function formatDayLabel(iso: string): string {
+  const d = new Date(iso)
+  if (isToday(d)) return "Today"
+  if (isYesterday(d)) return "Yesterday"
+  return format(d, "MMMM d, yyyy")
+}
+
+function computeListItems(messages: Message[]): ListItem[] {
+  const items: ListItem[] = []
+  let lastDayKey = ""
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]
+    const prev = messages[i - 1]
+    const next = messages[i + 1]
+    const dayKey = format(new Date(msg.created_at), "yyyy-MM-dd")
+
+    // Insert day separator whenever the date changes
+    if (dayKey !== lastDayKey) {
+      lastDayKey = dayKey
+      items.push({ kind: "separator", id: `sep-${dayKey}`, label: formatDayLabel(msg.created_at) })
+    }
+
+    // Grouping: same sender, same day, within 5 min, neither deleted
+    const sameSenderAsPrev =
+      !!prev && prev.sender_id === msg.sender_id && !prev.deleted_at && !msg.deleted_at
+    const closeToPrev =
+      sameSenderAsPrev &&
+      new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60 * 1000
+    const sameDayAsPrev = !!prev && format(new Date(prev.created_at), "yyyy-MM-dd") === dayKey
+    const isFirstInGroup = !(closeToPrev && sameDayAsPrev)
+
+    const sameSenderAsNext =
+      !!next && next.sender_id === msg.sender_id && !next.deleted_at && !msg.deleted_at
+    const closeToNext =
+      sameSenderAsNext &&
+      new Date(next.created_at).getTime() - new Date(msg.created_at).getTime() < 5 * 60 * 1000
+    const sameDayAsNext = !!next && format(new Date(next.created_at), "yyyy-MM-dd") === dayKey
+    const isLastInGroup = !(closeToNext && sameDayAsNext)
+
+    items.push({ kind: "message", id: msg.id, message: msg, isFirstInGroup, isLastInGroup })
+  }
+
+  return items
+}
+
+// ── MessageList ──────────────────────────────────────────────────────────────
 
 export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
   function MessageList(
@@ -52,19 +121,25 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
     const outerRef = useRef<HTMLDivElement>(null)
     const [showScrollBadge, setShowScrollBadge] = useState(false)
     const sentinelRef = useRef<HTMLDivElement>(null)
-    const prevMessageCount = useRef(0)
+    const prevListItemCountRef = useRef(0)
     const pendingInitialScrollRef = useRef(false)
     // Tracks whether the user is currently near the bottom of the list.
     // Written on every user-initiated scroll; read by isAtBottom() on the handle.
     const isAtBottomRef = useRef(true)
 
+    const listItems = useMemo(() => computeListItems(messages), [messages])
+    // Stable ref so scrollToBottom can read current length without being a dep
+    const listItemsRef = useRef(listItems)
+    listItemsRef.current = listItems
+
     const getItemSize = useCallback(
       (index: number) => {
-        const msg = messages[index]
-        if (!msg) return ESTIMATED_ITEM_SIZE
-        return heightCache.current.get(msg.id) ?? ESTIMATED_ITEM_SIZE
+        const item = listItems[index]
+        if (!item) return ESTIMATED_ITEM_SIZE
+        if (item.kind === "separator") return SEPARATOR_HEIGHT
+        return heightCache.current.get(item.id) ?? ESTIMATED_ITEM_SIZE
       },
-      [messages],
+      [listItems],
     )
 
     const setItemSize = useCallback(
@@ -77,15 +152,16 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
     )
 
     const scrollToBottom = useCallback((_behavior: ScrollBehavior = "smooth") => {
-      if (messages.length === 0) return
-      listRef.current?.scrollToItem(messages.length - 1, "end")
+      const items = listItemsRef.current
+      if (items.length === 0) return
+      listRef.current?.scrollToItem(items.length - 1, "end")
       // After react-window positions the last item using estimated heights,
       // force a native scroll so any measurement delta doesn't leave us short.
       requestAnimationFrame(() => {
         const outer = outerRef.current
         if (outer) outer.scrollTop = outer.scrollHeight
       })
-    }, [messages.length])
+    }, []) // stable — reads from ref
 
     useImperativeHandle(ref, () => ({
       scrollToBottom,
@@ -96,12 +172,12 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
       isAtBottom: () => isAtBottomRef.current,
     }))
 
-    // On initial load + new messages: auto-scroll to bottom unless user scrolled up
+    // On initial load + new items: auto-scroll to bottom unless user scrolled up
     useEffect(() => {
-      if (messages.length === 0) return
-      const prevCount = prevMessageCount.current
+      if (listItems.length === 0) return
+      const prevCount = prevListItemCountRef.current
       const isInitialLoad = prevCount === 0
-      prevMessageCount.current = messages.length
+      prevListItemCountRef.current = listItems.length
       const outer = outerRef.current
       if (isInitialLoad) {
         if (!outer) {
@@ -115,14 +191,14 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
       }
       if (!outer) return
       const distanceFromBottom = outer.scrollHeight - outer.scrollTop - outer.clientHeight
-      const isNewMessage = messages.length > prevCount
-      if (!isNewMessage || distanceFromBottom < 150) {
+      const isNewItems = listItems.length > prevCount
+      if (!isNewItems || distanceFromBottom < 150) {
         scrollToBottom("auto")
         setShowScrollBadge(false)
-      } else if (isNewMessage) {
+      } else if (isNewItems) {
         setShowScrollBadge(true)
       }
-    }, [messages.length, scrollToBottom])
+    }, [listItems.length, scrollToBottom])
 
     // Called by SizedList once it has a measured height — execute any deferred initial scroll
     const handleListReady = useCallback(() => {
@@ -147,11 +223,28 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
 
     const Row = useCallback(
       ({ index, style }: ListChildComponentProps) => {
-        const msg = messages[index]
+        const item = listItems[index]
+        if (!item) return null
+
+        if (item.kind === "separator") {
+          return (
+            <div style={style} className="flex items-center gap-3 px-6 select-none" aria-hidden="true">
+              <div className="flex-1 h-px bg-border/50" />
+              <time
+                dateTime={item.id.replace("sep-", "")}
+                className="text-[11px] font-medium text-muted-foreground/55 shrink-0 bg-background px-1"
+              >
+                {item.label}
+              </time>
+              <div className="flex-1 h-px bg-border/50" />
+            </div>
+          )
+        }
+
         return (
           <div style={style}>
             <MeasuredRow
-              message={msg}
+              item={item}
               index={index}
               currentUserId={currentUserId}
               onReact={onReact}
@@ -165,7 +258,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
         )
       },
       // eslint-disable-next-line react-hooks/exhaustive-deps
-      [messages, currentUserId, onReact, onEdit, onDelete, onReply, onRetry, setItemSize],
+      [listItems, currentUserId, onReact, onEdit, onDelete, onReply, onRetry, setItemSize],
     )
 
     return (
@@ -181,7 +274,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
         <SizedList
           listRef={listRef}
           outerRef={outerRef}
-          itemCount={messages.length}
+          itemCount={listItems.length}
           getItemSize={getItemSize}
           Row={Row}
           onReady={handleListReady}
@@ -218,7 +311,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
 )
 
 interface MeasuredRowProps {
-  message: Message
+  item: MessageListItem
   index: number
   currentUserId: string
   onReact: (msgId: string, emoji: string) => void
@@ -287,7 +380,7 @@ function SizedList({ listRef, outerRef, itemCount, getItemSize, Row, onScrolled,
 }
 
 function MeasuredRow({
-  message,
+  item,
   index,
   currentUserId,
   onReact,
@@ -303,18 +396,20 @@ function MeasuredRow({
     const el = rowRef.current
     if (!el) return
     const ro = new ResizeObserver(([entry]) => {
-      onMeasure(message.id, index, entry.contentRect.height)
+      onMeasure(item.id, index, entry.contentRect.height)
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [message.id, index, onMeasure])
+  }, [item.id, index, onMeasure])
 
   return (
     <div ref={rowRef}>
       <MessageRow
-        message={message}
-        isOwn={message.sender_id === currentUserId}
+        message={item.message}
+        isOwn={item.message.sender_id === currentUserId}
         currentUserId={currentUserId}
+        isFirstInGroup={item.isFirstInGroup}
+        isLastInGroup={item.isLastInGroup}
         onReact={onReact}
         onEdit={onEdit}
         onDelete={onDelete}

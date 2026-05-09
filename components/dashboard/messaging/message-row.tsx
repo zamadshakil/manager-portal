@@ -22,6 +22,8 @@ interface MessageRowProps {
   message: Message
   isOwn: boolean
   currentUserId: string
+  isFirstInGroup: boolean
+  isLastInGroup: boolean
   onReact: (msgId: string, emoji: string) => void
   onEdit: (msg: Message, newContent: string) => void
   onDelete: (msgId: string) => void
@@ -42,6 +44,8 @@ export function MessageRow({
   message,
   isOwn,
   currentUserId,
+  isFirstInGroup,
+  isLastInGroup,
   onReact,
   onEdit,
   onDelete,
@@ -52,13 +56,14 @@ export function MessageRow({
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const editRef = useRef<HTMLTextAreaElement>(null)
-  // Keep actions visible while any dropdown is open to prevent flickering
   const showActions = hovered || emojiOpen
 
   if (message.deleted_at) {
     return (
-      <div className={cn("px-4 py-1.5 flex", isOwn ? "justify-end" : "justify-start")}>
-        <span className="text-xs text-muted-foreground italic">This message was deleted</span>
+      <div className={cn("px-4 flex", isOwn ? "justify-end" : "justify-start", isLastInGroup ? "pb-1.5" : "pb-0.5")}>
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground/60 italic bg-muted/40 rounded-full px-3 py-1 border border-border/50">
+          This message was deleted
+        </span>
       </div>
     )
   }
@@ -77,28 +82,124 @@ export function MessageRow({
     reactionMap.set(r.emoji, { count: existing.count + 1, mine: existing.mine || r.user_id === currentUserId })
   }
 
+  // Bubble border-radius: shave the inner corner for grouped messages to create a stacked look
+  const ownRadiusClass = cn(
+    "rounded-2xl",
+    !isFirstInGroup && "rounded-tr-md",
+    !isLastInGroup && "rounded-br-md",
+  )
+  const otherRadiusClass = cn(
+    "rounded-2xl",
+    !isFirstInGroup && "rounded-tl-md",
+    !isLastInGroup && "rounded-bl-md",
+  )
+
   return (
-    // DOM order: [Avatar] [BubbleColumn] [ActionBar]
-    // flex-row        → Avatar LEFT, Bubble MIDDLE, Actions RIGHT  (other messages)
-    // flex-row-reverse → Avatar RIGHT, Bubble MIDDLE, Actions LEFT  (own messages)
     <div
-      className={cn("flex items-end gap-2 px-4 py-1", isOwn ? "flex-row-reverse" : "flex-row")}
+      className={cn(
+        "group flex items-end gap-2 px-4",
+        isFirstInGroup ? "pt-1.5" : "pt-0.5",
+        isLastInGroup ? "pb-1" : "pb-0",
+        isOwn ? "flex-row-reverse" : "flex-row",
+      )}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { if (!emojiOpen) setHovered(false) }}
     >
-      {/* Avatar — extreme right for own, extreme left for others */}
-      <div className="shrink-0 mb-0.5">
-        <Avatar className="h-7 w-7">
-          <AvatarImage src={message.sender?.avatar_url ?? undefined} />
-          <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
-        </Avatar>
+      {/* Avatar — only rendered on last in group; spacer div otherwise to maintain alignment */}
+      <div className="shrink-0 w-7 mb-0.5" aria-hidden={!isLastInGroup}>
+        {isLastInGroup ? (
+          <Avatar className="h-7 w-7">
+            <AvatarImage src={message.sender?.avatar_url ?? undefined} alt={senderName} />
+            <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
+          </Avatar>
+        ) : (
+          <div className="h-7 w-7" />
+        )}
       </div>
 
       {/* Bubble column */}
-      <div className={cn("flex flex-col min-w-0 max-w-[65%] ", isOwn ? "items-end" : "items-start")}>
-        {/* Sender name — only for incoming messages */}
-        {!isOwn && (
-          <span className={cn("text-[11px] font-semibold px-1 mb-0.5 truncate max-w-full", isDeletedUser ? "text-muted-foreground italic" : "text-primary")}>
+      <div className={cn("relative flex flex-col min-w-0 max-w-[65%]", isOwn ? "items-end" : "items-start")}>
+
+        {/* Floating action toolbar — appears above the bubble on hover */}
+        <div
+          role="toolbar"
+          aria-label="Message actions"
+          className={cn(
+            "absolute -top-8 z-20 flex items-center gap-0.5 rounded-xl border border-border bg-background shadow-md px-1 py-0.5 transition-all duration-150",
+            isOwn ? "right-0" : "left-0",
+            showActions ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
+          )}
+        >
+          <DropdownMenu
+            open={emojiOpen}
+            onOpenChange={(open) => {
+              setEmojiOpen(open)
+              if (!open) setHovered(false)
+            }}
+          >
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6" aria-label="Add reaction">
+                <SmilePlus className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align={isOwn ? "end" : "start"} className="p-1.5">
+              <div className="flex gap-1">
+                {QUICK_EMOJIS.map((e) => (
+                  <button
+                    key={e}
+                    onClick={() => { onReact(message.id, e); setEmojiOpen(false) }}
+                    className="text-lg hover:scale-125 transition-transform p-0.5 rounded"
+                    aria-label={`React with ${e}`}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => onReply(message)}
+            aria-label="Reply to message"
+          >
+            <CornerUpRight className="h-3.5 w-3.5" />
+          </Button>
+
+          {isOwn && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-6 w-6" aria-label="More message options">
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {message.type === "text" && (
+                  <DropdownMenuItem onClick={() => setEditing(true)}>
+                    <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onClick={() => onDelete(message.id)}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+
+        {/* Sender name — only on first message in a group, incoming only */}
+        {!isOwn && isFirstInGroup && (
+          <span
+            className={cn(
+              "text-[11px] font-semibold px-1 mb-0.5 truncate max-w-full",
+              isDeletedUser ? "text-muted-foreground/60 italic" : "text-primary",
+            )}
+          >
             {isDeletedUser ? `${senderName} (removed)` : senderName}
           </span>
         )}
@@ -106,26 +207,26 @@ export function MessageRow({
         {/* Speech bubble */}
         <div
           className={cn(
-            "relative rounded-2xl px-3 py-2 text-sm shadow-sm wrap-break-word",
+            "relative px-3 py-2 text-sm shadow-sm wrap-break-word",
             isOwn
-              ? "bg-primary text-primary-foreground rounded-tr-sm"
-              : "bg-muted text-foreground rounded-tl-sm",
+              ? cn("bg-primary text-primary-foreground", ownRadiusClass)
+              : cn("bg-muted text-foreground", otherRadiusClass),
           )}
         >
           {/* Reply-to preview inside bubble */}
           {message.reply_to_id && (
             <div
               className={cn(
-                "border-l-2 pl-2 pr-1 mb-2 py-1 rounded text-[11px] leading-snug",
+                "border-l-2 pl-2 pr-1 mb-2 py-1 rounded-md text-[11px] leading-snug",
                 isOwn
                   ? "border-primary-foreground/50 bg-primary-foreground/10 text-primary-foreground/80"
-                  : "border-primary/50 bg-background/30 text-muted-foreground",
+                  : "border-primary/60 bg-background/40 text-muted-foreground",
               )}
             >
               <p className="font-semibold truncate">
                 {message.reply_to?.sender?.full_name ?? message.reply_to?.sender?.email ?? "Unknown"}
               </p>
-              <p className="truncate">
+              <p className="truncate opacity-80">
                 {message.reply_to?.content
                   ?? (message.reply_to?.type === "image" ? "📷 Photo"
                     : message.reply_to?.type === "video" ? "🎥 Video"
@@ -152,18 +253,18 @@ export function MessageRow({
           <div className="flex items-center justify-end gap-1 mt-1">
             <span
               className={cn(
-                "text-[10px] select-none",
-                isOwn ? "text-primary-foreground/70" : "text-muted-foreground",
+                "text-[10px] select-none tabular-nums",
+                isOwn ? "text-primary-foreground/60" : "text-muted-foreground/70",
               )}
             >
               {formatTs(message.created_at)}
-              {message.edited_at ? " (edited)" : ""}
+              {message.edited_at ? " · edited" : ""}
             </span>
             {isOwn && message.status === "sending" && (
-              <Clock className="h-3 w-3 text-primary-foreground/70 shrink-0" />
+              <Clock className="h-3 w-3 text-primary-foreground/60 shrink-0" aria-label="Sending" />
             )}
             {isOwn && message.status !== "sending" && message.status !== "failed" && (
-              <CheckCheck className="h-3 w-3 text-primary-foreground/70 shrink-0" />
+              <CheckCheck className="h-3 w-3 text-primary-foreground/60 shrink-0" aria-label="Sent" />
             )}
           </div>
         </div>
@@ -172,93 +273,39 @@ export function MessageRow({
         {message.status === "failed" && (
           <button
             onClick={() => onRetry?.(message)}
-            className="flex items-center gap-1 text-[11px] text-destructive hover:underline mt-0.5 px-1"
+            className="flex items-center gap-1.5 text-[11px] text-destructive bg-destructive/10 hover:bg-destructive/15 rounded-full px-3 py-1 mt-1 transition-colors border border-destructive/20"
+            aria-label="Message failed to send — click to retry"
           >
-            <AlertCircle className="h-3 w-3" /> Failed — retry
+            <AlertCircle className="h-3 w-3 shrink-0" />
+            Failed to send · <span className="underline font-medium">Retry</span>
           </button>
         )}
 
         {/* Reactions — below bubble */}
         {reactionMap.size > 0 && (
-          <div className={cn("flex flex-wrap gap-1 mt-1", isOwn ? "justify-end" : "justify-start")}>
+          <div
+            className={cn("flex flex-wrap gap-1 mt-1", isOwn ? "justify-end" : "justify-start")}
+            role="group"
+            aria-label="Reactions"
+          >
             {Array.from(reactionMap.entries()).map(([emoji, { count, mine }]) => (
               <button
                 key={emoji}
                 onClick={() => onReact(message.id, emoji)}
+                aria-label={`${emoji} ${count} reaction${count !== 1 ? "s" : ""}${mine ? ", including yours" : ""}`}
+                aria-pressed={mine}
                 className={cn(
-                  "flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs border transition-colors",
+                  "flex items-center gap-0.5 rounded-full h-6 px-2 text-xs border transition-all",
                   mine
-                    ? "bg-primary/10 border-primary/30 text-primary"
-                    : "bg-background border-border hover:bg-accent",
+                    ? "bg-primary/10 border-primary/40 text-primary ring-1 ring-primary/20 font-medium"
+                    : "bg-background border-border hover:bg-accent text-foreground/80",
                 )}
               >
-                {emoji} <span className="text-[11px]">{count}</span>
+                <span aria-hidden="true">{emoji}</span>
+                <span className="text-[11px] ml-0.5 tabular-nums">{count}</span>
               </button>
             ))}
           </div>
-        )}
-      </div>
-
-      {/* Action bar — always mounted, opacity-toggled to prevent unmount-flicker */}
-      <div
-        className={cn(
-          "flex items-center gap-0.5 shrink-0 self-end mb-0.5 transition-opacity duration-100",
-          showActions ? "opacity-100" : "opacity-0 pointer-events-none",
-        )}
-      >
-        {/* Quick emoji reactions */}
-        <DropdownMenu
-          open={emojiOpen}
-          onOpenChange={(open) => {
-            setEmojiOpen(open)
-            if (!open) setHovered(false)
-          }}
-        >
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7">
-              <SmilePlus className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align={isOwn ? "start" : "end"} className="p-1">
-            <div className="flex gap-1">
-              {QUICK_EMOJIS.map((e) => (
-                <button
-                  key={e}
-                  onClick={() => { onReact(message.id, e); setEmojiOpen(false) }}
-                  className="text-lg hover:scale-125 transition-transform p-0.5"
-                >
-                  {e}
-                </button>
-              ))}
-            </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onReply(message)}>
-          <CornerUpRight className="h-3.5 w-3.5" />
-        </Button>
-
-        {isOwn && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7">
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {message.type === "text" && (
-                <DropdownMenuItem onClick={() => setEditing(true)}>
-                  <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                onClick={() => onDelete(message.id)}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         )}
       </div>
     </div>
