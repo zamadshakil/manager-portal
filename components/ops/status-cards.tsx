@@ -67,16 +67,21 @@ function Card({ title, value, sub, status }: CardProps) {
   )
 }
 
-export function StatusCards() {
+interface StatusCardsProps {
+  refreshKey?: number
+}
+
+export function StatusCards({ refreshKey }: StatusCardsProps) {
   const [data, setData] = useState<StatusData | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    setLoading(true)
     fetch("/api/ops/status")
       .then((r) => r.json())
       .then((d) => { setData(d); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [])
+  }, [refreshKey])
 
   if (loading) {
     return (

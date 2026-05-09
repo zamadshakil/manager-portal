@@ -16,7 +16,7 @@ export default function OpsPage() {
         <p className="text-sm text-zinc-500 mt-1">System status and database backup management.</p>
       </div>
 
-      <StatusCards />
+      <StatusCards refreshKey={refreshKey} />
 
       <BackupPanel onBackupComplete={() => setRefreshKey((k) => k + 1)} />
 

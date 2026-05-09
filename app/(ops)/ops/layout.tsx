@@ -1,7 +1,7 @@
-import Link from "next/link"
 import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { verifyToken } from "@/lib/ops/auth"
+import { NavTabs } from "@/components/ops/nav-tabs"
 
 async function opsLogout() {
   "use server"
@@ -12,8 +12,8 @@ async function opsLogout() {
 
 export default async function OpsLayout({ children }: { children: React.ReactNode }) {
   const h = await headers()
-  const pathname = h.get("x-pathname") ?? ""
-  const isLoginPage = pathname === "/ops/login" || pathname.startsWith("/ops/login?")
+  const xPathname = h.get("x-pathname") ?? ""
+  const isLoginPage = xPathname === "/ops/login" || xPathname.startsWith("/ops/login?")
 
   if (!isLoginPage) {
     const jar = await cookies()
@@ -26,12 +26,6 @@ export default async function OpsLayout({ children }: { children: React.ReactNod
   if (isLoginPage) {
     return <>{children}</>
   }
-
-  const NAV = [
-    { href: "/ops", label: "Dashboard", exact: true },
-    { href: "/ops/backups", label: "Backups", exact: false },
-    { href: "/ops/monitor", label: "Monitor", exact: false },
-  ]
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
@@ -56,24 +50,7 @@ export default async function OpsLayout({ children }: { children: React.ReactNod
               </button>
             </form>
           </div>
-          <nav className="flex items-center gap-1 -mb-px">
-            {NAV.map(({ href, label, exact }) => {
-              const active = exact ? pathname === href : pathname.startsWith(href)
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className={`px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                    active
-                      ? "border-orange-500 text-white"
-                      : "border-transparent text-zinc-500 hover:text-zinc-300"
-                  }`}
-                >
-                  {label}
-                </Link>
-              )
-            })}
-          </nav>
+          <NavTabs />
         </div>
       </header>
 

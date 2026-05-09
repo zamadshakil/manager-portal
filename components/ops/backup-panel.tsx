@@ -9,6 +9,8 @@ interface BackupResult {
   size: number
   tables: string[]
   total_rows: number
+  files_count: number
+  files_size_bytes: number
   duration_ms: number
 }
 
@@ -52,7 +54,7 @@ export function BackupPanel({ onBackupComplete }: Props) {
         <div>
           <h2 className="text-base font-semibold text-white">Create Backup</h2>
           <p className="text-sm text-zinc-500 mt-0.5">
-            Dumps all public schema tables to a zip file and uploads to R2.
+            Full system backup: all DB tables + materials, submissions, messaging &amp; avatar files.
           </p>
         </div>
         <button
@@ -85,7 +87,7 @@ export function BackupPanel({ onBackupComplete }: Props) {
           <div className="flex items-center gap-3">
             <div className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
             <p className="text-sm text-zinc-300">
-              Querying tables, serializing to JSON, compressing, uploading to R2…
+              Dumping DB tables, downloading R2 files, compressing, uploading to R2…
             </p>
           </div>
           <div className="mt-2 h-1 rounded-full bg-zinc-700 overflow-hidden">
@@ -102,9 +104,10 @@ export function BackupPanel({ onBackupComplete }: Props) {
             </svg>
             <p className="text-sm font-semibold text-emerald-400">Backup complete</p>
           </div>
-          <div className="grid grid-cols-3 gap-4 mt-2 text-xs text-zinc-400">
+          <div className="grid grid-cols-4 gap-4 mt-2 text-xs text-zinc-400">
             <div><span className="text-zinc-500">Tables</span><br /><span className="text-white font-medium">{result.tables.length}</span></div>
             <div><span className="text-zinc-500">Rows</span><br /><span className="text-white font-medium">{result.total_rows.toLocaleString()}</span></div>
+            <div><span className="text-zinc-500">Files</span><br /><span className="text-white font-medium">{result.files_count.toLocaleString()}</span></div>
             <div><span className="text-zinc-500">Size</span><br /><span className="text-white font-medium">{formatBytes(result.size)}</span></div>
           </div>
           <p className="text-xs text-zinc-600 mt-2 font-mono truncate">{result.key}</p>
