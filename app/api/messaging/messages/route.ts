@@ -19,16 +19,23 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminClient()
 
-  // Auth check — also fetch cleared_at for the message-visibility filter
+  // Auth check — membership only (no cleared_at here so a missing column can't break auth)
   const { data: membership } = await admin
     .from("conversation_members")
-    .select("user_id, cleared_at")
+    .select("user_id")
     .eq("conversation_id", conv)
     .eq("user_id", user.id)
     .maybeSingle()
   if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-  const clearedAt: string | null = (membership as any).cleared_at ?? null
+  // Fetch cleared_at separately — returns null if column doesn't exist yet (migration pending)
+  const { data: membershipDetails } = await admin
+    .from("conversation_members")
+    .select("cleared_at")
+    .eq("conversation_id", conv)
+    .eq("user_id", user.id)
+    .maybeSingle()
+  const clearedAt: string | null = (membershipDetails as any)?.cleared_at ?? null
 
   const messageSelect = `
     id, conversation_id, sender_id, content, type,
