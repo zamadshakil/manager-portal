@@ -1,12 +1,22 @@
-import { cookies } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { verifyToken } from "@/lib/ops/auth"
 
 export default async function OpsLayout({ children }: { children: React.ReactNode }) {
-  const jar = await cookies()
-  const token = jar.get("ops_session")?.value
-  if (!token || !verifyToken(token)) {
-    redirect("/ops/login")
+  const h = await headers()
+  const pathname = h.get("x-pathname") ?? ""
+  const isLoginPage = pathname === "/ops/login" || pathname.startsWith("/ops/login?")
+
+  if (!isLoginPage) {
+    const jar = await cookies()
+    const token = jar.get("ops_session")?.value
+    if (!token || !verifyToken(token)) {
+      redirect("/ops/login")
+    }
+  }
+
+  if (isLoginPage) {
+    return <>{children}</>
   }
 
   return (
