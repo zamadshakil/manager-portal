@@ -3,6 +3,7 @@
 import { useRef, useState, useCallback, useEffect } from "react"
 import { Send, Paperclip, Smile, X, Loader2, CornerUpRight } from "lucide-react"
 import EmojiPicker, { EmojiStyle, type EmojiClickData } from "emoji-picker-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
@@ -22,11 +23,23 @@ interface MessageComposerProps {
   onTyping: () => void
 }
 
+interface PendingAttachment {
+  id: string
+  name: string
+  size: number
+  type: string
+  status: "uploading" | "failed"
+  previewUrl: string | null
+  error: string | null
+}
+
 const ACCEPT = [
   "image/jpeg", "image/png", "image/gif", "image/webp",
   "application/pdf",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "audio/mpeg", "audio/ogg", "audio/mp4", "audio/webm",
   "video/mp4", "video/webm",
 ].join(",")
@@ -41,8 +54,11 @@ export function MessageComposer({
   const [text, setText] = useState("")
   const [uploading, setUploading] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
+  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const textRef = useRef<HTMLTextAreaElement>(null)
+  const previewUrlRef = useRef<string | null>(null)
+  const replyPreviewId = replyTo ? "reply-preview" : undefined
 
   // Auto-resize textarea on every text change
   useEffect(() => {
@@ -51,6 +67,14 @@ export function MessageComposer({
     el.style.height = "auto"
     el.style.height = `${Math.min(el.scrollHeight, 144)}px`
   }, [text])
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current)
+      }
+    }
+  }, [])
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim()
@@ -84,55 +108,82 @@ export function MessageComposer({
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ""
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current)
+      previewUrlRef.current = null
+    }
+    const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : null
+    previewUrlRef.current = previewUrl
+    const pendingId = crypto.randomUUID()
+    setPendingAttachment({
+      id: pendingId,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      status: "uploading",
+      previewUrl,
+      error: null,
+    })
     setUploading(true)
     try {
-      // 1. Get presigned URL
-      const res = await fetch("/api/messaging/upload/presign", {
+      const formData = new FormData()
+      formData.append("conversationId", conversationId)
+      formData.append("file", file)
+
+      const res = await fetch("/api/messaging/upload", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId,
-          fileName: file.name,
-          contentType: file.type,
-          size: file.size,
-        }),
+        body: formData,
       })
-      if (!res.ok) throw new Error(await res.text())
-      const { uploadUrl, publicUrl } = await res.json()
+      const payload = await res.json().catch(() => null)
+      if (!res.ok) {
+        throw new Error(payload?.error || "Upload failed")
+      }
 
-      // 2. PUT directly to R2
-      await fetch(uploadUrl, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type },
-      })
-
-      // 3. Determine message type
-      let msgType: string
-      if (file.type.startsWith("image/")) msgType = "image"
-      else if (file.type.startsWith("audio/")) msgType = "audio"
-      else if (file.type.startsWith("video/")) msgType = "video"
-      else msgType = "file"
+      const { url, type, media_metadata } = payload as {
+        url: string
+        type: string
+        media_metadata: Record<string, unknown>
+      }
 
       onSend({
-        type: msgType,
-        media_url: publicUrl,
-        media_metadata: { name: file.name, size: file.size, contentType: file.type },
+        type,
+        media_url: url,
+        media_metadata,
         reply_to_id: replyTo?.id,
       })
       onClearReply()
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current)
+        previewUrlRef.current = null
+      }
+      setPendingAttachment(null)
     } catch (err) {
       console.error("[upload]", err)
+      const message = err instanceof Error ? err.message : "Upload failed"
+      setPendingAttachment((prev) =>
+        prev && prev.id === pendingId
+          ? { ...prev, status: "failed", error: message }
+          : prev,
+      )
+      toast.error(message)
     } finally {
       setUploading(false)
     }
   }
 
-  const replyPreviewId = replyTo ? "reply-preview" : undefined
+  const clearPendingAttachment = useCallback(() => {
+    setPendingAttachment((prev) => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current)
+        previewUrlRef.current = null
+      }
+      return null
+    })
+  }, [])
 
   return (
-    <div className="border-t border-border bg-background px-4 pt-2.5 pb-3">
-      {/* Reply preview card */}
+    <div className="border-t border-border bg-background px-4 py-3">
+      {/* Reply preview */}
       {replyTo && (
         <div
           id="reply-preview"
@@ -159,7 +210,7 @@ export function MessageComposer({
 
       <div
         className={cn(
-          "flex items-end gap-2 rounded-xl border border-border bg-background px-3 py-2 shadow-sm focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 transition-all",
+          "flex items-end gap-2 rounded-xl border border-border bg-background px-3 py-2 focus-within:border-primary transition-colors",
           uploading && "opacity-60 pointer-events-none",
         )}
       >
@@ -229,6 +280,48 @@ export function MessageComposer({
           {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </Button>
       </div>
+
+      {pendingAttachment && (
+        <div className="mt-2 flex items-start gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2">
+          {pendingAttachment.previewUrl ? (
+            <img
+              src={pendingAttachment.previewUrl}
+              alt={pendingAttachment.name}
+              className="h-10 w-10 shrink-0 rounded-md object-cover"
+            />
+          ) : (
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-background text-xs font-semibold text-muted-foreground">
+              {pendingAttachment.type.startsWith("audio/")
+                ? "A"
+                : pendingAttachment.type.startsWith("video/")
+                  ? "V"
+                  : pendingAttachment.type === "application/pdf"
+                    ? "PDF"
+                    : "FILE"}
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{pendingAttachment.name}</p>
+            <p className="text-xs text-muted-foreground">
+              {pendingAttachment.status === "uploading"
+                ? "Uploading attachment..."
+                : pendingAttachment.error ?? "Upload failed"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={clearPendingAttachment}
+            className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+            aria-label={`Remove ${pendingAttachment.name}`}
+          >
+            {pendingAttachment.status === "uploading" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <X className="h-4 w-4" />
+            )}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
