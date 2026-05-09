@@ -92,7 +92,7 @@ export function ErrorGroupsTable({ groups }: ErrorGroupsTableProps) {
                 </span>
               ) : (
                 <Link
-                  href={`/dashboard/system/errors?fingerprint=${group.fingerprint}`}
+                  href={`/system-monitor/errors?fingerprint=${group.fingerprint}`}
                   className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-600 hover:bg-red-500/20 transition-colors"
                 >
                   <AlertCircle className="h-3 w-3" />

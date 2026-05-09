@@ -11,6 +11,7 @@ interface PageProps {
     unresolved?: string
     since?: string
     page?: string
+    fingerprint?: string
   }>
 }
 
@@ -19,7 +20,7 @@ const LIMIT = 50
 async function handleResolve(id: string) {
   "use server"
   await resolveErrorLog(id)
-  revalidatePath("/dashboard/system/errors")
+  revalidatePath("/system-monitor/errors")
 }
 
 export default async function ErrorLogsPage({ searchParams }: PageProps) {
@@ -34,6 +35,7 @@ export default async function ErrorLogsPage({ searchParams }: PageProps) {
     source: sp.source,
     unresolvedOnly: sp.unresolved === "1",
     since: sp.since,
+    fingerprint: sp.fingerprint,
     limit: LIMIT,
     offset,
   })
@@ -42,7 +44,7 @@ export default async function ErrorLogsPage({ searchParams }: PageProps) {
     <>
       <PageHeader
         title="Error Logs"
-        description="Structured error events with severity, source, stack traces, and Sentry links."
+        description="Structured error events with severity, source, stack traces, context, and issue grouping."
       />
 
       {/* Filters */}
@@ -102,7 +104,7 @@ export default async function ErrorLogsPage({ searchParams }: PageProps) {
           Apply
         </button>
         <a
-          href="/dashboard/system/errors"
+          href="/system-monitor/errors"
           className="rounded-lg border border-border px-3 py-1.5 text-[13px] hover:bg-muted/50 transition-colors"
         >
           Reset

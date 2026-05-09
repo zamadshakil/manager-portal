@@ -120,7 +120,7 @@ function RowDetail({
       <div className="flex items-center gap-3 pt-1">
         {row.fingerprint && (
           <a
-            href={`/dashboard/system/issues?fingerprint=${row.fingerprint}`}
+            href={`/system-monitor/issues?fingerprint=${row.fingerprint}`}
             className="inline-flex items-center gap-1.5 text-[12px] text-indigo-500 hover:underline"
           >
             <ExternalLink className="h-3.5 w-3.5" />

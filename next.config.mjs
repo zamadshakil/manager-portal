@@ -97,8 +97,24 @@ const nextConfig = {
     return [
       { source: "/:path*", headers: security },
       { source: "/dashboard/:path*", headers: crossOriginIsolation },
+      { source: "/system-monitor/:path*", headers: crossOriginIsolation },
       // Stricter Referrer-Policy for auth pages so tokens never leak via Referer
       { source: "/auth/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
+    ]
+  },
+
+  async redirects() {
+    return [
+      {
+        source: "/dashboard/system",
+        destination: "/system-monitor",
+        permanent: false,
+      },
+      {
+        source: "/dashboard/system/:path*",
+        destination: "/system-monitor/:path*",
+        permanent: false,
+      },
     ]
   },
 }

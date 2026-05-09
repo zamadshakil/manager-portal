@@ -162,6 +162,7 @@ export interface ErrorLogsFilter {
   source?: string
   unresolvedOnly?: boolean
   since?: string
+  fingerprint?: string
   limit?: number
   offset?: number
 }
@@ -183,6 +184,7 @@ export async function listErrorLogs(filter: ErrorLogsFilter = {}): Promise<{
   if (filter.source) q = q.eq("source", filter.source)
   if (filter.unresolvedOnly) q = q.is("resolved_at", null)
   if (filter.since) q = q.gte("created_at", filter.since)
+  if (filter.fingerprint) q = q.eq("fingerprint", filter.fingerprint)
 
   const { data, count, error } = await q
   if (error) return { rows: [], total: 0 }
@@ -270,11 +272,11 @@ export async function resolveErrorLog(id: string): Promise<void> {
   const { error } = await (admin.from("system_error_logs") as any)
     .update({ resolved_at: new Date().toISOString() })
     .eq("id", id)
-  if (error) throw new Error(`resolveErrorLog: ${error.message}`)
+  if (error) console.error("[system] resolveErrorLog failed", error.message)
 }
 
 // ---------------------------------------------------------------------------
-// Error groups — Sentry-style issue list grouped by fingerprint
+// Error groups — issue list grouped by fingerprint
 // ---------------------------------------------------------------------------
 
 export interface ErrorGroup {

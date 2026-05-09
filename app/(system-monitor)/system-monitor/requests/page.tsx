@@ -96,7 +96,7 @@ export default async function RequestLogsPage({ searchParams }: PageProps) {
           Apply
         </button>
         <a
-          href="/dashboard/system/requests"
+          href="/system-monitor/requests"
           className="rounded-lg border border-border px-3 py-1.5 text-[13px] hover:bg-muted/50 transition-colors"
         >
           Reset

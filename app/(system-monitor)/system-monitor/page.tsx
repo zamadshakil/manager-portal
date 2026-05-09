@@ -48,7 +48,7 @@ export default async function SystemOverviewPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-[14px] font-semibold">Request Volume (last 24h)</h2>
             <Link
-              href="/dashboard/system/requests"
+              href="/system-monitor/requests"
               className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
             >
               View all →
@@ -73,7 +73,7 @@ export default async function SystemOverviewPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-[14px] font-semibold">Error Trend (last 24h)</h2>
             <Link
-              href="/dashboard/system/errors"
+              href="/system-monitor/errors"
               className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
             >
               View logs →
@@ -97,7 +97,7 @@ export default async function SystemOverviewPage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[14px] font-semibold">Top Issues (7d)</h2>
           <Link
-            href="/dashboard/system/issues"
+            href="/system-monitor/issues"
             className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
           >
             View all →
@@ -113,7 +113,7 @@ export default async function SystemOverviewPage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[14px] font-semibold">Recent Errors</h2>
           <Link
-            href="/dashboard/system/errors"
+            href="/system-monitor/errors"
             className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
           >
             View all →

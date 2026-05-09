@@ -33,7 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_srl_trace_id     ON public.system_request_logs(tr
 
 -- ---------------------------------------------------------------------------
 -- 2. system_error_logs
---    Structured error records. Also stores Sentry event ID for cross-linking.
+--    Structured error records grouped by stable fingerprints.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.system_error_logs (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
