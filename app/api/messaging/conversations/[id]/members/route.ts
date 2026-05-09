@@ -32,6 +32,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     .select("role")
     .eq("conversation_id", id)
     .eq("user_id", user.id)
+    .is("removed_at", null)
     .maybeSingle()
   if (!membership || membership.role !== "admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
@@ -77,6 +78,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     conversation_id: id,
     user_id: uid,
     role: "member" as const,
+    removed_at: null,
+    removed_by: null,
   }))
 
   const { error } = await admin

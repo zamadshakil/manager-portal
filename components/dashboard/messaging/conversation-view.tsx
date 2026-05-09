@@ -9,7 +9,7 @@ import { MessageList, type MessageListHandle, ESTIMATED_ITEM_SIZE } from "./mess
 import { MessageComposer } from "./message-composer"
 import { TypingIndicator } from "./typing-indicator"
 import { useConversationRealtime } from "@/hooks/use-conversation-realtime"
-import type { Conversation, Message, MessageReaction, TypingUser } from "@/lib/types"
+import type { Conversation, Message, MessageReaction, TypingUser, Profile } from "@/lib/types"
 import { GroupInfoSheet } from "./group-info-sheet"
 import { DmInfoSheet } from "./dm-info-sheet"
 
@@ -17,6 +17,7 @@ interface ConversationViewProps {
   conversation: Conversation
   currentUserId: string
   currentUserName: string
+  profiles: Profile[]
   onConversationUpdate?: (patch: Partial<Pick<Conversation, "name" | "avatar_url">>) => void
 }
 
@@ -38,6 +39,7 @@ export function ConversationView({
   conversation,
   currentUserId,
   currentUserName,
+  profiles,
   onConversationUpdate,
 }: ConversationViewProps) {
   // Compute validity flag BEFORE hooks — used as a conditional render guard
@@ -370,7 +372,9 @@ export function ConversationView({
     ? (conversation.avatar_url ?? undefined)
     : (otherMember?.profile?.avatar_url ?? undefined)
   const headerInitials = headerName.slice(0, 2).toUpperCase()
-  const memberCount = conversation.members?.length ?? 0
+  const memberCount = (conversation.members ?? []).filter(
+    (m) => !m.removed_at && !m.profile?.deleted_at
+  ).length
 
   if (isInvalidConversation) {
     return (
@@ -446,6 +450,7 @@ export function ConversationView({
           open={infoOpen}
           conversation={conversation}
           currentUserId={currentUserId}
+          profiles={profiles}
           onClose={() => setInfoOpen(false)}
           onClearHistory={handleClearHistory}
           onGroupUpdated={onConversationUpdate}

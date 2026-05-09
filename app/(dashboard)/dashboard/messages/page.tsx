@@ -9,11 +9,13 @@ export default async function MessagesPage() {
   const profile = await requireProfile()
   const admin = createAdminClient()
 
-  // Fetch all org profiles for the contact picker (DM / group creation)
+  // Fetch all live org profiles for the contact picker (DM / group creation)
   const { data: profiles } = await admin
     .from("profiles")
-    .select("id, full_name, email, avatar_url, role")
+    .select("id, full_name, email, avatar_url, role, deleted_at")
     .neq("id", profile.id)
+    .is("deleted_at", null)
+    .not("email", "ilike", "deleted-%@archived.local")
     .order("full_name", { ascending: true })
 
   return (

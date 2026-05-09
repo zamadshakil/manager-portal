@@ -17,17 +17,17 @@ export async function GET(_req: NextRequest, { params }: Params) {
     .select(`
       id, type, name, created_by, avatar_url, created_at, updated_at,
       conversation_members (
-        user_id, role, joined_at, last_read_at,
-        profiles:profiles!user_id ( id, full_name, email, avatar_url )
+        user_id, role, joined_at, last_read_at, removed_at,
+        profiles:profiles!user_id ( id, full_name, email, avatar_url, deleted_at )
       )
     `)
     .eq("id", id)
     .single()
   if (error) return NextResponse.json({ error: error.message }, { status: 404 })
 
-  // Auth check — must be a member
-  const members = (conv.conversation_members as { user_id: string }[]) ?? []
-  if (!members.some((m) => m.user_id === user.id)) {
+  // Auth check — must be an active (not removed) member
+  const members = (conv.conversation_members as { user_id: string; removed_at: string | null }[]) ?? []
+  if (!members.some((m) => m.user_id === user.id && !m.removed_at)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
@@ -48,12 +48,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const admin = createAdminClient()
 
-  // Must be admin member
+  // Must be an active admin member (not removed)
   const { data: membership } = await admin
     .from("conversation_members")
     .select("role")
     .eq("conversation_id", id)
     .eq("user_id", user.id)
+    .is("removed_at", null)
     .maybeSingle()
   if (!membership || membership.role !== "admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })

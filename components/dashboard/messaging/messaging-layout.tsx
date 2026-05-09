@@ -181,6 +181,7 @@ export function MessagingLayout({
           conversation={selectedConversation}
           currentUserId={currentUserId}
           currentUserName={currentUserName}
+          profiles={profiles}
           onConversationUpdate={(patch) => handleConversationUpdate(selectedConversation.id, patch)}
         />
       ) : (

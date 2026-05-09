@@ -325,6 +325,7 @@ export interface Conversation {
   updated_at: string
   // joined via conversation_members
   members?: ConversationMember[]
+  removed_members?: ConversationMember[]
   unread_count?: number
   last_message?: Message | null
 }
@@ -335,12 +336,15 @@ export interface ConversationMember {
   role: MemberRole
   joined_at: string
   last_read_at: string
+  removed_at?: string | null
+  removed_by?: string | null
   // joined from profiles
   profile?: {
     id: string
     full_name: string | null
     email: string
     avatar_url: string | null
+    deleted_at?: string | null
   }
 }
 

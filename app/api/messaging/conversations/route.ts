@@ -28,8 +28,9 @@ const MAX_GROUP_NAME_LEN = 120
 async function fetchConversationWithMembers(admin: ReturnType<typeof createAdminClient>, conversationId: string) {
   const { data: members } = await admin
     .from("conversation_members")
-    .select("user_id, role, joined_at, last_read_at, profiles:profiles!user_id ( id, full_name, email, avatar_url )")
+    .select("user_id, role, joined_at, last_read_at, removed_at, profiles:profiles!user_id ( id, full_name, email, avatar_url, deleted_at )")
     .eq("conversation_id", conversationId)
+    .is("removed_at", null)
   return (members ?? []).map((m: any) => ({ ...m, profile: m.profiles }))
 }
 

@@ -653,6 +653,8 @@ export type Database = {
           role: "admin" | "member"
           joined_at: string
           last_read_at: string
+          removed_at: string | null
+          removed_by: string | null
         }
         Insert: {
           conversation_id: string
@@ -660,10 +662,14 @@ export type Database = {
           role?: "admin" | "member"
           joined_at?: string
           last_read_at?: string
+          removed_at?: string | null
+          removed_by?: string | null
         }
         Update: {
           role?: "admin" | "member"
           last_read_at?: string
+          removed_at?: string | null
+          removed_by?: string | null
         }
         Relationships: [
           { foreignKeyName: "conversation_members_conversation_id_fkey"; columns: ["conversation_id"]; referencedRelation: "conversations"; referencedColumns: ["id"] },
@@ -952,6 +958,7 @@ export type Database = {
           created_at: string
           updated_at: string
           members: Json
+          removed_members: Json | null
           last_message: Json | null
           unread_count: number
         }[]
