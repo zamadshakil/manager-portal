@@ -26,12 +26,11 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   // Admin removing another member: verify caller is admin of this conversation
   const { data: membership } = await admin
     .from("conversation_members")
-    .select("role")
+    .select("role, removed_at")
     .eq("conversation_id", id)
     .eq("user_id", user.id)
-    .is("removed_at", null)
     .maybeSingle()
-  if (!membership || membership.role !== "admin") {
+  if (!membership || membership.role !== "admin" || (membership as any).removed_at) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

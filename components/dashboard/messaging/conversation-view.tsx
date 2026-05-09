@@ -21,6 +21,7 @@ interface ConversationViewProps {
   profiles: Profile[]
   onConversationUpdate?: (patch: Partial<Pick<Conversation, "name" | "avatar_url">>) => void
   onLastMessage?: (conversationId: string, message: Message) => void
+  onConversationHidden?: (conversationId: string) => void
 }
 
 function mergeReplyMessage(
@@ -44,6 +45,7 @@ export function ConversationView({
   profiles,
   onConversationUpdate,
   onLastMessage,
+  onConversationHidden,
 }: ConversationViewProps) {
   // Stable ref so callbacks never need to re-close over onLastMessage
   const onLastMessageRef = useRef(onLastMessage)
@@ -195,17 +197,23 @@ export function ConversationView({
   }, [])
 
   const handleReactionChange = useCallback(
-    (reaction: MessageReaction & { action: "added" | "removed" }) => {
+    (reaction: MessageReaction & { action: "added" | "removed" | "updated" }) => {
       setMessages((prev) =>
         prev.map((m) => {
           if (m.id !== reaction.message_id) return m
           const reactions = m.reactions ?? []
-          if (reaction.action === "added") {
-            if (reactions.some((r) => r.user_id === reaction.user_id && r.emoji === reaction.emoji)) return m
-            return { ...m, reactions: [...reactions, reaction] }
-          } else {
+          if (reaction.action === "removed") {
             return { ...m, reactions: reactions.filter((r) => !(r.user_id === reaction.user_id && r.emoji === reaction.emoji)) }
           }
+
+          const nextReactions = reactions.filter((r) => r.user_id !== reaction.user_id)
+          if (
+            nextReactions.length === reactions.length - 1 &&
+            reactions.some((r) => r.user_id === reaction.user_id && r.emoji === reaction.emoji)
+          ) {
+            return m
+          }
+          return { ...m, reactions: [...nextReactions, reaction] }
         }),
       )
     },
@@ -360,9 +368,22 @@ export function ConversationView({
   }, [])
 
   const handleClearHistory = useCallback(async () => {
-    await fetch(`/api/messaging/conversations/${conversation.id}/clear`, { method: "POST" })
-    setMessages([])
+    const res = await fetch(`/api/messaging/conversations/${conversation.id}/clear`, { method: "POST" })
+    if (res.ok) {
+      setMessages([])
+    } else {
+      toast.error("Failed to clear history")
+    }
   }, [conversation.id])
+
+  const handleHideConversation = useCallback(async () => {
+    const res = await fetch(`/api/messaging/conversations/${conversation.id}/hide`, { method: "POST" })
+    if (res.ok) {
+      onConversationHidden?.(conversation.id)
+    } else {
+      toast.error("Failed to delete conversation")
+    }
+  }, [conversation.id, onConversationHidden])
 
   // Typing indicator debounce
   const sendTyping = useCallback(() => {
@@ -499,6 +520,7 @@ export function ConversationView({
           onClose={() => setInfoOpen(false)}
           onClearHistory={handleClearHistory}
           onGroupUpdated={onConversationUpdate}
+          onHideConversation={handleHideConversation}
         />
       ) : (
         <DmInfoSheet
@@ -507,6 +529,7 @@ export function ConversationView({
           currentUserId={currentUserId}
           onClose={() => setInfoOpen(false)}
           onClearHistory={handleClearHistory}
+          onHideConversation={handleHideConversation}
         />
       )}
     </div>

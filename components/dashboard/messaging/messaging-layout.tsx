@@ -171,6 +171,11 @@ export function MessagingLayout({
     [],
   )
 
+  const handleConversationHidden = useCallback((id: string) => {
+    setConversations((prev) => prev.filter((c) => c.id !== id))
+    setSelectedId((prev) => (prev === id ? null : prev))
+  }, [])
+
   return (
     <div className="flex flex-1 min-h-0 -mx-4 lg:-mx-8 -mt-6 lg:-mt-8 -mb-24 lg:-mb-12 overflow-hidden">
       <ConversationSidebar
@@ -199,6 +204,7 @@ export function MessagingLayout({
           profiles={profiles}
           onConversationUpdate={(patch) => handleConversationUpdate(selectedConversation.id, patch)}
           onLastMessage={handleLastMessage}
+          onConversationHidden={handleConversationHidden}
         />
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">

@@ -36,9 +36,10 @@ interface GroupInfoSheetProps {
   onClose: () => void
   onClearHistory?: () => void
   onGroupUpdated?: (patch: Partial<Pick<Conversation, "name" | "avatar_url">>) => void
+  onHideConversation?: () => void
 }
 
-export function GroupInfoSheet({ open, conversation, currentUserId, profiles, onClose, onClearHistory, onGroupUpdated }: GroupInfoSheetProps) {
+export function GroupInfoSheet({ open, conversation, currentUserId, profiles, onClose, onClearHistory, onGroupUpdated, onHideConversation }: GroupInfoSheetProps) {
   // Active members: not removed and profile not deleted
   const [localMembers, setLocalMembers] = useState<ConversationMember[]>([])
   // Former members: those who were removed from the group
@@ -533,7 +534,7 @@ export function GroupInfoSheet({ open, conversation, currentUserId, profiles, on
         </div>
 
         {/* Danger zone */}
-        <div className="px-3 py-3 border-t border-border shrink-0">
+        <div className="px-3 py-3 border-t border-border shrink-0 space-y-0.5">
           <Button
             variant="ghost"
             size="sm"
@@ -543,6 +544,17 @@ export function GroupInfoSheet({ open, conversation, currentUserId, profiles, on
             <Trash2 className="h-4 w-4" />
             Clear Chat History
           </Button>
+          {onHideConversation && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => { onHideConversation(); onClose() }}
+            >
+              <UserMinus className="h-4 w-4" />
+              Delete Conversation
+            </Button>
+          )}
         </div>
       </SheetContent>
 

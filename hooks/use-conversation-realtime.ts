@@ -17,7 +17,7 @@ interface UseConversationRealtimeOptions {
   conversationId: string | null
   onNewMessage: (msg: Message) => void
   onMessageUpdated: (msg: Partial<Message> & { id: string }) => void
-  onReactionChange: (reaction: MessageReaction & { action: "added" | "removed" }) => void
+  onReactionChange: (reaction: MessageReaction & { action: "added" | "removed" | "updated" }) => void
   onTyping: (users: TypingUser[]) => void
 }
 
@@ -213,6 +213,20 @@ export function useConversationRealtime({
           if (!active) return
           const r = payload.new as MessageReaction
           onReactionChangeRef.current({ ...r, action: "added" })
+        },
+      )
+      .on(
+        "postgres_changes" as any,
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "message_reactions",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload: any) => {
+          if (!active) return
+          const r = payload.new as MessageReaction
+          onReactionChangeRef.current({ ...r, action: "updated" })
         },
       )
       .on(
