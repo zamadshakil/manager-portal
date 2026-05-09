@@ -1,13 +1,14 @@
 "use client"
 
-import { useRef, useState, useTransition } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { FolderOpen, Loader2 } from "lucide-react"
-import { createMaterial } from "@/app/actions/materials"
-import { ARCHIVE_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
+import {
+  MAX_FILE_SIZE_BYTES,
+  MAX_MATERIAL_UPLOAD_SIZE_BYTES,
+  normalizeMaterialMimeType,
+} from "@/lib/types"
 import type { UserRole } from "@/lib/types"
-
-const ARCHIVE_MIMES = new Set<string>(ARCHIVE_MIME_TYPES as readonly string[])
 
 export function MaterialUploader({
   role,
@@ -27,40 +28,40 @@ export function MaterialUploader({
   const [target, setTarget] = useState<string>("global")
   const [expiresAt, setExpiresAt] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const [pending, start] = useTransition()
-  // Large-archive presigned upload state
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
-  const [uploadStage, setUploadStage] = useState<"" | "presigning" | "uploading" | "processing">("")
+  const [uploadStage, setUploadStage] = useState<"" | "presigning" | "uploading">("")
 
   const effectiveTarget = role === "manager" && currentTeamId ? currentTeamId : target
-  const isLargeArchive =
-    file !== null &&
-    ARCHIVE_MIMES.has(file.type) &&
-    file.size > MAX_FILE_SIZE_BYTES
-  const isOversized =
-    file !== null &&
-    !ARCHIVE_MIMES.has(file.type) &&
-    file.size > MAX_FILE_SIZE_BYTES
+  const resolvedMimeType = file ? normalizeMaterialMimeType(file.name, file.type) : null
+  const isOversized = file !== null && file.size > MAX_MATERIAL_UPLOAD_SIZE_BYTES
+  const usesLargeFilePath = file !== null && file.size > MAX_FILE_SIZE_BYTES
+  const isUnsupported = file !== null && !resolvedMimeType
+  const isUploading = uploadProgress !== null || uploadStage !== ""
 
-  async function handleLargeArchiveUpload() {
+  async function handleUpload() {
     if (!file) return
     setError(null)
     setUploadProgress(0)
-    let succeeded = false
+    const mimeType = normalizeMaterialMimeType(file.name, file.type)
+    if (!mimeType) {
+      setError(`Unsupported file type: ${file.type || file.name}`)
+      setUploadProgress(null)
+      return
+    }
 
     try {
-      // Step 1: Get presigned URL
       setUploadStage("presigning")
       const presignRes = await fetch("/api/materials/presign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: title.trim(),
+          fileName: file.name,
           description: description.trim() || undefined,
           tags: tags.trim() || undefined,
           target: effectiveTarget,
           expiresAt: expiresAt || undefined,
-          mimeType: file.type,
+          mimeType,
           sizeBytes: file.size,
         }),
       })
@@ -73,7 +74,6 @@ export function MaterialUploader({
         materialId: string
       }
 
-      // Step 2: Upload via server proxy (avoids browser-to-R2 CORS restriction)
       setUploadStage("uploading")
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest()
@@ -101,24 +101,21 @@ export function MaterialUploader({
         xhr.onerror = () => reject(new Error("Network error during upload"))
         xhr.send(fd)
       })
-      setUploadProgress(100)
 
-      succeeded = true
-      setUploadStage("processing")
       setFile(null)
       setTitle("")
       setDescription("")
       setTags("")
       setExpiresAt("")
       if (inputRef.current) inputRef.current.value = ""
+      setUploadStage("")
+      setUploadProgress(null)
       router.refresh()
-    } catch (err: any) {
-      setError(err?.message ?? "Upload failed.")
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Upload failed.")
     } finally {
-      if (!succeeded) {
-        setUploadStage("")
-        setUploadProgress(null)
-      }
+      setUploadStage("")
+      setUploadProgress(null)
     }
   }
 
@@ -130,39 +127,17 @@ export function MaterialUploader({
       return
     }
 
-    // Reject non-archive files that exceed the server action body limit
-    if (!ARCHIVE_MIMES.has(file.type) && file.size > MAX_FILE_SIZE_BYTES) {
-      setError(`File exceeds the 25 MB limit (${(file.size / 1024 / 1024).toFixed(1)} MB). Please compress it or choose a smaller file.`)
+    if (!resolvedMimeType) {
+      setError(`Unsupported file type: ${file.type || file.name}`)
       return
     }
 
-    if (isLargeArchive) {
-      void handleLargeArchiveUpload()
+    if (file.size > MAX_MATERIAL_UPLOAD_SIZE_BYTES) {
+      setError(`File exceeds the ${Math.round(MAX_MATERIAL_UPLOAD_SIZE_BYTES / 1024 / 1024)} MB limit (${(file.size / 1024 / 1024).toFixed(1)} MB).`)
       return
     }
 
-    const fd = new FormData()
-    fd.set("file", file)
-    fd.set("title", title.trim())
-    fd.set("description", description.trim())
-    fd.set("tags", tags.trim())
-    fd.set("target", effectiveTarget)
-    if (expiresAt) fd.set("expiresAt", expiresAt)
-
-    start(async () => {
-      const res = await createMaterial(fd)
-      if (!res.ok) {
-        setError(res.error ?? "Failed to upload.")
-        return
-      }
-      setFile(null)
-      setTitle("")
-      setDescription("")
-      setTags("")
-      setExpiresAt("")
-      if (inputRef.current) inputRef.current.value = ""
-      router.refresh()
-    })
+    void handleUpload()
   }
 
   return (
@@ -187,10 +162,11 @@ export function MaterialUploader({
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,.doc,.docx,.txt,.ppt,.pptx,.png,.jpg,.jpeg,.xlsx,.md,.zip,.rar"
+          accept=".pdf,.doc,.docx,.txt,.ppt,.pptx,.png,.jpg,.jpeg,.xls,.xlsx,.md,.zip,.rar"
           onChange={(e) => {
             const f = e.target.files?.[0] ?? null
             setFile(f)
+            setError(null)
             if (f && !title) setTitle(f.name.replace(/\.[^.]+$/, ""))
           }}
           className="block w-full text-[12px] file:mr-3 file:rounded-lg file:border file:border-border file:bg-background file:px-3 file:py-1.5 file:text-[12px] file:font-semibold hover:file:bg-muted"
@@ -259,15 +235,21 @@ export function MaterialUploader({
           </label>
         ) : null}
 
-        {isOversized && (
+        {isUnsupported && (
           <p className="text-[12px] font-semibold text-destructive">
-            File is {(file!.size / 1024 / 1024).toFixed(1)} MB — maximum is 25 MB for non-archive files. Please compress it or use a ZIP archive.
+            This file type is not supported for Materials upload.
           </p>
         )}
 
-        {isLargeArchive && (
+        {isOversized && (
+          <p className="text-[12px] font-semibold text-destructive">
+            File is {(file!.size / 1024 / 1024).toFixed(1)} MB — maximum is {Math.round(MAX_MATERIAL_UPLOAD_SIZE_BYTES / 1024 / 1024)} MB.
+          </p>
+        )}
+
+        {usesLargeFilePath && !isOversized && !isUnsupported && (
           <p className="text-[11px] text-muted-foreground">
-            Large archive (&gt;25 MB) — will upload to storage and extract content in the background.
+            Large file (&gt;25 MB) — will upload through the optimized storage path.
           </p>
         )}
 
@@ -289,12 +271,6 @@ export function MaterialUploader({
           </div>
         )}
 
-        {uploadStage === "processing" && (
-          <p className="text-[12px] font-semibold text-amber-600 dark:text-amber-400">
-            Archive uploaded — extracting content in background…
-          </p>
-        )}
-
         {error ? (
           <p role="alert" className="text-[12px] font-semibold text-destructive">
             {error}
@@ -304,10 +280,10 @@ export function MaterialUploader({
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={!file || pending || uploadProgress !== null || isOversized}
+            disabled={!file || isUploading || isOversized || isUnsupported}
             className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-9 text-[13px] font-semibold text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97] disabled:opacity-60"
           >
-            {pending || uploadProgress !== null ? (
+            {isUploading ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Uploading…
               </>

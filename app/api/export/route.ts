@@ -121,7 +121,7 @@ export async function GET(request: NextRequest) {
   if (type === "materials") {
     let q = supabase
       .from("materials")
-      .select("id, title, blob_url, file_type, tags, team_id, size_bytes, teams(name)")
+      .select("id, title, blob_url, file_type, tags, team_id, size_bytes, archive_status, teams(name)")
       .order("created_at", { ascending: true })
       .limit(500)
 
@@ -142,12 +142,14 @@ export async function GET(request: NextRequest) {
       team_id: string | null
       size_bytes: number | null
       teams: { name: string } | null
+      archive_status?: "pending" | "processing" | "done" | "failed" | "na" | null
     }>
 
+    const completedRows = rows.filter((r) => r.archive_status !== "pending")
     const filtered =
       tagList.length > 0
-        ? rows.filter((r) => r.tags.some((t) => tagList.includes(t)))
-        : rows
+        ? completedRows.filter((r) => r.tags.some((t) => tagList.includes(t)))
+        : completedRows
 
     for (const r of filtered) {
       if (!r.blob_url) continue

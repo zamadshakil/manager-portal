@@ -3,12 +3,16 @@ import { requireRole } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { presignPut } from "@/lib/r2"
 import { logActivity } from "@/lib/activity"
-import { ARCHIVE_MIME_TYPES, MAX_ARCHIVE_SIZE_BYTES } from "@/lib/types"
+import {
+  ARCHIVE_MIME_TYPES,
+  MAX_MATERIAL_UPLOAD_SIZE_BYTES,
+  normalizeMaterialMimeType,
+} from "@/lib/types"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const ACCEPTED_ARCHIVE_MIMES = new Set<string>(ARCHIVE_MIME_TYPES as readonly string[])
+const ARCHIVE_MIMES = new Set<string>(ARCHIVE_MIME_TYPES as readonly string[])
 
 /**
  * POST /api/materials/presign
@@ -32,6 +36,7 @@ export async function POST(req: Request) {
 
   let body: {
     title?: string
+    fileName?: string
     description?: string
     tags?: string
     target?: string
@@ -45,27 +50,33 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
   }
 
-  const { title, description, tags, target, expiresAt, mimeType, sizeBytes } = body
+  const { title, fileName, description, tags, target, expiresAt, mimeType, sizeBytes } = body
 
   // Validate title
   if (!title || title.trim().length < 2 || title.trim().length > 200) {
     return NextResponse.json({ error: "Title must be 2–200 characters." }, { status: 400 })
   }
 
+  if (!fileName || !fileName.trim()) {
+    return NextResponse.json({ error: "fileName is required." }, { status: 400 })
+  }
+
+  const resolvedMimeType = normalizeMaterialMimeType(fileName, mimeType)
+
   // Validate MIME type
-  if (!mimeType || !ACCEPTED_ARCHIVE_MIMES.has(mimeType)) {
+  if (!resolvedMimeType) {
     return NextResponse.json(
-      { error: `Unsupported archive type: ${mimeType ?? "(none)"}` },
+      { error: `Unsupported file type: ${mimeType ?? "(none)"}` },
       { status: 415 },
     )
   }
 
   // Validate size
-  if (!sizeBytes || sizeBytes <= 0 || sizeBytes > MAX_ARCHIVE_SIZE_BYTES) {
+  if (!sizeBytes || sizeBytes <= 0 || sizeBytes > MAX_MATERIAL_UPLOAD_SIZE_BYTES) {
     return NextResponse.json(
       {
-        error: `Archive must be between 1 byte and ${Math.round(
-          MAX_ARCHIVE_SIZE_BYTES / 1024 / 1024,
+        error: `File must be between 1 byte and ${Math.round(
+          MAX_MATERIAL_UPLOAD_SIZE_BYTES / 1024 / 1024,
         )} MB.`,
       },
       { status: 413 },
@@ -95,7 +106,34 @@ export async function POST(req: Request) {
   }
 
   // Generate R2 key
-  const ext = mimeType.includes("rar") ? "rar" : "zip"
+  const fileExt = fileName.split(".").pop()?.trim().toLowerCase()
+  const ext = fileExt && /^[a-z0-9]+$/.test(fileExt)
+    ? fileExt
+    : resolvedMimeType.includes("presentation")
+      ? "pptx"
+      : resolvedMimeType.includes("powerpoint")
+        ? "ppt"
+        : resolvedMimeType.includes("wordprocessingml")
+          ? "docx"
+          : resolvedMimeType.includes("msword")
+            ? "doc"
+            : resolvedMimeType.includes("spreadsheetml")
+              ? "xlsx"
+              : resolvedMimeType.includes("excel")
+                ? "xls"
+                : resolvedMimeType.includes("pdf")
+                  ? "pdf"
+                  : resolvedMimeType.includes("markdown")
+                    ? "md"
+                    : resolvedMimeType.includes("plain")
+                      ? "txt"
+                      : resolvedMimeType.includes("png")
+                        ? "png"
+                        : resolvedMimeType.includes("jpeg")
+                          ? "jpg"
+                          : resolvedMimeType.includes("rar")
+                            ? "rar"
+                            : "zip"
   const safeName = title
     .trim()
     .replace(/[^\w.\-]+/g, "_")
@@ -105,9 +143,9 @@ export async function POST(req: Request) {
   // Generate presigned PUT URL (valid for 10 minutes)
   let presignResult: { uploadUrl: string; publicUrl: string; key: string }
   try {
-    presignResult = await presignPut(key, mimeType, 600)
-  } catch (err: any) {
-    console.error("[presign] R2 presignPut failed:", err?.message)
+    presignResult = await presignPut(key, resolvedMimeType, 600)
+  } catch (err: unknown) {
+    console.error("[presign] R2 presignPut failed:", err instanceof Error ? err.message : err)
     return NextResponse.json({ error: "Could not generate upload URL." }, { status: 500 })
   }
 
@@ -129,11 +167,11 @@ export async function POST(req: Request) {
       description: description?.trim() || null,
       blob_url: presignResult.publicUrl,
       blob_pathname: key,
-      file_type: mimeType,
+      file_type: resolvedMimeType,
       size_bytes: sizeBytes,
       tags: tagList,
       ...(expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {}),
-    } as any)
+    })
     .select("id")
     .single()
 
@@ -155,7 +193,11 @@ export async function POST(req: Request) {
     action: "material.presign_issued",
     entityType: "material",
     entityId: data.id,
-    metadata: { mime: mimeType, size: sizeBytes },
+    metadata: {
+      mime: resolvedMimeType,
+      size: sizeBytes,
+      archive: ARCHIVE_MIMES.has(resolvedMimeType),
+    },
   })
 
   return NextResponse.json({

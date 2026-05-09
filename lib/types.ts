@@ -226,6 +226,7 @@ export const ACCEPTED_MIME_TYPES = [
 
 export const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024 // 25 MB
 export const MAX_ARCHIVE_SIZE_BYTES = 100 * 1024 * 1024 // 100 MB
+export const MAX_MATERIAL_UPLOAD_SIZE_BYTES = MAX_ARCHIVE_SIZE_BYTES
 
 export const ARCHIVE_MIME_TYPES = [
   "application/zip",
@@ -233,6 +234,51 @@ export const ARCHIVE_MIME_TYPES = [
   "application/vnd.rar",
   "application/x-rar-compressed",
 ] as const
+
+const ACCEPTED_MIME_TYPE_SET = new Set<string>(ACCEPTED_MIME_TYPES as readonly string[])
+
+export const MATERIAL_EXTENSION_TO_MIME = {
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  txt: "text/plain",
+  md: "text/markdown",
+  zip: "application/zip",
+  rar: "application/vnd.rar",
+} as const
+
+export function inferMaterialMimeTypeFromFileName(fileName: string): string | null {
+  const ext = fileName.split(".").pop()?.trim().toLowerCase() ?? ""
+  return MATERIAL_EXTENSION_TO_MIME[ext as keyof typeof MATERIAL_EXTENSION_TO_MIME] ?? null
+}
+
+export function isAcceptedMaterialMimeType(mimeType: string | null | undefined): boolean {
+  return typeof mimeType === "string" && ACCEPTED_MIME_TYPE_SET.has(mimeType)
+}
+
+export function normalizeMaterialMimeType(
+  fileName: string,
+  mimeType: string | null | undefined,
+): string | null {
+  const normalized = mimeType?.trim().toLowerCase() ?? ""
+  if (isAcceptedMaterialMimeType(normalized)) return normalized
+
+  const inferred = inferMaterialMimeTypeFromFileName(fileName)
+  if (!inferred) return null
+
+  if (!normalized || normalized === "application/octet-stream") {
+    return inferred
+  }
+
+  return isAcceptedMaterialMimeType(inferred) ? inferred : null
+}
 
 // ---------------------------------------------------------------------------
 // AI Credit System

@@ -3,12 +3,33 @@ import { requireRole } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { putRaw } from "@/lib/r2"
 import { processArchiveBackground } from "@/lib/archive-processor"
+import { logActivity } from "@/lib/activity"
+import { indexDocument, joinContent } from "@/lib/smart-ai/indexer"
 import { revalidatePath } from "next/cache"
-import { MAX_ARCHIVE_SIZE_BYTES } from "@/lib/types"
+import {
+  ARCHIVE_MIME_TYPES,
+  MAX_MATERIAL_UPLOAD_SIZE_BYTES,
+  normalizeMaterialMimeType,
+} from "@/lib/types"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
+
+const ARCHIVE_MIMES = new Set<string>(ARCHIVE_MIME_TYPES as readonly string[])
+
+interface MaterialUploadRow {
+  id: string
+  author_id: string
+  team_id: string | null
+  title: string
+  description: string | null
+  blob_url: string
+  blob_pathname: string
+  file_type: string | null
+  tags: string[] | null
+  archive_status: "pending" | "processing" | "done" | "failed" | "na" | null
+}
 
 /**
  * POST /api/materials/upload-proxy
@@ -48,9 +69,9 @@ export async function POST(req: Request) {
   if (!file || file.size === 0) {
     return NextResponse.json({ error: "No file provided." }, { status: 400 })
   }
-  if (file.size > MAX_ARCHIVE_SIZE_BYTES) {
+  if (file.size > MAX_MATERIAL_UPLOAD_SIZE_BYTES) {
     return NextResponse.json(
-      { error: `Archive exceeds the ${Math.round(MAX_ARCHIVE_SIZE_BYTES / 1024 / 1024)} MB limit.` },
+      { error: `File exceeds the ${Math.round(MAX_MATERIAL_UPLOAD_SIZE_BYTES / 1024 / 1024)} MB limit.` },
       { status: 413 },
     )
   }
@@ -58,9 +79,9 @@ export async function POST(req: Request) {
   const supabase = await createClient()
   const { data: row, error: fetchError } = (await supabase
     .from("materials")
-    .select("*")
+    .select("id, author_id, team_id, title, description, blob_url, blob_pathname, file_type, tags, archive_status")
     .eq("id", materialId)
-    .single()) as { data: any; error: any }
+    .single()) as { data: MaterialUploadRow | null; error: { message: string } | null }
 
   if (fetchError || !row) {
     return NextResponse.json({ error: "Material not found." }, { status: 404 })
@@ -74,29 +95,77 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, materialId, alreadyUploaded: true })
   }
 
+  const resolvedMimeType =
+    normalizeMaterialMimeType(file.name, row.file_type ?? file.type ?? null) ?? row.file_type ?? file.type
+  if (!resolvedMimeType) {
+    return NextResponse.json({ error: "Unsupported file type." }, { status: 415 })
+  }
+
+  const isArchive = ARCHIVE_MIMES.has(resolvedMimeType)
+
   try {
     const buffer = Buffer.from(await file.arrayBuffer())
-    await putRaw(row.blob_pathname, buffer, file.type || "application/zip")
-  } catch (err: any) {
-    console.error("[upload-proxy] R2 upload failed:", err?.message)
+    await putRaw(row.blob_pathname, buffer, resolvedMimeType)
+  } catch (err: unknown) {
+    console.error("[upload-proxy] R2 upload failed:", err instanceof Error ? err.message : err)
     return NextResponse.json({ error: "Storage upload failed." }, { status: 500 })
   }
 
   await supabase
     .from("materials")
-    .update({ archive_status: "processing" } as any)
+    .update({ file_type: resolvedMimeType, archive_status: isArchive ? "processing" : "na" } as any)
     .eq("id", materialId)
 
-  void processArchiveBackground(
-    materialId,
-    row.blob_url,
-    row.file_type ?? "application/zip",
-    row.team_id ?? null,
-    profile.id,
-    row.title,
-  )
+  await logActivity({
+    actorId: profile.id,
+    teamId: row.team_id ?? null,
+    action: "material.created",
+    entityType: "material",
+    entityId: materialId,
+    metadata: {
+      mime: resolvedMimeType,
+      size: file.size,
+      archive: isArchive,
+      upload_path: "upload_proxy",
+    },
+  })
+
+  const tagList = Array.isArray(row.tags) ? row.tags.filter(Boolean) : []
+  void indexDocument({
+    source_type: "material",
+    source_id: materialId,
+    team_id: row.team_id ?? null,
+    owner_id: row.author_id ?? profile.id,
+    title: row.title,
+    content: joinContent([
+      row.title,
+      row.description ?? null,
+      tagList.length ? `Tags: ${tagList.join(", ")}` : null,
+    ]),
+    metadata: {
+      tags: tagList,
+      mime: resolvedMimeType,
+      size: file.size,
+      archive: isArchive,
+    },
+  }).then((result) => {
+    if (!result.ok) {
+      console.warn("[upload-proxy] material metadata indexing skipped:", result.reason)
+    }
+  })
+
+  if (isArchive) {
+    void processArchiveBackground(
+      materialId,
+      row.blob_url,
+      resolvedMimeType,
+      row.team_id ?? null,
+      row.author_id ?? profile.id,
+      row.title,
+    )
+  }
 
   revalidatePath("/dashboard/materials")
 
-  return NextResponse.json({ ok: true, materialId })
+  return NextResponse.json({ ok: true, materialId, archive: isArchive })
 }

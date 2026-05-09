@@ -159,7 +159,7 @@ export async function listMaterials(profile: Profile, limit = 100): Promise<Mate
     .select("*, teams(name)")
     .order("created_at", { ascending: false })
     .limit(limit)
-  return (data ?? []) as unknown as Material[]
+  return ((data ?? []) as unknown as Material[]).filter((row) => row.archive_status !== "pending")
 }
 
 export async function listActivity(
