@@ -19,6 +19,20 @@ interface ConversationViewProps {
   currentUserName: string
 }
 
+function mergeReplyMessage(
+  replyTo: Message["reply_to"] | undefined,
+  fallback: Message | null = null,
+): Message["reply_to"] {
+  if (replyTo == null) return fallback
+  if (!fallback) return replyTo
+  return {
+    ...fallback,
+    ...replyTo,
+    sender: replyTo.sender ?? fallback.sender,
+    reactions: replyTo.reactions ?? fallback.reactions,
+  }
+}
+
 export function ConversationView({
   conversation,
   currentUserId,
@@ -36,9 +50,12 @@ export function ConversationView({
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([])
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const replyToRef = useRef<Message | null>(null)
-  replyToRef.current = replyTo
   const [infoOpen, setInfoOpen] = useState(false)
   const listRef = useRef<MessageListHandle>(null)
+
+  useEffect(() => {
+    replyToRef.current = replyTo
+  }, [replyTo])
 
   const fetchMessages = useCallback(async (before?: string) => {
     const params = new URLSearchParams({ conv: conversation.id, limit: "50" })
@@ -55,12 +72,7 @@ export function ConversationView({
     const byId = new Map(pool.map((m) => [m.id, m]))
     return msgs.map((m) => {
       if (!m.reply_to_id) return m
-      if (!m.reply_to) return { ...m, reply_to: byId.get(m.reply_to_id) ?? null }
-      if (!m.reply_to.sender) {
-        const poolMsg = byId.get(m.reply_to_id)
-        if (poolMsg?.sender) return { ...m, reply_to: { ...m.reply_to, sender: poolMsg.sender } }
-      }
-      return m
+      return { ...m, reply_to: mergeReplyMessage(m.reply_to, byId.get(m.reply_to_id) ?? null) }
     })
   }, [])
 
@@ -143,9 +155,7 @@ export function ConversationView({
       // Also fill in a missing sender from the locally-cached copy of the
       // reply target so the preview never shows "Unknown".
       const localReplyMsg = msg.reply_to_id ? (prev.find((m) => m.id === msg.reply_to_id) ?? null) : null
-      const replyTo: Message["reply_to"] = msg.reply_to
-        ? { ...msg.reply_to, sender: msg.reply_to.sender ?? localReplyMsg?.sender ?? undefined }
-        : localReplyMsg
+      const replyTo = mergeReplyMessage(msg.reply_to, localReplyMsg)
       return [...prev, { ...msg, reply_to: replyTo }]
     })
   }, [])
@@ -159,9 +169,7 @@ export function ConversationView({
         // never overwrite a populated reply_to with null from the server.
         const incomingReplyTo = partial.reply_to
         const mergedReplyTo = incomingReplyTo !== undefined
-          ? (incomingReplyTo
-              ? { ...incomingReplyTo, sender: incomingReplyTo.sender ?? m.reply_to?.sender }
-              : m.reply_to)   // server returned null → keep what we have
+          ? mergeReplyMessage(incomingReplyTo, m.reply_to ?? null)
           : m.reply_to
         return {
           ...m,
@@ -252,9 +260,7 @@ export function ConversationView({
         // snapshot when the Supabase nested join returns null for sender/content.
         const apiReplyTo  = real.reply_to
         const localReplyTo = optimisticMsg?.reply_to
-        const replyTo: Message["reply_to"] = apiReplyTo
-          ? { ...apiReplyTo, sender: apiReplyTo.sender ?? localReplyTo?.sender ?? undefined }
-          : (localReplyTo ?? null)
+        const replyTo = mergeReplyMessage(apiReplyTo, localReplyTo ?? null)
         // Realtime may have delivered the real row before the POST response
         // arrived and already added it to state. If so, just drop the tmp
         // placeholder to avoid having two copies of the same message.
@@ -268,9 +274,7 @@ export function ConversationView({
               const existingReplyTo = m.reply_to
               return {
                 ...m,
-                reply_to: existingReplyTo
-                  ? { ...existingReplyTo, sender: existingReplyTo.sender ?? localReplyTo?.sender ?? undefined }
-                  : replyTo,
+                reply_to: mergeReplyMessage(existingReplyTo, replyTo ?? null),
               }
             })
         }
@@ -282,7 +286,7 @@ export function ConversationView({
       )
       toast.error("Failed to send message")
     }
-  }, [conversation.id, currentUserId])
+  }, [conversation.id, currentUserId, currentUserName])
 
   const handleRetry = useCallback((msg: Message) => {
     // Remove failed message and resend
