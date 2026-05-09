@@ -5,14 +5,16 @@ import Link from "next/link"
 import { Plus, LogOut, Loader2 } from "lucide-react"
 import { roleLabel } from "@/lib/auth-shared"
 import type { UserRole } from "@/lib/types"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 interface TopBarProps {
   name: string
   email: string
   role: UserRole
+  avatarUrl?: string | null
 }
 
-export function TopBar({ name, email, role }: TopBarProps) {
+export function TopBar({ name, email, role, avatarUrl }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
 
@@ -79,9 +81,12 @@ export function TopBar({ name, email, role }: TopBarProps) {
             aria-expanded={menuOpen}
             className="ml-1 flex items-center gap-2 rounded-xl border border-border bg-background pl-1 pr-2.5 h-10 transition-colors hover:bg-muted"
           >
-            <div className="h-8 w-8 rounded-lg bg-warm-white flex items-center justify-center text-[12px] font-semibold">
-              {initials || "U"}
-            </div>
+            <Avatar className="h-8 w-8 rounded-lg">
+              <AvatarImage src={avatarUrl ?? undefined} alt={name} />
+              <AvatarFallback className="rounded-lg bg-warm-white text-[12px] font-semibold">
+                {initials || "U"}
+              </AvatarFallback>
+            </Avatar>
             <div className="hidden md:flex flex-col leading-tight text-left">
               <span className="text-[12px] font-semibold">{name}</span>
               <span className="text-[11px] font-medium text-muted-foreground">

@@ -34,6 +34,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           name={profile.full_name ?? profile.email}
           email={profile.email}
           role={profile.role}
+          avatarUrl={profile.avatar_url}
         />
         <main className="flex-1 min-h-0 overflow-y-auto flex flex-col px-4 lg:px-8 py-6 lg:py-8 pb-24 lg:pb-12 space-y-6 lg:space-y-8 min-w-0">
           {children}
