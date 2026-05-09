@@ -222,6 +222,13 @@ export function ConversationView({
     reply_to_id?: string
   }) => {
     const tmpId = `tmp_${crypto.randomUUID()}`
+    const requestedReplyId = payload.reply_to_id ?? replyToRef.current?.id ?? null
+    const persistedReplyId = requestedReplyId && !requestedReplyId.startsWith("tmp_")
+      ? requestedReplyId
+      : null
+    const replyTarget = persistedReplyId
+      ? (messages.find((message) => message.id === persistedReplyId) ?? null)
+      : null
     const optimistic: Message = {
       id: tmpId,
       conversation_id: conversation.id,
@@ -236,8 +243,8 @@ export function ConversationView({
       type: payload.type as Message["type"],
       media_url: payload.media_url ?? null,
       media_metadata: payload.media_metadata ?? null,
-      reply_to_id: payload.reply_to_id ?? null,
-      reply_to: replyToRef.current ?? null,
+      reply_to_id: persistedReplyId,
+      reply_to: replyTarget,
       edited_at: null,
       deleted_at: null,
       created_at: new Date().toISOString(),
@@ -250,7 +257,11 @@ export function ConversationView({
       const res = await fetch("/api/messaging/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation_id: conversation.id, ...payload }),
+        body: JSON.stringify({
+          conversation_id: conversation.id,
+          ...payload,
+          reply_to_id: persistedReplyId,
+        }),
       })
       if (!res.ok) throw new Error(await res.text())
       const real: Message = await res.json()
@@ -286,7 +297,7 @@ export function ConversationView({
       )
       toast.error("Failed to send message")
     }
-  }, [conversation.id, currentUserId, currentUserName])
+  }, [conversation.id, currentUserId, currentUserName, messages])
 
   const handleRetry = useCallback((msg: Message) => {
     // Remove failed message and resend
