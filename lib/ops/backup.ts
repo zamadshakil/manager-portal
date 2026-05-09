@@ -26,13 +26,13 @@ export async function runBackup(): Promise<BackupResult> {
   const client = await pool.connect()
 
   try {
-    const tablesRes = await client.query<{ tablename: string }>(
-      `SELECT tablename FROM information_schema.tables
+    const tablesRes = await client.query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.tables
        WHERE table_schema = 'public'
          AND table_type = 'BASE TABLE'
-       ORDER BY tablename`
+       ORDER BY table_name`
     )
-    const tables = tablesRes.rows.map((r) => r.tablename)
+    const tables = tablesRes.rows.map((r) => r.table_name)
 
     const files: Record<string, Uint8Array> = {}
     const rowCounts: Record<string, number> = {}
