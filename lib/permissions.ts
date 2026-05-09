@@ -108,7 +108,9 @@ export interface UserOverrideRow {
   capability_key: string
   effect: "allow" | "deny"
   granted_by: string | null
+  granted_by_name: string | null
   reason: string | null
+  expires_at: string | null
   updated_at: string
 }
 
@@ -177,10 +179,14 @@ const loadPermissions = cache(async (
       .from("role_permission_defaults")
       .select("capability_key")
       .eq("role", role),
-    supabase
+    (supabase
       .from("user_permission_overrides")
-      .select("capability_key, effect")
-      .eq("user_id", userId),
+      .select("capability_key, effect, expires_at")
+      .eq("user_id", userId)
+      .or("expires_at.is.null,expires_at.gt." + new Date().toISOString()) as unknown as Promise<{
+        data: { capability_key: string; effect: string; expires_at: string | null }[] | null
+        error: { message: string } | null
+      }>),
   ])
 
   if (defaultsRes.error) {
