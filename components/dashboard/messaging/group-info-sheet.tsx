@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { UserMinus, UserPlus, Search } from "lucide-react"
+import { UserMinus, UserPlus, Search, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import {
   Sheet,
@@ -9,6 +9,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -20,9 +31,10 @@ interface GroupInfoSheetProps {
   conversation: Conversation
   currentUserId: string
   onClose: () => void
+  onClearHistory: () => void
 }
 
-export function GroupInfoSheet({ open, conversation, currentUserId, onClose }: GroupInfoSheetProps) {
+export function GroupInfoSheet({ open, conversation, currentUserId, onClose, onClearHistory }: GroupInfoSheetProps) {
   const [removing, setRemoving] = useState<string | null>(null)
   const members = conversation.members ?? []
 
@@ -89,6 +101,38 @@ export function GroupInfoSheet({ open, conversation, currentUserId, onClose }: G
               </div>
             )
           })}
+        </div>
+
+        {/* Danger zone */}
+        <div className="px-3 py-3 border-t border-border">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 className="h-4 w-4" />
+                Clear Chat History
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear chat history?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will remove the conversation history from your view only. All other participants will still see all messages.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => { onClearHistory(); onClose() }}
+                >
+                  Clear
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </SheetContent>
     </Sheet>

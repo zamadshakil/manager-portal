@@ -38,6 +38,10 @@ const nextConfig = {
     // var so CSP works for both hosted Supabase (*.supabase.co) and a
     // self-hosted gateway (e.g. Kong on Railway). Falls back to the hosted
     // wildcards when the var is unset (e.g. during `next lint`).
+    const r2StorageOrigin = process.env.R2_ACCOUNT_ID
+      ? `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+      : "https://*.r2.cloudflarestorage.com"
+
     const supabaseOrigins = (() => {
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL
       if (!url) return ["https://*.supabase.co", "wss://*.supabase.co"]
@@ -78,7 +82,7 @@ const nextConfig = {
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "img-src 'self' blob: data: https://*.r2.dev",
           "font-src 'self' https://fonts.gstatic.com https://frontend-cdn.perplexity.ai",
-          `connect-src 'self' ${supabaseOrigins.join(" ")} https://*.r2.dev https://cloudflareinsights.com`,
+          `connect-src 'self' ${supabaseOrigins.join(" ")} https://*.r2.dev ${r2StorageOrigin} https://cloudflareinsights.com`,
           "frame-src 'none'",
           "frame-ancestors 'none'",
           "object-src 'none'",

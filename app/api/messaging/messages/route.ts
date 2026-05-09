@@ -19,14 +19,16 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminClient()
 
-  // Auth check
+  // Auth check — also fetch cleared_at for the message-visibility filter
   const { data: membership } = await admin
     .from("conversation_members")
-    .select("user_id")
+    .select("user_id, cleared_at")
     .eq("conversation_id", conv)
     .eq("user_id", user.id)
     .maybeSingle()
   if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  const clearedAt: string | null = (membership as any).cleared_at ?? null
 
   const messageSelect = `
     id, conversation_id, sender_id, content, type,
@@ -41,13 +43,15 @@ export async function GET(req: NextRequest) {
 
   // modifiedAfter: return messages edited or deleted after the cursor (include deleted ones)
   if (modifiedAfter) {
-    const { data, error } = await admin
+    let modQuery = admin
       .from("messages")
       .select(messageSelect)
       .eq("conversation_id", conv)
       .or(`edited_at.gt."${modifiedAfter}",deleted_at.gt."${modifiedAfter}"`)
       .order("created_at", { ascending: true })
       .limit(limit)
+    if (clearedAt) modQuery = modQuery.gt("created_at", clearedAt)
+    const { data, error } = await modQuery
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(data ?? [])
   }
@@ -66,6 +70,7 @@ export async function GET(req: NextRequest) {
 
   if (after)  query = query.gt("created_at", after)
   if (before) query = query.lt("created_at", before)
+  if (clearedAt) query = query.gt("created_at", clearedAt)
 
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

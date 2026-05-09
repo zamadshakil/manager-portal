@@ -343,6 +343,11 @@ export function ConversationView({
     )
   }, [])
 
+  const handleClearHistory = useCallback(async () => {
+    await fetch(`/api/messaging/conversations/${conversation.id}/clear`, { method: "POST" })
+    setMessages([])
+  }, [conversation.id])
+
   // Typing indicator debounce
   const sendTyping = useCallback(() => {
     fetch("/api/messaging/typing", {
@@ -440,6 +445,7 @@ export function ConversationView({
           conversation={conversation}
           currentUserId={currentUserId}
           onClose={() => setInfoOpen(false)}
+          onClearHistory={handleClearHistory}
         />
       ) : (
         <DmInfoSheet
@@ -447,6 +453,7 @@ export function ConversationView({
           conversation={conversation}
           currentUserId={currentUserId}
           onClose={() => setInfoOpen(false)}
+          onClearHistory={handleClearHistory}
         />
       )}
     </div>
