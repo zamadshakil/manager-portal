@@ -43,7 +43,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </div>
 
       <MobileNav role={profile.role} />
-      <OpsCollector userId={profile.id} userEmail={profile.email} />
+      <OpsCollector userId={profile.id} userEmail={profile.email} userRole={profile.role} />
     </div>
   )
 }

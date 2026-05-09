@@ -115,7 +115,7 @@ function Section({ title, children, action }: { title: string; children: React.R
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-const TABS = ["Overview", "Issues", "Errors", "Requests", "Activity"] as const
+const TABS = ["Overview", "Issues", "Errors", "Requests", "Activity", "Users"] as const
 type Tab = typeof TABS[number]
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -221,6 +221,7 @@ export default function OpsMonitorPage() {
       {tab === "Errors" && <ErrorsTab />}
       {tab === "Requests" && <RequestsTab />}
       {tab === "Activity" && <ActivityTab />}
+      {tab === "Users" && <UsersTab />}
     </div>
   )
 }
@@ -528,6 +529,335 @@ function ActivityTable({ limit }: { limit: number }) {
           <span className="text-[10px] text-zinc-600 whitespace-nowrap">{rel(r.created_at)}</span>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ─── Users Tab ────────────────────────────────────────────────────────────────
+
+interface UserRow {
+  id: string
+  email: string
+  full_name: string | null
+  role: string
+  status: "online" | "recent" | "offline"
+  last_seen_at: string | null
+  last_pathname: string | null
+  errors_7d: number
+  last_session_event: string | null
+  deleted_at: string | null
+}
+
+interface UserDetail {
+  profile: UserRow
+  sessions: any[]
+  errors: any[]
+  network_errors: any[]
+  page_views: any[]
+  timeline: Array<{ kind: string; at: string; data: any }>
+}
+
+const STATUS_DOT: Record<string, string> = {
+  online: "bg-emerald-400 animate-pulse",
+  recent: "bg-yellow-400",
+  offline: "bg-zinc-600",
+}
+const STATUS_LABEL: Record<string, string> = {
+  online: "Online",
+  recent: "Recently active",
+  offline: "Offline",
+}
+const ROLE_BADGE: Record<string, string> = {
+  main_admin: "bg-orange-500/15 text-orange-400",
+  manager: "bg-blue-500/15 text-blue-400",
+  member: "bg-zinc-700 text-zinc-400",
+}
+
+function UsersTab() {
+  const [users, setUsers] = useState<UserRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<string | null>(null)
+  const [detail, setDetail] = useState<UserDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+
+  useEffect(() => {
+    fetch("/api/ops/monitor/users")
+      .then((r) => r.json())
+      .then((d) => { setUsers(d.users ?? []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  function openDetail(userId: string) {
+    setSelected(userId)
+    setDetail(null)
+    setDetailLoading(true)
+    fetch(`/api/ops/monitor/users/${userId}`)
+      .then((r) => r.json())
+      .then((d) => { setDetail(d); setDetailLoading(false) })
+      .catch(() => setDetailLoading(false))
+  }
+
+  if (loading) return <div className="h-40 animate-pulse bg-zinc-900 rounded-xl border border-zinc-800" />
+
+  const online = users.filter((u) => u.status === "online").length
+  const recent = users.filter((u) => u.status === "recent").length
+
+  return (
+    <div className="flex gap-6">
+      {/* User list */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-4 mb-4">
+          <span className="text-sm text-zinc-400">{users.length} total</span>
+          <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />{online} online
+          </span>
+          <span className="flex items-center gap-1.5 text-xs text-yellow-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" />{recent} recently active
+          </span>
+        </div>
+
+        <div className="space-y-2">
+          {users.map((u) => (
+            <button
+              key={u.id}
+              onClick={() => openDetail(u.id)}
+              className={`w-full text-left rounded-xl border p-4 transition-colors ${
+                selected === u.id
+                  ? "border-orange-500/50 bg-zinc-800"
+                  : "border-zinc-800 bg-zinc-900 hover:bg-zinc-800/60"
+              } ${u.deleted_at ? "opacity-40" : ""}`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="relative flex-shrink-0">
+                  <div className="w-9 h-9 rounded-full bg-zinc-700 flex items-center justify-center text-sm font-semibold text-zinc-300">
+                    {(u.full_name?.[0] || u.email[0]).toUpperCase()}
+                  </div>
+                  <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-zinc-900 ${STATUS_DOT[u.status]}`} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-white truncate">{u.full_name || u.email}</span>
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${ROLE_BADGE[u.role] ?? ROLE_BADGE.member}`}>{u.role}</span>
+                    {u.deleted_at && <span className="text-[10px] text-red-400">deleted</span>}
+                  </div>
+                  <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                    <span className="text-xs text-zinc-500 truncate">{u.email}</span>
+                    {u.last_seen_at && (
+                      <span className="text-[10px] text-zinc-600">{STATUS_LABEL[u.status]} · {rel(u.last_seen_at)}</span>
+                    )}
+                    {u.last_pathname && (
+                      <span className="text-[10px] text-zinc-600 font-mono truncate max-w-[160px]">{u.last_pathname}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  {u.errors_7d > 0 && (
+                    <span className="inline-block text-[10px] font-semibold bg-red-500/15 text-red-400 px-2 py-0.5 rounded-full">
+                      {u.errors_7d} error{u.errors_7d !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Detail panel */}
+      {selected && (
+        <div className="w-[480px] flex-shrink-0">
+          <div className="sticky top-20">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden max-h-[calc(100vh-120px)] flex flex-col">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 flex-shrink-0">
+                <span className="text-sm font-semibold text-white">User Detail</span>
+                <button onClick={() => setSelected(null)} className="text-zinc-600 hover:text-zinc-300 text-lg leading-none">×</button>
+              </div>
+              <div className="overflow-y-auto flex-1 p-4">
+                {detailLoading && <div className="h-40 animate-pulse bg-zinc-800 rounded-lg" />}
+                {detail && <UserDetailView detail={detail} />}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function UserDetailView({ detail }: { detail: UserDetail }) {
+  const { profile, timeline } = detail
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  const kindIcon: Record<string, string> = {
+    session: "🔐",
+    error: "🔴",
+    network: "🌐",
+    page_view: "📄",
+  }
+
+  const kindLabel: Record<string, string> = {
+    session: "Session",
+    error: "Error",
+    network: "Network",
+    page_view: "Page view",
+  }
+
+  const kindColor: Record<string, string> = {
+    session: "border-blue-800/50 bg-blue-950/30",
+    error: "border-red-800/50 bg-red-950/30",
+    network: "border-orange-800/50 bg-orange-950/30",
+    page_view: "border-zinc-800 bg-zinc-800/30",
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Profile header */}
+      <div className="flex items-center gap-3 pb-3 border-b border-zinc-800">
+        <div className="w-10 h-10 rounded-full bg-zinc-700 flex items-center justify-center text-base font-semibold text-zinc-300">
+          {(profile.full_name?.[0] || profile.email[0]).toUpperCase()}
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-white">{profile.full_name || profile.email}</p>
+          <p className="text-xs text-zinc-500">{profile.email} · {profile.role}</p>
+        </div>
+        <div className="ml-auto">
+          <span className={`inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-full ${
+            profile.status === "online" ? "bg-emerald-500/15 text-emerald-400" :
+            profile.status === "recent" ? "bg-yellow-500/15 text-yellow-400" :
+            "bg-zinc-800 text-zinc-500"
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[profile.status]}`} />
+            {STATUS_LABEL[profile.status]}
+          </span>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-lg bg-zinc-800 p-2 text-center">
+          <p className="text-lg font-bold text-white">{detail.errors.length}</p>
+          <p className="text-[10px] text-zinc-500">Errors</p>
+        </div>
+        <div className="rounded-lg bg-zinc-800 p-2 text-center">
+          <p className="text-lg font-bold text-white">{detail.network_errors.length}</p>
+          <p className="text-[10px] text-zinc-500">Net issues</p>
+        </div>
+        <div className="rounded-lg bg-zinc-800 p-2 text-center">
+          <p className="text-lg font-bold text-white">{detail.page_views.length}</p>
+          <p className="text-[10px] text-zinc-500">Page views</p>
+        </div>
+      </div>
+
+      {/* Unified timeline */}
+      <div>
+        <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Timeline</p>
+        <div className="space-y-1.5">
+          {timeline.length === 0 && (
+            <p className="text-xs text-zinc-600 py-3 text-center">No activity recorded yet</p>
+          )}
+          {timeline.map((entry, i) => {
+            const id = `${entry.kind}-${i}`
+            const isOpen = expandedId === id
+            const d = entry.data
+
+            return (
+              <div key={id} className={`rounded-lg border text-xs overflow-hidden ${kindColor[entry.kind]}`}>
+                <button
+                  className="w-full text-left px-3 py-2 flex items-center gap-2"
+                  onClick={() => setExpandedId(isOpen ? null : id)}
+                >
+                  <span>{kindIcon[entry.kind]}</span>
+                  <span className="text-zinc-500 text-[10px]">{kindLabel[entry.kind]}</span>
+                  <span className="flex-1 text-zinc-300 truncate font-mono">
+                    {entry.kind === "session" && `${d.event_type}`}
+                    {entry.kind === "error" && d.error_message?.slice(0, 80)}
+                    {entry.kind === "network" && `${d.method} ${d.path?.slice(0, 60)} → ${d.status_code}`}
+                    {entry.kind === "page_view" && d.pathname}
+                  </span>
+                  <span className="text-zinc-600 text-[10px] whitespace-nowrap">{rel(entry.at)}</span>
+                  <span className="text-zinc-600 ml-1">{isOpen ? "▲" : "▼"}</span>
+                </button>
+
+                {isOpen && (
+                  <div className="px-3 pb-3 space-y-2 border-t border-zinc-700/40 pt-2">
+                    {/* Error detail */}
+                    {entry.kind === "error" && (
+                      <>
+                        <div className="flex gap-2 flex-wrap">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${severityColor(d.severity)}`}>{d.severity}</span>
+                          <span className="text-[10px] bg-zinc-700 text-zinc-400 px-1.5 py-0.5 rounded-full">{d.source}</span>
+                        </div>
+                        <p className="text-zinc-300 font-mono text-[11px] break-words">{d.error_message}</p>
+                        {d.stack_trace && (
+                          <pre className="text-[10px] text-zinc-500 overflow-x-auto whitespace-pre-wrap max-h-32 font-mono bg-zinc-900 rounded p-2">{d.stack_trace}</pre>
+                        )}
+                        {d.context && Object.keys(d.context).length > 0 && (
+                          <div>
+                            <p className="text-[10px] text-zinc-600 mb-1">Context</p>
+                            <pre className="text-[10px] text-zinc-500 font-mono bg-zinc-900 rounded p-2 overflow-x-auto">{JSON.stringify(d.context, null, 2).slice(0, 800)}</pre>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Network detail */}
+                    {entry.kind === "network" && (
+                      <>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                          <span className="text-zinc-600">Method</span><span className="text-zinc-300 font-mono">{d.method}</span>
+                          <span className="text-zinc-600">Status</span><span className={`font-semibold ${statusColor(d.status_code)}`}>{d.status_code ?? "—"}</span>
+                          <span className="text-zinc-600">Latency</span><span className="text-zinc-300">{d.duration_ms != null ? `${d.duration_ms}ms` : "—"}</span>
+                          <span className="text-zinc-600">Path</span><span className="text-zinc-300 font-mono truncate">{d.path}</span>
+                        </div>
+                        {d.metadata?.request_headers && Object.keys(d.metadata.request_headers as object).length > 0 && (
+                          <div>
+                            <p className="text-[10px] text-zinc-600 mb-1">Request Headers</p>
+                            <pre className="text-[10px] text-zinc-500 font-mono bg-zinc-900 rounded p-2 overflow-x-auto max-h-24">{JSON.stringify(d.metadata.request_headers, null, 2)}</pre>
+                          </div>
+                        )}
+                        {d.metadata?.request_body_preview && (
+                          <div>
+                            <p className="text-[10px] text-zinc-600 mb-1">Request Body</p>
+                            <pre className="text-[10px] text-zinc-500 font-mono bg-zinc-900 rounded p-2 overflow-x-auto max-h-24">{d.metadata.request_body_preview as string}</pre>
+                          </div>
+                        )}
+                        {d.metadata?.response_headers && Object.keys(d.metadata.response_headers as object).length > 0 && (
+                          <div>
+                            <p className="text-[10px] text-zinc-600 mb-1">Response Headers</p>
+                            <pre className="text-[10px] text-zinc-500 font-mono bg-zinc-900 rounded p-2 overflow-x-auto max-h-24">{JSON.stringify(d.metadata.response_headers, null, 2)}</pre>
+                          </div>
+                        )}
+                        {d.metadata?.response_preview && (
+                          <div>
+                            <p className="text-[10px] text-zinc-600 mb-1">Response Preview</p>
+                            <pre className="text-[10px] text-zinc-500 font-mono bg-zinc-900 rounded p-2 overflow-x-auto max-h-32 break-words whitespace-pre-wrap">{d.metadata.response_preview as string}</pre>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Session detail */}
+                    {entry.kind === "session" && (
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                        <span className="text-zinc-600">Event</span><span className="text-zinc-300">{d.event_type}</span>
+                        <span className="text-zinc-600">IP</span><span className="text-zinc-300 font-mono">{d.ip_address || "—"}</span>
+                        {d.metadata?.screen && <><span className="text-zinc-600">Screen</span><span className="text-zinc-300">{d.metadata.screen as string}</span></>}
+                        {d.metadata?.timezone && <><span className="text-zinc-600">TZ</span><span className="text-zinc-300">{d.metadata.timezone as string}</span></>}
+                        {d.metadata?.language && <><span className="text-zinc-600">Language</span><span className="text-zinc-300">{d.metadata.language as string}</span></>}
+                      </div>
+                    )}
+
+                    {/* Page view detail */}
+                    {entry.kind === "page_view" && (
+                      <div className="text-[10px] text-zinc-500 font-mono">{d.pathname}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
