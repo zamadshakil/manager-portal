@@ -52,7 +52,8 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
     const outerRef = useRef<HTMLDivElement>(null)
     const [showScrollBadge, setShowScrollBadge] = useState(false)
     const sentinelRef = useRef<HTMLDivElement>(null)
-    const prevMessageCount = useRef(messages.length)
+    const prevMessageCount = useRef(0)
+    const pendingInitialScrollRef = useRef(false)
     // Tracks whether the user is currently near the bottom of the list.
     // Written on every user-initiated scroll; read by isAtBottom() on the handle.
     const isAtBottomRef = useRef(true)
@@ -102,9 +103,13 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
       const isInitialLoad = prevCount === 0
       prevMessageCount.current = messages.length
       const outer = outerRef.current
-      // Always scroll to bottom on first load or when DOM isn't ready yet.
-      if (!outer || isInitialLoad) {
-        scrollToBottom("auto")
+      if (isInitialLoad) {
+        if (!outer) {
+          // SizedList hasn't measured yet — scroll once it reports ready
+          pendingInitialScrollRef.current = true
+        } else {
+          scrollToBottom("auto")
+        }
         setShowScrollBadge(false)
         return
       }
@@ -117,6 +122,14 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
         setShowScrollBadge(true)
       }
     }, [messages.length, scrollToBottom])
+
+    // Called by SizedList once it has a measured height — execute any deferred initial scroll
+    const handleListReady = useCallback(() => {
+      if (pendingInitialScrollRef.current) {
+        pendingInitialScrollRef.current = false
+        requestAnimationFrame(() => scrollToBottom("auto"))
+      }
+    }, [scrollToBottom])
 
     // Infinite scroll sentinel
     useEffect(() => {
@@ -170,6 +183,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
           itemCount={messages.length}
           getItemSize={getItemSize}
           Row={Row}
+          onReady={handleListReady}
           onScrolled={({ scrollOffset, scrollUpdateWasRequested }) => {
             if (scrollUpdateWasRequested) return
             const outer = outerRef.current
@@ -222,11 +236,13 @@ interface SizedListProps {
   getItemSize: (index: number) => number
   Row: React.ComponentType<ListChildComponentProps>
   onScrolled: (info: { scrollOffset: number; scrollUpdateWasRequested: boolean }) => void
+  onReady?: () => void
 }
 
-function SizedList({ listRef, outerRef, itemCount, getItemSize, Row, onScrolled }: SizedListProps) {
+function SizedList({ listRef, outerRef, itemCount, getItemSize, Row, onScrolled, onReady }: SizedListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
+  const onReadyFiredRef = useRef(false)
 
   useEffect(() => {
     const el = containerRef.current
@@ -240,6 +256,14 @@ function SizedList({ listRef, outerRef, itemCount, getItemSize, Row, onScrolled 
     setSize({ width: el.clientWidth, height: el.clientHeight })
     return () => ro.disconnect()
   }, [])
+
+  // Fire onReady once after the list first has a measured height
+  useEffect(() => {
+    if (size.height > 0 && !onReadyFiredRef.current) {
+      onReadyFiredRef.current = true
+      onReady?.()
+    }
+  }, [size.height, onReady])
 
   return (
     <div ref={containerRef} className="absolute inset-0">
