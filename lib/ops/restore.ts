@@ -10,12 +10,32 @@ function getPool(): Pool {
 
 const BATCH_SIZE = 500
 
-interface Manifest {
-  version: number
+interface ManifestV1 {
+  version: 1
   timestamp: string
   tables: string[]
   row_counts: Record<string, number>
   total_rows: number
+}
+
+interface ManifestV2 {
+  version: 2
+  timestamp: string
+  db: {
+    tables: string[]
+    row_counts: Record<string, number>
+    total_rows: number
+  }
+  files: { count: number; size_bytes: number; entries: { key: string; size: number }[] }
+}
+
+type Manifest = ManifestV1 | ManifestV2
+
+function normalisedManifest(m: Manifest): { tables: string[]; dbFilePrefix: string } {
+  if (m.version === 2) {
+    return { tables: m.db.tables ?? [], dbFilePrefix: "db/" }
+  }
+  return { tables: (m as ManifestV1).tables ?? [], dbFilePrefix: "" }
 }
 
 export interface RestoreResult {
@@ -60,6 +80,8 @@ export async function runRestore(key: string): Promise<RestoreResult> {
   if (!manifestRaw) throw new Error("manifest.json not found in backup zip")
   const manifest: Manifest = JSON.parse(Buffer.from(manifestRaw).toString("utf8"))
 
+  const { tables, dbFilePrefix } = normalisedManifest(manifest)
+
   const pool = getPool()
   const client = await pool.connect()
 
@@ -67,13 +89,13 @@ export async function runRestore(key: string): Promise<RestoreResult> {
     await client.query("BEGIN")
     await client.query("SET session_replication_role = replica")
 
-    for (const table of manifest.tables) {
+    for (const table of tables) {
       await client.query(`TRUNCATE public."${table}" CASCADE`)
     }
 
     let totalRowsRestored = 0
-    for (const table of manifest.tables) {
-      const fileKey = `public.${table}.json`
+    for (const table of tables) {
+      const fileKey = `${dbFilePrefix}public.${table}.json`
       const raw = files[fileKey]
       if (!raw) continue
       const rows: Record<string, unknown>[] = JSON.parse(
@@ -109,7 +131,7 @@ export async function runRestore(key: string): Promise<RestoreResult> {
     await client.query("COMMIT")
 
     return {
-      tables_restored: manifest.tables.length,
+      tables_restored: tables.length,
       rows_restored: totalRowsRestored,
       duration_ms: Date.now() - start,
     }
