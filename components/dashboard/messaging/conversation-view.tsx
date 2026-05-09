@@ -48,12 +48,20 @@ export function ConversationView({
     return res.json() as Promise<Message[]>
   }, [conversation.id])
 
-  // Resolve reply_to from a local pool when the DB join returned null
+  // Resolve reply_to (and reply_to.sender) from a local pool when the DB join returned null.
+  // Supabase double-nested joins (sender inside reply_to) can return null even when data
+  // exists — patch from the locally-cached message when that happens.
   const patchReplyTos = useCallback((msgs: Message[], pool: Message[]): Message[] => {
     const byId = new Map(pool.map((m) => [m.id, m]))
-    return msgs.map((m) =>
-      m.reply_to_id && !m.reply_to ? { ...m, reply_to: byId.get(m.reply_to_id) ?? null } : m
-    )
+    return msgs.map((m) => {
+      if (!m.reply_to_id) return m
+      if (!m.reply_to) return { ...m, reply_to: byId.get(m.reply_to_id) ?? null }
+      if (!m.reply_to.sender) {
+        const poolMsg = byId.get(m.reply_to_id)
+        if (poolMsg?.sender) return { ...m, reply_to: { ...m.reply_to, sender: poolMsg.sender } }
+      }
+      return m
+    })
   }, [])
 
   // Initial load
@@ -146,11 +154,19 @@ export function ConversationView({
     setMessages((prev) =>
       prev.map((m) => {
         if (m.id !== partial.id) return m
-        // Preserve joined fields (reply_to, sender, reactions) that raw DB rows omit
+        // Preserve joined fields (reply_to, sender, reactions) that raw DB rows omit.
+        // Supabase nested joins can return null for reply_to even when the data exists;
+        // never overwrite a populated reply_to with null from the server.
+        const incomingReplyTo = partial.reply_to
+        const mergedReplyTo = incomingReplyTo !== undefined
+          ? (incomingReplyTo
+              ? { ...incomingReplyTo, sender: incomingReplyTo.sender ?? m.reply_to?.sender }
+              : m.reply_to)   // server returned null → keep what we have
+          : m.reply_to
         return {
           ...m,
           ...partial,
-          reply_to: partial.reply_to !== undefined ? partial.reply_to : m.reply_to,
+          reply_to: mergedReplyTo,
           sender:   partial.sender   !== undefined ? partial.sender   : m.sender,
           reactions: partial.reactions !== undefined ? partial.reactions : m.reactions,
         }
@@ -202,6 +218,12 @@ export function ConversationView({
       id: tmpId,
       conversation_id: conversation.id,
       sender_id: currentUserId,
+      sender: {
+        id: currentUserId,
+        full_name: currentUserName || null,
+        email: "",
+        avatar_url: null,
+      },
       content: payload.content ?? null,
       type: payload.type as Message["type"],
       media_url: payload.media_url ?? null,
@@ -214,7 +236,7 @@ export function ConversationView({
       status: "sending",
     }
     setMessages((prev) => [...prev, optimistic])
-    setTimeout(() => listRef.current?.scrollToBottom("auto"), 50)
+    requestAnimationFrame(() => listRef.current?.scrollToBottom("auto"))
 
     try {
       const res = await fetch("/api/messaging/messages", {

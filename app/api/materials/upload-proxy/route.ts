@@ -32,15 +32,15 @@ interface MaterialUploadRow {
 }
 
 /**
- * POST /api/materials/upload-proxy
+ * POST /api/materials/upload-proxy?materialId=<id>
  *
- * Accepts the archive file from the browser as multipart FormData and uploads
- * it to R2 server-side, bypassing the browser-to-R2 direct upload that
- * requires CORS headers on the bucket.
+ * Accepts the raw archive bytes as the request body (Content-Type = MIME of
+ * the archive) and uploads them to R2 server-side.  Using a raw body avoids
+ * multipart FormData parsing, which struggles with very large files in the
+ * Next.js App Router Node.js runtime.
  *
- * FormData fields:
+ * Query params:
  *   materialId  – the placeholder row ID created by /api/materials/presign
- *   file        – the archive blob
  *
  * On success it advances archive_status → "processing" and fires the
  * background extraction job, exactly as /api/materials/register did before.
@@ -53,23 +53,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let formData: FormData
-  try {
-    formData = await req.formData()
-  } catch {
-    return NextResponse.json({ error: "Invalid form data" }, { status: 400 })
-  }
-
-  const materialId = formData.get("materialId") as string | null
-  const file = formData.get("file") as File | null
+  const { searchParams } = new URL(req.url)
+  const materialId = searchParams.get("materialId")
 
   if (!materialId) {
-    return NextResponse.json({ error: "materialId is required." }, { status: 400 })
+    return NextResponse.json({ error: "materialId query param is required." }, { status: 400 })
   }
-  if (!file || file.size === 0) {
-    return NextResponse.json({ error: "No file provided." }, { status: 400 })
+
+  const contentType = req.headers.get("Content-Type") || "application/zip"
+
+  let buffer: Buffer
+  try {
+    buffer = Buffer.from(await req.arrayBuffer())
+  } catch (err: any) {
+    console.error("[upload-proxy] body read failed:", err?.message)
+    return NextResponse.json({ error: "Failed to read request body." }, { status: 400 })
   }
-  if (file.size > MAX_MATERIAL_UPLOAD_SIZE_BYTES) {
+
+  if (buffer.length === 0) {
+    return NextResponse.json({ error: "No file data received." }, { status: 400 })
+  }
+  if (buffer.length > MAX_MATERIAL_UPLOAD_SIZE_BYTES) {
     return NextResponse.json(
       { error: `File exceeds the ${Math.round(MAX_MATERIAL_UPLOAD_SIZE_BYTES / 1024 / 1024)} MB limit.` },
       { status: 413 },
@@ -96,7 +100,7 @@ export async function POST(req: Request) {
   }
 
   const resolvedMimeType =
-    normalizeMaterialMimeType(file.name, row.file_type ?? file.type ?? null) ?? row.file_type ?? file.type
+    normalizeMaterialMimeType(row.blob_pathname, row.file_type ?? contentType ?? null) ?? row.file_type ?? contentType
   if (!resolvedMimeType) {
     return NextResponse.json({ error: "Unsupported file type." }, { status: 415 })
   }
@@ -104,7 +108,6 @@ export async function POST(req: Request) {
   const isArchive = ARCHIVE_MIMES.has(resolvedMimeType)
 
   try {
-    const buffer = Buffer.from(await file.arrayBuffer())
     await putRaw(row.blob_pathname, buffer, resolvedMimeType)
   } catch (err: unknown) {
     console.error("[upload-proxy] R2 upload failed:", err instanceof Error ? err.message : err)
@@ -124,7 +127,7 @@ export async function POST(req: Request) {
     entityId: materialId,
     metadata: {
       mime: resolvedMimeType,
-      size: file.size,
+      size: buffer.length,
       archive: isArchive,
       upload_path: "upload_proxy",
     },
@@ -145,7 +148,7 @@ export async function POST(req: Request) {
     metadata: {
       tags: tagList,
       mime: resolvedMimeType,
-      size: file.size,
+      size: buffer.length,
       archive: isArchive,
     },
   }).then((result) => {
