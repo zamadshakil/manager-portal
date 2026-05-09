@@ -113,6 +113,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
         setShowScrollBadge(false)
         return
       }
+      if (!outer) return
       const distanceFromBottom = outer.scrollHeight - outer.scrollTop - outer.clientHeight
       const isNewMessage = messages.length > prevCount
       if (!isNewMessage || distanceFromBottom < 150) {
