@@ -3,6 +3,13 @@ import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { verifyToken } from "@/lib/ops/auth"
 
+async function opsLogout() {
+  "use server"
+  const jar = await cookies()
+  jar.delete("ops_session")
+  redirect("/ops/login")
+}
+
 export default async function OpsLayout({ children }: { children: React.ReactNode }) {
   const h = await headers()
   const pathname = h.get("x-pathname") ?? ""
@@ -40,7 +47,7 @@ export default async function OpsLayout({ children }: { children: React.ReactNod
               </div>
               <span className="font-semibold text-sm text-white">Ops Console</span>
             </div>
-            <form action="/api/ops/logout" method="POST">
+            <form action={opsLogout}>
               <button
                 type="submit"
                 className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors px-3 py-1.5 rounded-md hover:bg-zinc-800"

@@ -101,6 +101,7 @@ const nextConfig = {
     return [
       { source: "/:path*", headers: security },
       { source: "/dashboard/:path*", headers: crossOriginIsolation },
+      { source: "/ops/:path*", headers: crossOriginIsolation },
       { source: "/system-monitor/:path*", headers: crossOriginIsolation },
       // Stricter Referrer-Policy for auth pages so tokens never leak via Referer
       { source: "/auth/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
