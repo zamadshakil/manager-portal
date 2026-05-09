@@ -61,13 +61,28 @@ export function MessagingLayout({
     }
   }, []) // no deps — uses selectedIdRef instead of selectedId
 
-  // Debounced refresh — coalesces rapid-fire Realtime events (e.g. a burst of
-  // incoming messages) into a single fetch 400 ms after the last trigger.
+  // Debounced refresh — coalesces rapid-fire Realtime events into a single
+  // fetch 150 ms after the last trigger (reduced from 400 ms for snappier sidebar).
   const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scheduleRefresh = useCallback(() => {
     if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
-    refreshDebounceRef.current = setTimeout(() => void fetchConversations(), 400)
+    refreshDebounceRef.current = setTimeout(() => void fetchConversations(), 150)
   }, [fetchConversations])
+
+  // Instantly update a conversation's last-message preview without a network
+  // round-trip. Called by ConversationView on every send + every received message.
+  const handleLastMessage = useCallback((convId: string, message: import("@/lib/types").Message) => {
+    setConversations((prev) => {
+      const idx = prev.findIndex((c) => c.id === convId)
+      if (idx === -1) return prev
+      const updated = { ...prev[idx], last_message: message }
+      // Re-sort: move this conversation to the top (most-recent first)
+      const next = [...prev]
+      next.splice(idx, 1)
+      next.unshift(updated)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     fetchConversations(true).finally(() => setLoading(false))
@@ -183,6 +198,7 @@ export function MessagingLayout({
           currentUserName={currentUserName}
           profiles={profiles}
           onConversationUpdate={(patch) => handleConversationUpdate(selectedConversation.id, patch)}
+          onLastMessage={handleLastMessage}
         />
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">

@@ -20,6 +20,7 @@ interface ConversationViewProps {
   currentUserName: string
   profiles: Profile[]
   onConversationUpdate?: (patch: Partial<Pick<Conversation, "name" | "avatar_url">>) => void
+  onLastMessage?: (conversationId: string, message: Message) => void
 }
 
 function mergeReplyMessage(
@@ -42,7 +43,11 @@ export function ConversationView({
   currentUserName,
   profiles,
   onConversationUpdate,
+  onLastMessage,
 }: ConversationViewProps) {
+  // Stable ref so callbacks never need to re-close over onLastMessage
+  const onLastMessageRef = useRef(onLastMessage)
+  useEffect(() => { onLastMessageRef.current = onLastMessage }, [onLastMessage])
   // Compute validity flag BEFORE hooks — used as a conditional render guard
   // at the bottom of the function.  We cannot do an early return here because
   // all hooks below must be called unconditionally (Rules of Hooks).
@@ -163,6 +168,8 @@ export function ConversationView({
       const replyTo = mergeReplyMessage(msg.reply_to, localReplyMsg)
       return [...prev, { ...msg, reply_to: replyTo }]
     })
+    // Instantly update sidebar preview for this conversation
+    onLastMessageRef.current?.(msg.conversation_id, msg)
   }, [])
 
   const handleMessageUpdated = useCallback((partial: Partial<Message> & { id: string }) => {
@@ -257,6 +264,8 @@ export function ConversationView({
     }
     setMessages((prev) => [...prev, optimistic])
     requestAnimationFrame(() => listRef.current?.scrollToBottom("auto"))
+    // Optimistically update the sidebar last-message preview right away
+    onLastMessageRef.current?.(conversation.id, optimistic)
 
     try {
       const res = await fetch("/api/messaging/messages", {
@@ -270,6 +279,8 @@ export function ConversationView({
       })
       if (!res.ok) throw new Error(await res.text())
       const real: Message = await res.json()
+      // Update sidebar with the confirmed server message (correct id + timestamp)
+      onLastMessageRef.current?.(conversation.id, real)
       setMessages((prev) => {
         const optimisticMsg = prev.find((m) => m.id === tmpId)
         // Merge reply_to: prefer API data but fall back to the locally-known
