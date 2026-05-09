@@ -73,12 +73,12 @@ const nextConfig = {
         value: [
           "default-src 'self'",
           isDev
-            ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-            : "script-src 'self' 'unsafe-inline'",
+            ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com"
+            : "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com",
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "img-src 'self' blob: data: https://*.r2.dev",
           "font-src 'self' https://fonts.gstatic.com https://frontend-cdn.perplexity.ai",
-          `connect-src 'self' ${supabaseOrigins.join(" ")} https://*.r2.dev`,
+          `connect-src 'self' ${supabaseOrigins.join(" ")} https://*.r2.dev https://cloudflareinsights.com`,
           "frame-src 'none'",
           "frame-ancestors 'none'",
           "object-src 'none'",
