@@ -141,11 +141,11 @@ export function RoleTransitionModal({ user, teams, isOpen, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div 
-        className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-in zoom-in-95 duration-200"
+        className="flex w-full max-w-lg max-h-[90vh] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-in zoom-in-95 duration-200"
         role="dialog"
         aria-modal="true"
       >
-        <header className="border-b border-border bg-muted/30 px-6 py-4">
+        <header className="shrink-0 border-b border-border bg-muted/30 px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Shield className="h-5 w-5" />
@@ -159,7 +159,7 @@ export function RoleTransitionModal({ user, teams, isOpen, onClose }: Props) {
           </div>
         </header>
 
-        <div className="p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {/* Role Selector */}
           <div className="grid grid-cols-3 gap-3">
             {(["member", "manager", "main_admin"] as UserRole[]).map((role) => (
@@ -293,7 +293,7 @@ export function RoleTransitionModal({ user, teams, isOpen, onClose }: Props) {
           )}
         </div>
 
-        <footer className="flex items-center justify-end gap-3 border-t border-border bg-muted/30 px-6 py-4">
+        <footer className="shrink-0 flex items-center justify-end gap-3 border-t border-border bg-muted/30 px-6 py-4">
           <button
             type="button"
             onClick={onClose}
