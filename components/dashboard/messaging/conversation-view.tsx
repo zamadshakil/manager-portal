@@ -366,6 +366,7 @@ export function ConversationView({
   const isGroup = conversation.type === "group"
   const otherMember = isGroup ? null : conversation.members?.find((m) => m.user_id !== currentUserId)
   const otherMemberDeleted = !isGroup && !!(otherMember?.profile as any)?.deleted_at
+  const isOtherOnline = usePresence(isGroup ? null : (otherMember?.user_id ?? null))
   const headerName = isGroup
     ? (conversation.name ?? "Group")
     : (otherMember?.profile?.full_name ?? otherMember?.profile?.email ?? "DM")
@@ -395,7 +396,7 @@ export function ConversationView({
               <AvatarImage src={headerAvatarSrc} alt={headerName} />
               <AvatarFallback className="text-[11px] font-semibold">{headerInitials}</AvatarFallback>
             </Avatar>
-            {!isGroup && !otherMemberDeleted && (
+            {!isGroup && !otherMemberDeleted && isOtherOnline && (
               <span
                 className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-background"
                 aria-label="Online"
@@ -412,10 +413,12 @@ export function ConversationView({
             <p className="text-[14px] font-semibold leading-tight">{headerName}</p>
             {isGroup ? (
               <p className="text-[11px] text-muted-foreground">{memberCount} member{memberCount !== 1 ? "s" : ""}</p>
-            ) : !otherMemberDeleted ? (
+            ) : otherMemberDeleted ? (
+              <p className="text-[11px] text-muted-foreground italic">User removed</p>
+            ) : isOtherOnline ? (
               <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">Active now</p>
             ) : (
-              <p className="text-[11px] text-muted-foreground italic">User removed</p>
+              <p className="text-[11px] text-muted-foreground">Offline</p>
             )}
           </div>
         </div>
@@ -497,6 +500,47 @@ export function ConversationView({
       )}
     </div>
   )
+}
+
+// ── Presence hook ────────────────────────────────────────────────────────────
+// Polls GET /api/messaging/presence every 30 s (matching the heartbeat TTL).
+// Returns false while loading so we never flash "online" incorrectly.
+function usePresence(userId: string | null): boolean {
+  const [online, setOnline] = useState(false)
+
+  useEffect(() => {
+    if (!userId) {
+      setOnline(false)
+      return
+    }
+
+    let active = true
+
+    async function check() {
+      if (!active) return
+      try {
+        const res = await fetch(
+          `/api/messaging/presence?userIds=${encodeURIComponent(userId!)}`,
+          { cache: "no-store" },
+        )
+        if (!res.ok || !active) return
+        const map: Record<string, boolean> = await res.json()
+        if (active) setOnline(map[userId!] === true)
+      } catch {
+        // silent — keep last known state
+      }
+    }
+
+    check()
+    const timer = setInterval(check, 30_000)
+
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [userId])
+
+  return online
 }
 
 function MessageSkeleton({ isOwn, width }: { isOwn: boolean; width: string }) {
