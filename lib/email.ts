@@ -28,14 +28,15 @@ export async function sendWelcomeEmail({ email, fullName, role, password }: Welc
   const senderEmail = process.env.BREVO_SENDER_EMAIL
   const senderName = process.env.BREVO_SENDER_NAME || "AI Manager Portal"
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? ""
+  const companyAddress = process.env.COMPANY_ADDRESS || "Johar Town, Lahore"
 
   if (!apiKey || !senderEmail) {
     console.warn("[email] BREVO_API_KEY or BREVO_SENDER_EMAIL is missing. Skipping email dispatch.")
     return false
   }
 
-  const roleText = 
-    role === "main_admin" 
+  const roleText =
+    role === "main_admin"
       ? "As a Main Admin, you have full control over the platform, team management, and organization settings."
       : role === "manager"
       ? "As a Manager, you can create tasks, manage team members, and define AI validation rules."
@@ -49,131 +50,79 @@ export async function sendWelcomeEmail({ email, fullName, role, password }: Welc
   const safeEmail = escapeHtml(email)
   const safeRoleText = escapeHtml(roleText)
   const safeSiteUrl = encodeURI(siteUrl)
+  const safeAddress = escapeHtml(companyAddress)
+  const loginUrl = `${safeSiteUrl}/auth/login`
 
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <style>
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f3f4f6;
-            margin: 0;
-            padding: 40px 20px;
-            color: #1f2937;
-          }
-          .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #ffffff;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            overflow: hidden;
-          }
-          .header {
-            background-color: #111827;
-            padding: 30px;
-            text-align: center;
-          }
-          .header h1 {
-            color: #ffffff;
-            margin: 0;
-            font-size: 24px;
-            font-weight: 600;
-          }
-          .content {
-            padding: 40px 30px;
-          }
-          .content h2 {
-            margin-top: 0;
-            font-size: 20px;
-            color: #111827;
-          }
-          .content p {
-            line-height: 1.6;
-            margin-bottom: 20px;
-            color: #4b5563;
-          }
-          .credentials {
-            background-color: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 20px;
-            margin: 30px 0;
-          }
-          .credentials p {
-            margin: 8px 0;
-            font-size: 15px;
-          }
-          .credentials strong {
-            color: #111827;
-          }
-          .password {
-            font-family: monospace;
-            background-color: #e5e7eb;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-weight: 600;
-          }
-          .button-container {
-            text-align: center;
-            margin-top: 40px;
-            margin-bottom: 20px;
-          }
-          .button {
-            display: inline-block;
-            background-color: #2563eb;
-            color: #ffffff !important;
-            text-decoration: none;
-            padding: 14px 28px;
-            border-radius: 6px;
-            font-weight: 600;
-            font-size: 16px;
-            transition: background-color 0.2s;
-          }
-          .button:hover {
-            background-color: #1d4ed8;
-          }
-          .footer {
-            background-color: #f9fafb;
-            padding: 20px;
-            text-align: center;
-            font-size: 13px;
-            color: #6b7280;
-            border-top: 1px solid #e5e7eb;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>Welcome to ${safeSenderName}</h1>
-          </div>
-          <div class="content">
-            <h2>Hi ${safeFullName},</h2>
-            <p>Your account has been successfully created. We're excited to have you on board!</p>
-            
-            <p>${safeRoleText}</p>
+  const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation">
+    <tr>
+      <td align="center" style="padding:40px 20px;background-color:#f3f4f6;">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" role="presentation" style="max-width:600px;width:100%;">
+          <tr>
+            <td style="background-color:#111827;padding:28px 32px;text-align:center;border-radius:8px 8px 0 0;">
+              <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;font-family:Arial,Helvetica,sans-serif;letter-spacing:-0.3px;">${safeSenderName}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#ffffff;padding:36px 32px 32px;">
+              <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#111827;font-family:Arial,Helvetica,sans-serif;">Hi ${safeFullName},</h1>
+              <p style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#4b5563;font-family:Arial,Helvetica,sans-serif;">Your account on <strong style="color:#111827;">${safeSenderName}</strong> has been created. Welcome aboard!</p>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.65;color:#4b5563;font-family:Arial,Helvetica,sans-serif;">${safeRoleText}</p>
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:24px;">
+                <tr>
+                  <td style="padding:16px 20px;">
+                    <p style="margin:0 0 8px;font-size:14px;color:#4b5563;font-family:Arial,Helvetica,sans-serif;"><strong style="color:#111827;">Login email:</strong>&nbsp;${safeEmail}</p>
+                    <p style="margin:0;font-size:13px;line-height:1.5;color:#6b7280;font-family:Arial,Helvetica,sans-serif;">Your temporary password has been shared with you separately via a secure channel. You will be required to change it on first login.</p>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 6px;text-align:center;font-family:Arial,Helvetica,sans-serif;">
+                <a href="${loginUrl}" style="color:#2563eb;font-size:16px;font-weight:700;text-decoration:underline;font-family:Arial,Helvetica,sans-serif;">Log in to your account &#8594;</a>
+              </p>
+              <p style="margin:0 0 28px;text-align:center;font-size:12px;color:#9ca3af;word-break:break-all;font-family:Arial,Helvetica,sans-serif;">${loginUrl}</p>
+              <p style="margin:0;font-size:13px;color:#6b7280;font-family:Arial,Helvetica,sans-serif;">If you have questions, reach out to your administrator.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;border-radius:0 0 8px 8px;">
+              <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;font-family:Arial,Helvetica,sans-serif;">&copy; ${new Date().getFullYear()} ${safeSenderName}. All rights reserved.</p>
+              <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;font-family:Arial,Helvetica,sans-serif;">${safeAddress}</p>
+              <p style="margin:0;font-size:11px;color:#d1d5db;font-family:Arial,Helvetica,sans-serif;">This is a transactional email sent because an administrator created your account.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
 
-            <div class="credentials">
-              <p><strong>Login Email:</strong> ${safeEmail}</p>
-              <p style="font-size: 13px; margin-top: 15px; color: #6b7280;">Your temporary password has been shared with you separately via a secure channel. You will be required to change your password upon your first login.</p>
-            </div>
+  const textContent = `Welcome to ${senderName}
 
-            <div class="button-container">
-              <a href="${safeSiteUrl}/auth/login" class="button">Log In to Your Account</a>
-            </div>
-            
-            <p style="font-size: 14px;">If you have any questions, feel free to contact your administrator.</p>
-          </div>
-          <div class="footer">
-            &copy; ${new Date().getFullYear()} ${safeSenderName}. All rights reserved.
-          </div>
-        </div>
-      </body>
-    </html>
-  `
+Hi ${fullName},
+
+Your account on ${senderName} has been created. Welcome aboard!
+
+${roleText}
+
+Login email: ${email}
+Your temporary password has been shared with you separately via a secure channel. You will be required to change it on first login.
+
+Log in here: ${siteUrl}/auth/login
+
+If you have questions, reach out to your administrator.
+
+---
+${senderName}
+${companyAddress}
+This is a transactional email.`
 
   try {
     const res = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -181,14 +130,21 @@ export async function sendWelcomeEmail({ email, fullName, role, password }: Welc
       headers: {
         "api-key": apiKey,
         "content-type": "application/json",
-        "accept": "application/json"
+        "accept": "application/json",
       },
       body: JSON.stringify({
         sender: { email: senderEmail, name: senderName },
+        replyTo: { email: senderEmail, name: senderName },
         to: [{ email, name: fullName }],
-        subject: `Welcome to ${senderName} - Your Account Details`,
-        htmlContent
-      })
+        subject: `Your ${senderName} account is ready`,
+        htmlContent,
+        textContent,
+        headers: {
+          "List-Unsubscribe": `<mailto:${senderEmail}>`,
+          "X-Priority": "3",
+          "Precedence": "bulk",
+        },
+      }),
     })
 
     if (!res.ok) {
@@ -232,6 +188,7 @@ export async function sendEmailChangeVerification({
   const apiKey = process.env.BREVO_API_KEY
   const senderEmail = process.env.BREVO_SENDER_EMAIL
   const senderName = process.env.BREVO_SENDER_NAME || "AI Manager Portal"
+  const companyAddress = process.env.COMPANY_ADDRESS || "Johar Town, Lahore"
 
   if (!apiKey || !senderEmail) {
     console.warn("[email] BREVO_API_KEY or BREVO_SENDER_EMAIL is missing. Skipping email-change verification dispatch.")
@@ -243,6 +200,7 @@ export async function sendEmailChangeVerification({
   const safeNewEmail = escapeHtml(newEmail)
   const safeOldEmail = escapeHtml(oldEmail)
   const safeVerifyLink = encodeURI(verifyLink)
+  const safeAddress = escapeHtml(companyAddress)
   const safeExpires = escapeHtml(
     new Date(expiresAt).toLocaleString("en-US", {
       dateStyle: "medium",
@@ -250,132 +208,79 @@ export async function sendEmailChangeVerification({
     }),
   )
 
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <style>
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f3f4f6;
-            margin: 0;
-            padding: 40px 20px;
-            color: #1f2937;
-          }
-          .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #ffffff;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            overflow: hidden;
-          }
-          .header {
-            background-color: #111827;
-            padding: 30px;
-            text-align: center;
-          }
-          .header h1 {
-            color: #ffffff;
-            margin: 0;
-            font-size: 22px;
-            font-weight: 600;
-          }
-          .content { padding: 36px 30px; }
-          .content h2 {
-            margin-top: 0;
-            font-size: 19px;
-            color: #111827;
-          }
-          .content p {
-            line-height: 1.6;
-            margin-bottom: 18px;
-            color: #4b5563;
-            font-size: 14.5px;
-          }
-          .change-card {
-            background-color: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 18px 20px;
-            margin: 24px 0;
-            font-size: 14px;
-          }
-          .change-card .row { margin: 4px 0; }
-          .change-card .label {
-            display: inline-block;
-            min-width: 90px;
-            color: #6b7280;
-            font-weight: 500;
-          }
-          .change-card .value {
-            color: #111827;
-            font-weight: 600;
-            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-          }
-          .button-container {
-            text-align: center;
-            margin-top: 36px;
-            margin-bottom: 12px;
-          }
-          .button {
-            display: inline-block;
-            background-color: #2563eb;
-            color: #ffffff !important;
-            text-decoration: none;
-            padding: 13px 28px;
-            border-radius: 6px;
-            font-weight: 600;
-            font-size: 15px;
-          }
-          .meta {
-            font-size: 12.5px;
-            color: #6b7280;
-            margin-top: 18px;
-            line-height: 1.55;
-          }
-          .footer {
-            background-color: #f9fafb;
-            padding: 18px;
-            text-align: center;
-            font-size: 12.5px;
-            color: #6b7280;
-            border-top: 1px solid #e5e7eb;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>Confirm your new email</h1>
-          </div>
-          <div class="content">
-            <h2>Hi ${safeFullName},</h2>
-            <p>An administrator on <strong>${safeSenderName}</strong> requested to change the email address on your account. To keep your account secure, you must confirm the change from this new mailbox.</p>
+  const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation">
+    <tr>
+      <td align="center" style="padding:40px 20px;background-color:#f3f4f6;">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" role="presentation" style="max-width:600px;width:100%;">
+          <tr>
+            <td style="background-color:#111827;padding:28px 32px;text-align:center;border-radius:8px 8px 0 0;">
+              <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;font-family:Arial,Helvetica,sans-serif;letter-spacing:-0.3px;">${safeSenderName}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#ffffff;padding:36px 32px 32px;">
+              <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#111827;font-family:Arial,Helvetica,sans-serif;">Hi ${safeFullName},</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.65;color:#4b5563;font-family:Arial,Helvetica,sans-serif;">An administrator on <strong style="color:#111827;">${safeSenderName}</strong> requested to change the email address on your account. Confirm the change by clicking the link below.</p>
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:24px;">
+                <tr>
+                  <td style="padding:16px 20px;">
+                    <p style="margin:0 0 8px;font-size:14px;color:#4b5563;font-family:Arial,Helvetica,sans-serif;"><strong style="color:#6b7280;font-weight:500;">Previous email:</strong>&nbsp;<span style="color:#111827;font-family:'Courier New',Courier,monospace;font-weight:600;">${safeOldEmail}</span></p>
+                    <p style="margin:0;font-size:14px;color:#4b5563;font-family:Arial,Helvetica,sans-serif;"><strong style="color:#6b7280;font-weight:500;">New email:</strong>&nbsp;<span style="color:#111827;font-family:'Courier New',Courier,monospace;font-weight:600;">${safeNewEmail}</span></p>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 6px;text-align:center;font-family:Arial,Helvetica,sans-serif;">
+                <a href="${safeVerifyLink}" style="color:#2563eb;font-size:16px;font-weight:700;text-decoration:underline;font-family:Arial,Helvetica,sans-serif;">Confirm email change &#8594;</a>
+              </p>
+              <p style="margin:0 0 24px;text-align:center;font-size:12px;color:#9ca3af;word-break:break-all;font-family:Arial,Helvetica,sans-serif;">${safeVerifyLink}</p>
+              <p style="margin:0 0 10px;font-size:13px;color:#6b7280;font-family:Arial,Helvetica,sans-serif;">This link expires on <strong style="color:#111827;">${safeExpires}</strong>. Until confirmed, your account will continue to use <strong style="color:#111827;">${safeOldEmail}</strong> for sign-in.</p>
+              <p style="margin:0;font-size:13px;color:#6b7280;font-family:Arial,Helvetica,sans-serif;">If you did not expect this change, ignore this email or contact your administrator immediately.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;border-radius:0 0 8px 8px;">
+              <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;font-family:Arial,Helvetica,sans-serif;">&copy; ${new Date().getFullYear()} ${safeSenderName}. All rights reserved.</p>
+              <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;font-family:Arial,Helvetica,sans-serif;">${safeAddress}</p>
+              <p style="margin:0;font-size:11px;color:#d1d5db;font-family:Arial,Helvetica,sans-serif;">This is a transactional security email.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
 
-            <div class="change-card">
-              <div class="row"><span class="label">Previous email:</span> <span class="value">${safeOldEmail}</span></div>
-              <div class="row"><span class="label">New email:</span> <span class="value">${safeNewEmail}</span></div>
-            </div>
+  const textContent = `Email Change Confirmation \u2014 ${senderName}
 
-            <div class="button-container">
-              <a href="${safeVerifyLink}" class="button">Confirm email change</a>
-            </div>
+Hi ${fullName},
 
-            <p class="meta">If the button does not work, copy and paste this link into your browser:<br /><a href="${safeVerifyLink}" style="color:#2563eb;word-break:break-all;">${safeVerifyLink}</a></p>
+An administrator on ${senderName} requested to change the email on your account.
 
-            <p class="meta">This link expires on <strong>${safeExpires}</strong>. Until you confirm, your account will continue to use <strong>${safeOldEmail}</strong> for sign-in and notifications.</p>
+Previous email: ${oldEmail}
+New email: ${newEmail}
 
-            <p class="meta">If you did not expect this change, please ignore this email or contact your administrator immediately.</p>
-          </div>
-          <div class="footer">
-            &copy; ${new Date().getFullYear()} ${safeSenderName}. All rights reserved.
-          </div>
-        </div>
-      </body>
-    </html>
-  `
+To confirm this change, visit:
+${verifyLink}
+
+This link expires on ${new Date(expiresAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}.
+
+Until confirmed, your account will continue to use ${oldEmail} for sign-in.
+
+If you did not expect this, ignore this email or contact your administrator immediately.
+
+---
+${senderName}
+${companyAddress}
+This is a transactional security email.`
 
   try {
     const res = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -387,9 +292,16 @@ export async function sendEmailChangeVerification({
       },
       body: JSON.stringify({
         sender: { email: senderEmail, name: senderName },
+        replyTo: { email: senderEmail, name: senderName },
         to: [{ email: newEmail, name: fullName }],
-        subject: `Confirm your new email for ${senderName}`,
+        subject: `Confirm your new email \u2014 ${senderName}`,
         htmlContent,
+        textContent,
+        headers: {
+          "List-Unsubscribe": `<mailto:${senderEmail}>`,
+          "X-Priority": "3",
+          "Precedence": "bulk",
+        },
       }),
     })
 
@@ -410,108 +322,72 @@ export async function sendPasswordResetEmail(email: string, resetLink: string) {
   const apiKey = process.env.BREVO_API_KEY
   const senderEmail = process.env.BREVO_SENDER_EMAIL
   const senderName = process.env.BREVO_SENDER_NAME || "AI Manager Portal"
+  const companyAddress = process.env.COMPANY_ADDRESS || "Johar Town, Lahore"
 
   if (!apiKey || !senderEmail) {
     console.warn("[email] BREVO_API_KEY or BREVO_SENDER_EMAIL is missing. Skipping email dispatch.")
     return false
   }
 
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <style>
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f3f4f6;
-            margin: 0;
-            padding: 40px 20px;
-            color: #1f2937;
-          }
-          .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #ffffff;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            overflow: hidden;
-          }
-          .header {
-            background-color: #111827;
-            padding: 30px;
-            text-align: center;
-          }
-          .header h1 {
-            color: #ffffff;
-            margin: 0;
-            font-size: 24px;
-            font-weight: 600;
-          }
-          .content {
-            padding: 40px 30px;
-          }
-          .content h2 {
-            margin-top: 0;
-            font-size: 20px;
-            color: #111827;
-          }
-          .content p {
-            line-height: 1.6;
-            margin-bottom: 20px;
-            color: #4b5563;
-          }
-          .button-container {
-            text-align: center;
-            margin-top: 40px;
-            margin-bottom: 20px;
-          }
-          .button {
-            display: inline-block;
-            background-color: #2563eb;
-            color: #ffffff !important;
-            text-decoration: none;
-            padding: 14px 28px;
-            border-radius: 6px;
-            font-weight: 600;
-            font-size: 16px;
-            transition: background-color 0.2s;
-          }
-          .button:hover {
-            background-color: #1d4ed8;
-          }
-          .footer {
-            background-color: #f9fafb;
-            padding: 20px;
-            text-align: center;
-            font-size: 13px;
-            color: #6b7280;
-            border-top: 1px solid #e5e7eb;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>${escapeHtml(senderName)}</h1>
-          </div>
-          <div class="content">
-            <h2>Password Reset Request</h2>
-            <p>We received a request to reset your password. Click the button below to choose a new password.</p>
-            
-            <div class="button-container">
-              <a href="${encodeURI(resetLink)}" class="button">Reset Password</a>
-            </div>
-            
-            <p style="font-size: 14px; margin-top: 30px;">If you didn't request a password reset, you can safely ignore this email. The link will expire in 1 hour.</p>
-          </div>
-          <div class="footer">
-            &copy; ${new Date().getFullYear()} ${escapeHtml(senderName)}. All rights reserved.
-          </div>
-        </div>
-      </body>
-    </html>
-  `
+  const safeSenderName = escapeHtml(senderName)
+  const safeResetLink = encodeURI(resetLink)
+  const safeAddress = escapeHtml(companyAddress)
+
+  const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation">
+    <tr>
+      <td align="center" style="padding:40px 20px;background-color:#f3f4f6;">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" role="presentation" style="max-width:600px;width:100%;">
+          <tr>
+            <td style="background-color:#111827;padding:28px 32px;text-align:center;border-radius:8px 8px 0 0;">
+              <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;font-family:Arial,Helvetica,sans-serif;letter-spacing:-0.3px;">${safeSenderName}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#ffffff;padding:36px 32px 32px;">
+              <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#111827;font-family:Arial,Helvetica,sans-serif;">Password Reset Request</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.65;color:#4b5563;font-family:Arial,Helvetica,sans-serif;">We received a request to reset the password for your <strong style="color:#111827;">${safeSenderName}</strong> account. Click the link below to choose a new password.</p>
+              <p style="margin:0 0 6px;text-align:center;font-family:Arial,Helvetica,sans-serif;">
+                <a href="${safeResetLink}" style="color:#2563eb;font-size:16px;font-weight:700;text-decoration:underline;font-family:Arial,Helvetica,sans-serif;">Reset your password &#8594;</a>
+              </p>
+              <p style="margin:0 0 28px;text-align:center;font-size:12px;color:#9ca3af;word-break:break-all;font-family:Arial,Helvetica,sans-serif;">${safeResetLink}</p>
+              <p style="margin:0;font-size:13px;color:#6b7280;font-family:Arial,Helvetica,sans-serif;">This link expires in 1 hour. If you did not request a password reset, you can safely ignore this email — your account remains secure.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;border-radius:0 0 8px 8px;">
+              <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;font-family:Arial,Helvetica,sans-serif;">&copy; ${new Date().getFullYear()} ${safeSenderName}. All rights reserved.</p>
+              <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;font-family:Arial,Helvetica,sans-serif;">${safeAddress}</p>
+              <p style="margin:0;font-size:11px;color:#d1d5db;font-family:Arial,Helvetica,sans-serif;">This is a transactional security email.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+
+  const textContent = `Password Reset \u2014 ${senderName}
+
+We received a request to reset the password for your ${senderName} account.
+
+To reset your password, visit:
+${resetLink}
+
+This link expires in 1 hour. If you did not request a password reset, you can safely ignore this email.
+
+---
+${senderName}
+${companyAddress}
+This is a transactional security email.`
 
   try {
     const res = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -519,14 +395,21 @@ export async function sendPasswordResetEmail(email: string, resetLink: string) {
       headers: {
         "api-key": apiKey,
         "content-type": "application/json",
-        "accept": "application/json"
+        "accept": "application/json",
       },
       body: JSON.stringify({
         sender: { email: senderEmail, name: senderName },
+        replyTo: { email: senderEmail, name: senderName },
         to: [{ email }],
-        subject: `Password Reset Request - ${senderName}`,
-        htmlContent
-      })
+        subject: `Reset your ${senderName} password`,
+        htmlContent,
+        textContent,
+        headers: {
+          "List-Unsubscribe": `<mailto:${senderEmail}>`,
+          "X-Priority": "3",
+          "Precedence": "bulk",
+        },
+      }),
     })
 
     if (!res.ok) {
