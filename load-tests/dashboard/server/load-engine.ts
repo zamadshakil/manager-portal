@@ -10,6 +10,7 @@ export interface TestConfig {
   rampUp: number
   rateCap: number
   thinkTime: number
+  tokens?: string[]
 }
 
 export interface MetricsSnapshot {
@@ -134,12 +135,17 @@ function buildSnapshot(state: LiveState): MetricsSnapshot {
 }
 
 async function runVU(
-  _vuId: number,
+  vuId: number,
   config: TestConfig,
   state: LiveState,
   bucket: TokenBucket | null,
 ): Promise<void> {
   state.activeVUs += 1
+
+  const vuHeaders: Record<string, string> = { ...config.headers }
+  if (config.tokens && config.tokens.length > 0) {
+    vuHeaders['Authorization'] = `Bearer ${config.tokens[vuId % config.tokens.length]}`
+  }
 
   try {
     while (state.running && Date.now() < state.endTime) {
@@ -154,7 +160,7 @@ async function runVU(
 
         const init: RequestInit = {
           method: config.method,
-          headers: config.headers,
+          headers: vuHeaders,
           signal: controller.signal as any,
         }
         if (

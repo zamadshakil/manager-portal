@@ -8,6 +8,7 @@ export interface TestConfig {
   rampUp: number
   rateCap: number
   thinkTime: number
+  tokens?: string[]
 }
 
 export interface Threshold {

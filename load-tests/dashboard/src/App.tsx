@@ -53,13 +53,32 @@ const DEFAULT_THRESHOLDS: Threshold[] = [
   },
 ]
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return payload.exp * 1000 < Date.now()
+  } catch {
+    return true
+  }
+}
+
+function loadStoredAuth(): AuthState {
+  try {
+    const raw = localStorage.getItem('lt_auth')
+    if (!raw) return { token: null, email: null, loading: false, error: null }
+    const { token, email } = JSON.parse(raw)
+    if (!token || isTokenExpired(token)) {
+      localStorage.removeItem('lt_auth')
+      return { token: null, email: null, loading: false, error: null }
+    }
+    return { token, email, loading: false, error: null }
+  } catch {
+    return { token: null, email: null, loading: false, error: null }
+  }
+}
+
 export default function App() {
-  const [auth, setAuth] = useState<AuthState>({
-    token: null,
-    email: null,
-    loading: false,
-    error: null,
-  })
+  const [auth, setAuth] = useState<AuthState>(loadStoredAuth)
   const [config, setConfig] = useState<TestConfig>(DEFAULT_CONFIG)
   const [thresholds, setThresholds] =
     useState<Threshold[]>(DEFAULT_THRESHOLDS)
@@ -69,7 +88,16 @@ export default function App() {
     useState<MetricsSnapshot | null>(null)
   const [result, setResult] = useState<TestResult | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
+  const [tokenPool, setTokenPool] = useState<string>('')
   const esRef = useRef<EventSource | null>(null)
+
+  useEffect(() => {
+    if (auth.token) {
+      localStorage.setItem('lt_auth', JSON.stringify({ token: auth.token, email: auth.email }))
+    } else {
+      localStorage.removeItem('lt_auth')
+    }
+  }, [auth.token, auth.email])
 
   const connectSSE = useCallback(() => {
     esRef.current?.close()
@@ -107,13 +135,19 @@ export default function App() {
     setResult(null)
     setTestStatus('running')
 
+    const extraTokens = tokenPool
+      .split('\n')
+      .map((t) => t.trim())
+      .filter(Boolean)
+    const allTokens = [auth.token!, ...extraTokens]
+
     const configWithAuth: TestConfig = {
       ...config,
       headers: {
         ...config.headers,
-        Authorization: `Bearer ${auth.token}`,
         'Content-Type': 'application/json',
       },
+      tokens: allTokens,
     }
 
     try {
@@ -187,6 +221,31 @@ export default function App() {
                 thresholds={thresholds}
                 setThresholds={setThresholds}
               />
+
+              {/* Token pool */}
+              <div className="rounded-xl border border-gray-800 bg-gray-900 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-gray-300">Multi-User Token Pool</h3>
+                  <span className="text-[10px] text-gray-500">
+                    {tokenPool.split('\n').filter(t => t.trim()).length + 1} token{tokenPool.split('\n').filter(t => t.trim()).length === 0 ? '' : 's'}
+                  </span>
+                </div>
+                <p className="text-[10px] text-gray-500 leading-relaxed">
+                  Paste extra Bearer tokens (one per line) to distribute VUs across different accounts. Your login token is always included.
+                </p>
+                <textarea
+                  rows={4}
+                  placeholder="eyJhbGci...token2&#10;eyJhbGci...token3"
+                  value={tokenPool}
+                  onChange={(e) => setTokenPool(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-2 text-[10px] font-mono text-gray-300 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+                />
+                {tokenPool.trim() && (
+                  <p className="text-[10px] text-indigo-400">
+                    ✓ VUs will rotate across {tokenPool.split('\n').filter(t => t.trim()).length + 1} tokens — each user hits their own rate limit
+                  </p>
+                )}
+              </div>
 
               {/* Action buttons */}
               <div className="space-y-2 pb-4">
@@ -291,7 +350,7 @@ function ResultCard({ result }: { result: TestResult }) {
         <Stat label="Avg" value={`${result.avgLatency}ms`} />
         <Stat label="2xx" value={result.status2xx.toLocaleString()} color="text-green-400" />
         <Stat label="429" value={result.status429.toLocaleString()} color="text-yellow-400" />
-        <Stat label="4xx" value={(result.status4xx - result.status429).toLocaleString()} color="text-orange-400" />
+        <Stat label="4xx" value={result.status4xx.toLocaleString()} color="text-orange-400" />
         <Stat label="5xx" value={result.status5xx.toLocaleString()} color="text-red-400" />
       </div>
 
