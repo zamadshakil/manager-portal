@@ -8,14 +8,13 @@ import {
   MAX_MATERIAL_UPLOAD_SIZE_BYTES,
   normalizeMaterialMimeType,
 } from "@/lib/types"
-import type { UserRole } from "@/lib/types"
 
 export function MaterialUploader({
-  role,
+  canTargetGlobal,
   teams,
   currentTeamId,
 }: {
-  role: UserRole
+  canTargetGlobal: boolean
   teams: { id: string; name: string }[]
   currentTeamId: string | null
 }) {
@@ -31,7 +30,7 @@ export function MaterialUploader({
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadStage, setUploadStage] = useState<"" | "presigning" | "uploading">("")
 
-  const effectiveTarget = role === "manager" && currentTeamId ? currentTeamId : target
+  const effectiveTarget = !canTargetGlobal && currentTeamId ? currentTeamId : target
   const resolvedMimeType = file ? normalizeMaterialMimeType(file.name, file.type) : null
   const isOversized = file !== null && file.size > MAX_MATERIAL_UPLOAD_SIZE_BYTES
   const usesLargeFilePath = file !== null && file.size > MAX_FILE_SIZE_BYTES
@@ -217,7 +216,7 @@ export function MaterialUploader({
           />
         </label>
 
-        {role === "main_admin" ? (
+        {canTargetGlobal ? (
           <label className="block">
             <span className="text-[12px] font-semibold text-muted-foreground">Target Audience</span>
             <select

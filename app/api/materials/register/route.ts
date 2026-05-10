@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
-import { requireRole } from "@/lib/auth"
+import { requireProfile } from "@/lib/auth"
+import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { createClient } from "@/lib/supabase/server"
 import { processArchiveBackground } from "@/lib/archive-processor"
 import { revalidatePath } from "next/cache"
@@ -17,9 +18,9 @@ export const dynamic = "force-dynamic"
  *   { materialId }
  */
 export async function POST(req: Request) {
-  let profile: Awaited<ReturnType<typeof requireRole>>
+  let profile: Awaited<ReturnType<typeof requireProfile>>
   try {
-    profile = await requireRole(["main_admin", "manager"])
+    profile = await requireProfile()
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
@@ -51,6 +52,18 @@ export async function POST(req: Request) {
   // Only the original author (or main_admin) may complete the upload
   if (profile.role !== "main_admin" && row.author_id !== profile.id) {
     return NextResponse.json({ error: "Not authorized." }, { status: 403 })
+  }
+
+  try {
+    await assertCapability(profile, CAPABILITIES.MATERIALS_CREATE, {
+      team_id: row.team_id,
+      is_global: row.team_id === null,
+    })
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return NextResponse.json({ error: "You do not have permission to finish this upload." }, { status: 403 })
+    }
+    throw err
   }
 
   // Guard against double-registration

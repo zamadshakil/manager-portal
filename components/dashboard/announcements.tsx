@@ -16,10 +16,12 @@ interface AnnouncementsProps {
   rows: Announcement[]
   emptyHint?: string
   canDelete?: boolean
+  canDeleteGlobal?: boolean
+  currentTeamId?: string | null
   showAll?: boolean
 }
 
-export function Announcements({ rows, emptyHint, canDelete = false }: AnnouncementsProps) {
+export function Announcements({ rows, emptyHint, canDelete = false, canDeleteGlobal = false, currentTeamId }: AnnouncementsProps) {
   return (
     <section
       aria-labelledby="announcements-heading"
@@ -64,7 +66,7 @@ export function Announcements({ rows, emptyHint, canDelete = false }: Announceme
                 <span className="ml-auto text-[11px] text-muted-foreground">
                   {formatRelative(a.created_at)}
                 </span>
-                {canDelete ? (
+                {canDelete && (a.team_id === currentTeamId || (a.team_id === null && canDeleteGlobal)) ? (
                   <DeleteIconButton
                     id={a.id}
                     action={deleteAnnouncement}

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
-import { requireRole } from "@/lib/auth"
+import { requireProfile } from "@/lib/auth"
+import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { createClient } from "@/lib/supabase/server"
 import { presignPut } from "@/lib/r2"
 import { logActivity } from "@/lib/activity"
@@ -35,9 +36,9 @@ export async function POST(req: Request) {
   })
   if (limited) return limited
 
-  let profile: Awaited<ReturnType<typeof requireRole>>
+  let profile: Awaited<ReturnType<typeof requireProfile>>
   try {
-    profile = await requireRole(["main_admin", "manager"])
+    profile = await requireProfile()
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
@@ -102,14 +103,25 @@ export async function POST(req: Request) {
     }
     teamId = null
   } else if (target) {
-    if (profile.role === "manager" && target !== profile.team_id) {
-      return NextResponse.json(
-        { error: "Managers can only post to their own team." },
-        { status: 403 },
-      )
+    try {
+      await assertCapability(profile, CAPABILITIES.MATERIALS_CREATE, {
+        team_id: target,
+        is_global: false,
+      })
+    } catch (err) {
+      if (err instanceof AccessDeniedError) {
+        return NextResponse.json(
+          { error: "You do not have permission to upload materials for this team." },
+          { status: 403 },
+        )
+      }
+      throw err
     }
     teamId = target
   } else {
+    if (!profile.team_id) {
+      return NextResponse.json({ error: "No team assigned." }, { status: 403 })
+    }
     teamId = profile.team_id
   }
 

@@ -7,6 +7,7 @@ import type { TaskWithStats } from "@/lib/data"
 interface TaskListProps {
   tasks: TaskWithStats[]
   emptyHint?: string
+  canDelete?: boolean
 }
 
 function dueLabel(dueAt: string | null): { label: string; tone: "default" | "warn" | "danger" } {
@@ -18,7 +19,7 @@ function dueLabel(dueAt: string | null): { label: string; tone: "default" | "war
   return { label: `Due ${formatRelative(dueAt)}`, tone: "default" }
 }
 
-export function TaskList({ tasks, emptyHint }: TaskListProps) {
+export function TaskList({ tasks, emptyHint, canDelete = false }: TaskListProps) {
   if (tasks.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-card p-8 text-center shadow-card">
@@ -86,7 +87,7 @@ export function TaskList({ tasks, emptyHint }: TaskListProps) {
                     <CheckCircle2 className="h-3 w-3 text-primary" aria-hidden="true" />
                     {completion}%
                   </span>
-                  <DeleteTaskButton taskId={t.id} iconOnly />
+                  {canDelete ? <DeleteTaskButton taskId={t.id} iconOnly /> : null}
                 </div>
               </div>
               {t.total_assigned > 0 ? (

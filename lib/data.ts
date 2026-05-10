@@ -115,6 +115,13 @@ export async function listSubmissions(
 ): Promise<{ rows: Submission[]; nextCursor?: string }> {
   const supabase = await createClient()
   const limit = Math.min(opts.limit ?? 50, 100)
+  const canScopeToTeam =
+    profile.role === "main_admin" ||
+    (profile.role === "manager" && profile.team_id !== null) ||
+    (profile.role === "member" && profile.team_id !== null && (
+      await hasCapability(profile, CAPABILITIES.SUBMISSIONS_UPDATE) ||
+      await hasCapability(profile, CAPABILITIES.SUBMISSIONS_DELETE)
+    ))
 
   let q = supabase
     .from("submissions")
@@ -122,8 +129,10 @@ export async function listSubmissions(
     .order("created_at", { ascending: false })
     .limit(limit + 1)
 
-  if (profile.role === "manager" && profile.team_id) q = q.eq("team_id", profile.team_id)
-  if (profile.role === "member") q = q.eq("uploader_id", profile.id)
+  if (profile.role !== "main_admin") {
+    if (canScopeToTeam && profile.team_id) q = q.eq("team_id", profile.team_id)
+    else q = q.eq("uploader_id", profile.id)
+  }
   if (opts.status) q = q.eq("status", opts.status)
   if (opts.cursor) q = q.lt("created_at", opts.cursor)
 
@@ -315,7 +324,7 @@ export async function listTeamMembers(profile: Profile): Promise<Profile[]> {
   // - main_admin sees all members (no filter)
   // - manager sees only their team's members
   // - members should not access this directly
-  if (profile.role === "manager" && profile.team_id) {
+  if (profile.role !== "main_admin" && profile.team_id) {
     q = q.eq("team_id", profile.team_id)
   } else if (profile.role !== "main_admin") {
     return [] // Members don't have access to member listings
@@ -475,14 +484,22 @@ export interface TaskWithStats extends Task {
  * progress. Members never call this — they get assignments via `listMyTasks`.
  */
 export async function listTasksForManager(profile: Profile): Promise<TaskWithStats[]> {
-  if (profile.role === "member") return []
+  const canReadTasks =
+    await hasCapability(profile, CAPABILITIES.TASKS_READ) ||
+    await hasCapability(profile, CAPABILITIES.TASKS_CREATE) ||
+    await hasCapability(profile, CAPABILITIES.TASKS_ASSIGN) ||
+    await hasCapability(profile, CAPABILITIES.TASKS_DELETE)
+  if (!canReadTasks) return []
   const supabase = await createClient()
 
   let q = supabase
     .from("tasks")
     .select("*, task_assignments(status)")
     .order("created_at", { ascending: false })
-  if (profile.role === "manager" && profile.team_id) q = q.eq("team_id", profile.team_id)
+  if (profile.role !== "main_admin") {
+    if (!profile.team_id) return []
+    q = q.eq("team_id", profile.team_id)
+  }
 
   const { data } = await q
   if (!data) return []

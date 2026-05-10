@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { put, del } from "@/lib/r2"
 import { createClient } from "@/lib/supabase/server"
-import { requireRole } from "@/lib/auth"
+import { requireProfile } from "@/lib/auth"
+import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { logActivity } from "@/lib/activity"
 import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES, ARCHIVE_MIME_TYPES } from "@/lib/types"
 import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
@@ -18,7 +19,7 @@ const MetaSchema = z.object({
 })
 
 export async function createMaterial(formData: FormData): Promise<{ ok: boolean; error?: string }> {
-  const profile = await requireRole(["main_admin", "manager"])
+  const profile = await requireProfile()
   if (!profile.team_id && profile.role !== "main_admin") {
     return { ok: false, error: "No team assigned." }
   }
@@ -55,9 +56,16 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
     }
     teamId = null
   } else {
-    // If manager, enforce their own team_id
-    if (profile.role === "manager" && parsed.data.target !== profile.team_id) {
-      return { ok: false, error: "Managers can only post to their own team." }
+    try {
+      await assertCapability(profile, CAPABILITIES.MATERIALS_CREATE, {
+        team_id: parsed.data.target,
+        is_global: false,
+      })
+    } catch (err) {
+      if (err instanceof AccessDeniedError) {
+        return { ok: false, error: "You do not have permission to upload materials for this team." }
+      }
+      throw err
     }
     teamId = parsed.data.target
   }
@@ -155,7 +163,7 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
 }
 
 export async function deleteMaterial(formData: FormData): Promise<{ ok: boolean; error?: string }> {
-  const profile = await requireRole(["main_admin", "manager"])
+  const profile = await requireProfile()
   const id = String(formData.get("id") || "")
   const supabase = await createClient()
   const { data: row } = await supabase
@@ -165,9 +173,20 @@ export async function deleteMaterial(formData: FormData): Promise<{ ok: boolean;
     .single()
   if (!row) return { ok: false, error: "Not found" }
 
-  // Managers can only delete materials from their own team.
-  if (profile.role === "manager" && row.team_id !== profile.team_id) {
-    return { ok: false, error: "Not authorized to delete this material." }
+  if (row.team_id === null && profile.role !== "main_admin") {
+    return { ok: false, error: "Only Main Admin can delete global materials." }
+  }
+
+  try {
+    await assertCapability(profile, CAPABILITIES.MATERIALS_DELETE, {
+      team_id: row.team_id,
+      is_global: row.team_id === null,
+    })
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return { ok: false, error: "You do not have permission to delete this material." }
+    }
+    throw err
   }
 
   const { error } = await supabase.from("materials").delete().eq("id", id)

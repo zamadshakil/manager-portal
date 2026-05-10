@@ -66,12 +66,20 @@ export function ConversationView({
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([])
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const replyToRef = useRef<Message | null>(null)
+  // Tracks the most recent visible message without being a useCallback dep.
+  // Used by handleReact to optimistically bump the sidebar without needing
+  // `messages` in the callback's dependency array.
+  const lastMessageRef = useRef<Message | null>(null)
   const [infoOpen, setInfoOpen] = useState(false)
   const listRef = useRef<MessageListHandle>(null)
 
   useEffect(() => {
     replyToRef.current = replyTo
   }, [replyTo])
+
+  useEffect(() => {
+    if (messages.length > 0) lastMessageRef.current = messages[messages.length - 1]
+  }, [messages])
 
   const fetchMessages = useCallback(async (before?: string) => {
     const params = new URLSearchParams({ conv: conversation.id, limit: "50" })
@@ -345,7 +353,12 @@ export function ConversationView({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ emoji }),
     })
-  }, [])
+    // Reactions count as conversation activity — keep this conversation at
+    // the top of the sidebar just like sending a message does.
+    if (lastMessageRef.current) {
+      onLastMessageRef.current?.(conversation.id, lastMessageRef.current)
+    }
+  }, [conversation.id])
 
   const handleEdit = useCallback((msg: Message, newContent: string) => {
     if (!newContent.trim() || newContent === msg.content) return

@@ -8,10 +8,10 @@ import { roleLabel } from "@/lib/auth-shared"
 import type { UserRole } from "@/lib/types"
 import { getDashboardNavGroups } from "./navigation"
 
-export function DashboardSidebar({ role }: { role: UserRole }) {
+export function DashboardSidebar({ role, allowedHrefs }: { role: UserRole; allowedHrefs?: string[] }) {
   const pathname = usePathname()
   const router = useRouter()
-  const navGroups = getDashboardNavGroups(role)
+  const navGroups = getDashboardNavGroups(role, allowedHrefs)
 
   // Track which routes we've already warmed in this session so a single
   // hover or focus only triggers one prefetch per route per page.

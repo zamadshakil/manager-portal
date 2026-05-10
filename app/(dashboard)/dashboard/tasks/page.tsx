@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation"
 import { requireProfile } from "@/lib/auth"
+import { CAPABILITIES, getAccessContext } from "@/lib/permissions"
 import {
   listTasksForManager,
   listMyTasks,
@@ -13,8 +15,18 @@ import { MyTasks } from "@/components/dashboard/my-tasks"
 
 export default async function TasksPage() {
   const profile = await requireProfile()
+  const ctx = await getAccessContext(profile)
+  const canReadTasks = ctx.has(CAPABILITIES.TASKS_READ)
+  const canCreateTasks = ctx.has(CAPABILITIES.TASKS_CREATE)
+  const canAssignTasks = ctx.has(CAPABILITIES.TASKS_ASSIGN)
+  const canDeleteTasks = ctx.has(CAPABILITIES.TASKS_DELETE)
+  const canManageTasks = canCreateTasks || canAssignTasks || canDeleteTasks
 
-  if (profile.role === "member") {
+  if (!canReadTasks && !canManageTasks) {
+    redirect("/dashboard")
+  }
+
+  if (!canManageTasks) {
     const myTasks = await listMyTasks(profile)
     const open = myTasks.filter((t) => t.status === "assigned")
     const closed = myTasks.filter((t) => t.status !== "assigned")
@@ -40,15 +52,13 @@ export default async function TasksPage() {
     )
   }
 
-  // Manager + main_admin view: composer + list of team tasks.
   const [tasks, teams, members, rules] = await Promise.all([
     listTasksForManager(profile),
     profile.role === "main_admin" ? listTeams() : Promise.resolve([]),
     listTeamMembers(profile),
-    listRules(profile),
+    canCreateTasks ? listRules(profile) : Promise.resolve([]),
   ])
 
-  // For managers, expose only their own team in the composer.
   const composerTeams =
     profile.role === "main_admin"
       ? teams
@@ -73,18 +83,20 @@ export default async function TasksPage() {
         description="Create briefs, assign them to your team, and track AI-validated submissions."
       />
 
-      <TaskComposer
-        teams={composerTeams}
-        defaultTeamId={profile.team_id}
-        members={members}
-        rules={rules}
-      />
+      {canCreateTasks ? (
+        <TaskComposer
+          teams={composerTeams}
+          defaultTeamId={profile.team_id}
+          members={members}
+          rules={rules}
+        />
+      ) : null}
 
       <section>
         <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-3">
           All tasks
         </h2>
-        <TaskList tasks={tasks} />
+        <TaskList tasks={tasks} canDelete={canDeleteTasks} />
       </section>
     </div>
   )

@@ -19,12 +19,12 @@ const PRIMARY_MOBILE_ROUTES = [
   "/dashboard/smart-ai",
 ] as const
 
-export function MobileNav({ role }: { role: UserRole }) {
+export function MobileNav({ role, allowedHrefs }: { role: UserRole; allowedHrefs?: string[] }) {
   const pathname = usePathname()
   const router = useRouter()
   const [moreOpen, setMoreOpen] = useState(false)
-  const navItems = useMemo(() => getDashboardNavItems(role), [role])
-  const navGroups = useMemo(() => getDashboardNavGroups(role), [role])
+  const navItems = useMemo(() => getDashboardNavItems(role, allowedHrefs), [allowedHrefs, role])
+  const navGroups = useMemo(() => getDashboardNavGroups(role, allowedHrefs), [allowedHrefs, role])
   const primaryItems = useMemo(
     () => PRIMARY_MOBILE_ROUTES
       .map((href) => navItems.find((item) => item.href === href))

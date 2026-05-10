@@ -6,6 +6,7 @@ import { put, del } from "@/lib/r2"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireProfile } from "@/lib/auth"
+import { AccessDeniedError, assertCapability, CAPABILITIES, hasScopedCapability } from "@/lib/permissions"
 import { logActivity } from "@/lib/activity"
 import { uploadLimiter } from "@/lib/redis"
 import { clearPipelineLock } from "@/lib/llm/pipeline"
@@ -275,8 +276,10 @@ export async function retrySubmission(formData: FormData): Promise<ActionResult>
     !((data.metadata as any)?.rules_evaluated > 0)
 
   const canRetry =
-    profile.role === "main_admin" ||
-    (profile.role === "manager" && profile.team_id === data.team_id) ||
+    await hasScopedCapability(profile, CAPABILITIES.SUBMISSIONS_UPDATE, {
+      team_id: data.team_id,
+      owner_id: data.uploader_id,
+    }) ||
     (profile.id === data.uploader_id && isSystemFailure)
   if (!canRetry) return { ok: false, error: "Not authorized." }
 
@@ -320,11 +323,16 @@ export async function deleteSubmission(formData: FormData): Promise<ActionResult
     .single()
   if (!sub) return { ok: false, error: "Submission not found." }
 
-  if (
-    profile.role !== "main_admin" &&
-    !(profile.role === "manager" && profile.team_id === sub.team_id)
-  ) {
-    return { ok: false, error: "Only managers can delete submissions." }
+  try {
+    await assertCapability(profile, CAPABILITIES.SUBMISSIONS_DELETE, {
+      team_id: sub.team_id,
+      is_global: false,
+    })
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return { ok: false, error: "You do not have permission to delete this submission." }
+    }
+    throw err
   }
 
   const { error } = await supabase.from("submissions").delete().eq("id", sub.id)
@@ -385,10 +393,11 @@ export async function bulkDeleteSubmissions(formData: FormData): Promise<ActionR
   const blobUrls: string[] = []
 
   for (const sub of subs) {
-    const canDelete =
-      profile.role === "main_admin" ||
-      (profile.role === "manager" && profile.team_id === sub.team_id)
-      
+    const canDelete = await hasScopedCapability(profile, CAPABILITIES.SUBMISSIONS_DELETE, {
+      team_id: sub.team_id,
+      is_global: false,
+    })
+
     if (canDelete) {
       allowedIds.push(sub.id)
       if (sub.blob_url) blobUrls.push(sub.blob_url)

@@ -8,9 +8,11 @@ interface MaterialsProps {
   rows: Material[]
   emptyHint?: string
   canDelete?: boolean
+  canDeleteGlobal?: boolean
+  currentTeamId?: string | null
 }
 
-export function Materials({ rows, emptyHint, canDelete = false }: MaterialsProps) {
+export function Materials({ rows, emptyHint, canDelete = false, canDeleteGlobal = false, currentTeamId }: MaterialsProps) {
   return (
     <section
       aria-labelledby="materials-heading"
@@ -88,7 +90,7 @@ export function Materials({ rows, emptyHint, canDelete = false }: MaterialsProps
                   >
                     <Download className="h-4 w-4" aria-hidden="true" />
                   </a>
-                  {canDelete ? (
+                  {canDelete && (m.team_id === currentTeamId || (m.team_id === null && canDeleteGlobal)) ? (
                     <DeleteIconButton
                       id={m.id}
                       action={deleteMaterial}

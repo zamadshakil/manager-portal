@@ -137,15 +137,18 @@ export const dashboardNavGroups: DashboardNavGroup[] = [
   },
 ]
 
-export function getDashboardNavGroups(role: UserRole): DashboardNavGroup[] {
+export function getDashboardNavGroups(role: UserRole, allowedHrefs?: string[]): DashboardNavGroup[] {
+  const allowedHrefSet = allowedHrefs ? new Set(allowedHrefs) : null
   return dashboardNavGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => item.roles.includes(role)),
+      items: group.items.filter((item) =>
+        allowedHrefSet ? allowedHrefSet.has(item.href) : item.roles.includes(role),
+      ),
     }))
     .filter((group) => group.items.length > 0)
 }
 
-export function getDashboardNavItems(role: UserRole): DashboardNavItem[] {
-  return getDashboardNavGroups(role).flatMap((group) => group.items)
+export function getDashboardNavItems(role: UserRole, allowedHrefs?: string[]): DashboardNavItem[] {
+  return getDashboardNavGroups(role, allowedHrefs).flatMap((group) => group.items)
 }

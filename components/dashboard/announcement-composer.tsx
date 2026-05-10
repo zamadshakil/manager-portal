@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation"
 import { Megaphone, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { createAnnouncement } from "@/app/actions/announcements"
-import type { UserRole } from "@/lib/types"
 
 const PRIORITIES = [
   { id: "low", label: "Low" },
@@ -15,11 +14,11 @@ const PRIORITIES = [
 ] as const
 
 export function AnnouncementComposer({
-  role,
+  canTargetGlobal,
   teams,
   currentTeamId,
 }: {
-  role: UserRole
+  canTargetGlobal: boolean
   teams: { id: string; name: string }[]
   currentTeamId: string | null
 }) {
@@ -40,8 +39,7 @@ export function AnnouncementComposer({
     fd.set("body", body.trim())
     fd.set("priority", priority)
     
-    // For managers, force their own team id
-    fd.set("target", role === "manager" && currentTeamId ? currentTeamId : target)
+    fd.set("target", !canTargetGlobal && currentTeamId ? currentTeamId : target)
     if (expiresAt) {
       fd.set("expiresAt", expiresAt)
     }
@@ -137,7 +135,7 @@ export function AnnouncementComposer({
             ))}
           </div>
 
-          {role === "main_admin" ? (
+          {canTargetGlobal ? (
             <label className="flex items-center gap-2 text-[12px] font-semibold text-muted-foreground ml-2">
               Audience:
               <select

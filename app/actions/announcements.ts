@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
-import { requireRole } from "@/lib/auth"
+import { requireProfile } from "@/lib/auth"
+import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { logActivity } from "@/lib/activity"
 import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
 
@@ -21,7 +22,7 @@ export interface ActionResult {
 }
 
 export async function createAnnouncement(formData: FormData): Promise<ActionResult> {
-  const profile = await requireRole(["main_admin", "manager"])
+  const profile = await requireProfile()
   const parsed = Schema.safeParse({
     title: formData.get("title") || "",
     body: formData.get("body") || "",
@@ -38,9 +39,16 @@ export async function createAnnouncement(formData: FormData): Promise<ActionResu
     }
     teamId = null
   } else {
-    // If manager, enforce their own team_id
-    if (profile.role === "manager" && parsed.data.target !== profile.team_id) {
-      return { ok: false, error: "Managers can only post to their own team." }
+    try {
+      await assertCapability(profile, CAPABILITIES.ANNOUNCEMENTS_CREATE, {
+        team_id: parsed.data.target,
+        is_global: false,
+      })
+    } catch (err) {
+      if (err instanceof AccessDeniedError) {
+        return { ok: false, error: "You do not have permission to post announcements for this team." }
+      }
+      throw err
     }
     teamId = parsed.data.target
   }
@@ -87,15 +95,26 @@ export async function createAnnouncement(formData: FormData): Promise<ActionResu
 }
 
 export async function deleteAnnouncement(formData: FormData): Promise<ActionResult> {
-  const profile = await requireRole(["main_admin", "manager"])
+  const profile = await requireProfile()
   const id = String(formData.get("id") || "")
   const supabase = await createClient()
   const { data: row } = await supabase.from("announcements").select("id, team_id").eq("id", id).single()
   if (!row) return { ok: false, error: "Not found" }
 
-  // Managers can only delete announcements from their own team.
-  if (profile.role === "manager" && row.team_id !== profile.team_id) {
-    return { ok: false, error: "Not authorized to delete this announcement." }
+  if (row.team_id === null && profile.role !== "main_admin") {
+    return { ok: false, error: "Only Main Admin can delete global announcements." }
+  }
+
+  try {
+    await assertCapability(profile, CAPABILITIES.ANNOUNCEMENTS_DELETE, {
+      team_id: row.team_id,
+      is_global: row.team_id === null,
+    })
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return { ok: false, error: "You do not have permission to delete this announcement." }
+    }
+    throw err
   }
 
   const { error } = await supabase.from("announcements").delete().eq("id", id)

@@ -2,6 +2,7 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { ArrowLeft, ExternalLink, Sparkles } from "lucide-react"
 import { requireProfile } from "@/lib/auth"
+import { CAPABILITIES, getAccessContext } from "@/lib/permissions"
 import { createClient } from "@/lib/supabase/server"
 import { StatusBadge } from "@/components/dashboard/status-badge"
 import { SubmissionActions } from "@/components/dashboard/submission-actions"
@@ -16,6 +17,7 @@ interface PageProps {
 
 export default async function SubmissionDetail({ params, searchParams }: PageProps) {
   const profile = await requireProfile()
+  const ctx = await getAccessContext(profile)
   const { id } = await params
   const { fromStatus } = await searchParams
   const supabase = await createClient()
@@ -44,14 +46,12 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
   const isSystemFailure =
     (submission.status === "failed" || submission.status === "needs_review") &&
     !((submission.metadata as any)?.rules_evaluated > 0)
+  const scope = { team_id: submission.team_id, owner_id: submission.uploader_id }
 
   const canRetry =
-    profile.role === "main_admin" ||
-    (profile.role === "manager" && profile.team_id === submission.team_id) ||
+    ctx.hasScoped(CAPABILITIES.SUBMISSIONS_UPDATE, scope) ||
     (profile.id === submission.uploader_id && isSystemFailure)
-  const canDelete =
-    profile.role === "main_admin" ||
-    (profile.role === "manager" && profile.team_id === submission.team_id)
+  const canDelete = ctx.hasScoped(CAPABILITIES.SUBMISSIONS_DELETE, scope)
 
   const flags = submission.flags ?? []
 

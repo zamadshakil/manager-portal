@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { requireRole, canManageTeam } from "@/lib/auth"
+import { requireProfile } from "@/lib/auth"
+import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { logActivity } from "@/lib/activity"
 import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
 
@@ -59,7 +60,7 @@ const CreateTaskSchema = z.object({
  * caller's role has been verified.
  */
 export async function createTask(formData: FormData): Promise<TaskActionResult> {
-  const profile = await requireRole(["main_admin", "manager"])
+  const profile = await requireProfile()
 
   // Collect rule_ids from the form — multiple checkboxes named "rule_ids".
   const rawRuleIds = formData.getAll("rule_ids").map((v) => String(v)).filter(Boolean)
@@ -88,8 +89,16 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
   }
 
-  if (!canManageTeam(profile, parsed.data.team_id)) {
-    return { ok: false, error: "You can only create tasks for your own team." }
+  try {
+    await assertCapability(profile, CAPABILITIES.TASKS_CREATE, {
+      team_id: parsed.data.team_id,
+      is_global: false,
+    })
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return { ok: false, error: "You do not have permission to create tasks for this team." }
+    }
+    throw err
   }
 
   const supabase = await createClient()
@@ -203,7 +212,7 @@ const AssignSchema = z.object({
  * team or when a manager wants to add specific people later.
  */
 export async function assignTask(formData: FormData): Promise<TaskActionResult> {
-  const profile = await requireRole(["main_admin", "manager"])
+  const profile = await requireProfile()
   const parsed = AssignSchema.safeParse({
     task_id: formData.get("task_id"),
     mode: formData.get("mode") ?? "all",
@@ -217,8 +226,17 @@ export async function assignTask(formData: FormData): Promise<TaskActionResult> 
     .eq("id", parsed.data.task_id)
     .maybeSingle()
   if (!task) return { ok: false, error: "Task not found." }
-  if (!canManageTeam(profile, task.team_id)) {
-    return { ok: false, error: "Not authorised for this task's team." }
+
+  try {
+    await assertCapability(profile, CAPABILITIES.TASKS_ASSIGN, {
+      team_id: task.team_id,
+      is_global: false,
+    })
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return { ok: false, error: "You do not have permission to assign this task." }
+    }
+    throw err
   }
 
   const admin = createAdminClient()
@@ -272,7 +290,7 @@ export async function assignTask(formData: FormData): Promise<TaskActionResult> 
 const DeleteSchema = z.object({ id: z.string().uuid() })
 
 export async function deleteTask(formData: FormData): Promise<TaskActionResult> {
-  const profile = await requireRole(["main_admin", "manager"])
+  const profile = await requireProfile()
   const parsed = DeleteSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: "Invalid id" }
 
@@ -283,8 +301,17 @@ export async function deleteTask(formData: FormData): Promise<TaskActionResult> 
     .eq("id", parsed.data.id)
     .maybeSingle()
   if (!task) return { ok: false, error: "Task not found." }
-  if (!canManageTeam(profile, task.team_id)) {
-    return { ok: false, error: "Not authorised." }
+
+  try {
+    await assertCapability(profile, CAPABILITIES.TASKS_DELETE, {
+      team_id: task.team_id,
+      is_global: false,
+    })
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return { ok: false, error: "You do not have permission to delete this task." }
+    }
+    throw err
   }
 
   const { error } = await supabase.from("tasks").delete().eq("id", task.id)

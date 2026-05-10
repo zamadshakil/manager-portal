@@ -12,17 +12,12 @@ interface TopBarProps {
   email: string
   role: UserRole
   avatarUrl?: string | null
+  primaryAction: { href: string; label: string }
 }
 
-export function TopBar({ name, email, role, avatarUrl }: TopBarProps) {
+export function TopBar({ name, email, role, avatarUrl, primaryAction }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
-  const primaryAction =
-    role === "member"
-      ? { href: "/dashboard/tasks", label: "Open tasks" }
-      : role === "manager"
-        ? { href: "/dashboard/tasks", label: "Assign task" }
-        : { href: "/dashboard/team?tab=provisioning", label: "Provision user" }
 
   async function handleSignOut() {
     setIsSigningOut(true)

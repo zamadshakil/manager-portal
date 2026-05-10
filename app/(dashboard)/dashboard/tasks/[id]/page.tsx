@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft, CalendarClock, Users, AlertTriangle, ListChecks, Sparkles } from "lucide-react"
-import { requireProfile, canManageTeam } from "@/lib/auth"
+import { requireProfile } from "@/lib/auth"
+import { CAPABILITIES, getAccessContext } from "@/lib/permissions"
 import {
   getTaskById,
   getMyAssignmentForTask,
@@ -31,31 +32,36 @@ export default async function TaskDetailPage({
 }) {
   const { id } = await params
   const profile = await requireProfile()
+  const ctx = await getAccessContext(profile)
 
   const task = await getTaskById(profile, id)
   if (!task) notFound()
 
-  const isManager = canManageTeam(profile, task.team_id)
   const myAssignment = await getMyAssignmentForTask(profile, id)
+  const scope = { team_id: task.team_id, is_global: false }
+  const canReadTask = ctx.hasScoped(CAPABILITIES.TASKS_READ, scope)
+  const canCreateTask = ctx.hasScoped(CAPABILITIES.TASKS_CREATE, scope)
+  const canAssignTask = ctx.hasScoped(CAPABILITIES.TASKS_ASSIGN, scope)
+  const canDeleteTask = ctx.hasScoped(CAPABILITIES.TASKS_DELETE, scope)
+  const canManageTask = canCreateTask || canAssignTask || canDeleteTask
+
+  if (!canReadTask && !canManageTask && !myAssignment) {
+    notFound()
+  }
   
-  // Fetch assignments and team members for managers to populate the ledger
-  const rawAssignments = isManager ? await listAssignmentsForTask(id) : []
-  const allTeamMembers = isManager ? await listTeamMembers(profile) : []
+  const rawAssignments = canManageTask ? await listAssignmentsForTask(id) : []
+  const allTeamMembers = canManageTask ? await listTeamMembers(profile) : []
   
-  // Filter members belonging to this task's team and merge with assignments
   const assignments = (() => {
-    if (!isManager) return []
+    if (!canManageTask) return []
     
-    // Start with all explicit assignments
     const merged = [...rawAssignments].map(a => {
-      // If assigned but no submission, show as pending in the ledger for better visibility
       if (a.status === "assigned" && !a.submission_id) {
         return { ...a, status: "pending" as any }
       }
       return a
     })
 
-    // Add any team members who don't have an assignment yet
     const assignedIds = new Set(merged.map(a => a.assignee_id))
     
     allTeamMembers
@@ -101,7 +107,7 @@ export default async function TaskDetailPage({
       <PageHeader
         title={task.title}
         description={task.description ?? "Task details and submission."}
-        action={isManager ? <DeleteTaskButton taskId={task.id} /> : undefined}
+        action={canDeleteTask ? <DeleteTaskButton taskId={task.id} /> : undefined}
       />
 
       {/* Meta strip */}
@@ -139,7 +145,7 @@ export default async function TaskDetailPage({
       </div>
 
       {/* Instructions */}
-      {isManager && task.instructions ? (
+      {canManageTask && task.instructions ? (
         <section className="rounded-xl border border-border bg-card shadow-card">
           <header className="px-4 py-3.5 lg:px-5 border-b border-border flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f2f9ff] text-[#097fe8]">
@@ -223,7 +229,7 @@ export default async function TaskDetailPage({
       ) : null}
 
       {/* Manager assignment table */}
-      {isManager ? (
+      {canManageTask ? (
         <section className="rounded-xl border border-border bg-card shadow-card">
           <AssignmentsRealtimeListener taskId={task.id} />
           <header className="px-4 py-3.5 lg:px-5 border-b border-border">

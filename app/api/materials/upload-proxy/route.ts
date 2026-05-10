@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
-import { requireRole } from "@/lib/auth"
+import { requireProfile } from "@/lib/auth"
+import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { createClient } from "@/lib/supabase/server"
 import { putRaw } from "@/lib/r2"
 import { processArchiveBackground } from "@/lib/archive-processor"
@@ -54,9 +55,9 @@ export async function POST(req: Request) {
   })
   if (limited) return limited
 
-  let profile: Awaited<ReturnType<typeof requireRole>>
+  let profile: Awaited<ReturnType<typeof requireProfile>>
   try {
-    profile = await requireRole(["main_admin", "manager"])
+    profile = await requireProfile()
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
@@ -101,6 +102,18 @@ export async function POST(req: Request) {
 
   if (profile.role !== "main_admin" && row.author_id !== profile.id) {
     return NextResponse.json({ error: "Not authorized." }, { status: 403 })
+  }
+
+  try {
+    await assertCapability(profile, CAPABILITIES.MATERIALS_CREATE, {
+      team_id: row.team_id,
+      is_global: row.team_id === null,
+    })
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return NextResponse.json({ error: "You do not have permission to finish this upload." }, { status: 403 })
+    }
+    throw err
   }
 
   if (row.archive_status !== "pending") {
