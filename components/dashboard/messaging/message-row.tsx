@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
+import { createPortal } from "react-dom"
 import { format, isToday, isYesterday } from "date-fns"
 import { Clock, AlertCircle, Pencil, Trash2, SmilePlus, CornerUpRight, FileText, CheckCheck, X, Download } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -345,6 +346,18 @@ function TextWithLinks({ text, isOwn }: { text: string; isOwn: boolean }) {
 function MessageContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
   const [lightboxOpen, setLightboxOpen] = useState(false)
 
+  // Escape key + body scroll-lock while lightbox is open
+  useEffect(() => {
+    if (!lightboxOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setLightboxOpen(false) }
+    document.addEventListener("keydown", onKey)
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.body.style.overflow = ""
+    }
+  }, [lightboxOpen])
+
   if (message.type === "text") {
     return <TextWithLinks text={message.content ?? ""} isOwn={isOwn} />
   }
@@ -366,42 +379,43 @@ function MessageContent({ message, isOwn }: { message: Message; isOwn: boolean }
           />
         </div>
 
-        {lightboxOpen && (
+        {lightboxOpen && typeof document !== "undefined" && createPortal(
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/85 backdrop-blur-sm"
             onClick={() => setLightboxOpen(false)}
           >
-            <div
-              className="relative max-w-[90vw] max-h-[90vh]"
-              onClick={(e) => e.stopPropagation()}
+            {/* Close — always top-right of viewport */}
+            <button
+              className="fixed top-4 right-4 z-[10000] rounded-full bg-black/60 p-2 text-white hover:bg-black/90 transition-colors"
+              onClick={() => setLightboxOpen(false)}
+              aria-label="Close"
             >
-              <img
-                src={message.media_url ?? ""}
-                alt="Full size image"
-                className="max-w-[90vw] max-h-[90vh] rounded-lg object-contain shadow-2xl"
-              />
-              {/* Close */}
-              <button
-                className="absolute top-2 right-2 rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80 transition-colors"
-                onClick={() => setLightboxOpen(false)}
-                aria-label="Close"
-              >
-                <X className="h-4 w-4" />
-              </button>
-              {/* Download */}
-              <a
-                href={message.media_url ?? ""}
-                download
-                target="_blank"
-                rel="noopener noreferrer"
-                className="absolute bottom-2 right-2 rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80 transition-colors"
-                onClick={(e) => e.stopPropagation()}
-                aria-label="Download image"
-              >
-                <Download className="h-4 w-4" />
-              </a>
-            </div>
-          </div>
+              <X className="h-5 w-5" />
+            </button>
+
+            {/* Image — centred, never overflows viewport */}
+            <img
+              src={message.media_url ?? ""}
+              alt="Full size image"
+              className="max-w-[92vw] max-h-[92vh] rounded-lg object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+
+            {/* Download — always bottom-right of viewport */}
+            <a
+              href={message.media_url ?? ""}
+              download
+              target="_blank"
+              rel="noopener noreferrer"
+              className="fixed bottom-4 right-4 z-[10000] flex items-center gap-2 rounded-full bg-black/60 px-3 py-2 text-white text-sm hover:bg-black/90 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+              aria-label="Download image"
+            >
+              <Download className="h-4 w-4" />
+              <span>Download</span>
+            </a>
+          </div>,
+          document.body,
         )}
       </>
     )
