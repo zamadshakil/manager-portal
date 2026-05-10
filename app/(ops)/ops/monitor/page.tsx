@@ -91,13 +91,19 @@ function severityColor(s: string) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function StatCard({ label, value, sub, accent }: { label: string; value: React.ReactNode; sub?: string; accent?: string }) {
+function StatCard({ label, value, sub, accent, onClick }: { label: string; value: React.ReactNode; sub?: string; accent?: string; onClick?: () => void }) {
+  const Component = onClick ? "button" : "div"
   return (
-    <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-5">
+    <Component
+      onClick={onClick}
+      className={`rounded-xl bg-zinc-900 border border-zinc-800 p-5 text-left w-full ${
+        onClick ? "hover:bg-zinc-800/60 hover:border-zinc-700 transition-colors cursor-pointer" : ""
+      }`}
+    >
       <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">{label}</p>
       <p className={`text-2xl font-bold ${accent ?? "text-white"}`}>{value}</p>
       {sub && <p className="text-xs text-zinc-500 mt-1">{sub}</p>}
-    </div>
+    </Component>
   )
 }
 
@@ -125,6 +131,7 @@ export default function OpsMonitorPage() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [httpErrorsOpen, setHttpErrorsOpen] = useState(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadSummary = useCallback(async () => {
@@ -189,7 +196,13 @@ export default function OpsMonitorPage() {
       ) : summary ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard label="Requests (24h)" value={summary.requests_24h.toLocaleString()} />
-          <StatCard label="HTTP Errors (24h)" value={summary.errors_24h.toLocaleString()} accent={summary.errors_24h > 0 ? "text-orange-400" : "text-white"} />
+          <StatCard
+            label="HTTP Errors (24h)"
+            value={summary.errors_24h.toLocaleString()}
+            accent={summary.errors_24h > 0 ? "text-orange-400" : "text-white"}
+            sub={summary.errors_24h > 0 ? "click for details" : undefined}
+            onClick={summary.errors_24h > 0 ? () => setHttpErrorsOpen(true) : undefined}
+          />
           <StatCard label="Avg Latency" value={summary.avg_latency_ms_24h != null ? `${summary.avg_latency_ms_24h}ms` : "—"} />
           <StatCard label="AI Calls (24h)" value={summary.ai_calls_24h.toLocaleString()} />
           <StatCard label="Error Events (24h)" value={summary.error_events_24h.toLocaleString()} accent={summary.error_events_24h > 0 ? "text-red-400" : "text-white"} />
@@ -222,6 +235,232 @@ export default function OpsMonitorPage() {
       {tab === "Requests" && <RequestsTab />}
       {tab === "Activity" && <ActivityTab />}
       {tab === "Users" && <UsersTab />}
+
+      {httpErrorsOpen && <HttpErrorsModal onClose={() => setHttpErrorsOpen(false)} />}
+    </div>
+  )
+}
+
+// ─── HTTP Errors Modal ────────────────────────────────────────────────────────
+
+interface HttpErrorRow {
+  id: string
+  trace_id: string | null
+  method: string
+  path: string
+  status_code: number | null
+  duration_ms: number | null
+  user_id: string | null
+  ip_address: string | null
+  user_agent: string | null
+  error_message: string | null
+  request_size: number | null
+  response_size: number | null
+  metadata: Record<string, unknown> | null
+  created_at: string
+}
+
+function HttpErrorsModal({ onClose }: { onClose: () => void }) {
+  const [rows, setRows] = useState<HttpErrorRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<HttpErrorRow | null>(null)
+
+  useEffect(() => {
+    fetch("/api/ops/monitor/requests?min_status=400&limit=200")
+      .then((r) => r.json())
+      .then((d) => {
+        setRows(d.rows ?? [])
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [])
+
+  // Close on Escape
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (selected) setSelected(null)
+        else onClose()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [selected, onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-5xl max-h-[85vh] bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 flex-shrink-0">
+          <div>
+            <h2 className="text-lg font-semibold text-white">HTTP Errors (24h)</h2>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {loading ? "Loading…" : `${rows.length} error${rows.length !== 1 ? "s" : ""} — status code ≥ 400`}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-zinc-500 hover:text-zinc-200 text-2xl leading-none px-2"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="p-5 space-y-2">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="h-12 animate-pulse bg-zinc-800/60 rounded-md" />
+              ))}
+            </div>
+          ) : rows.length === 0 ? (
+            <p className="text-sm text-zinc-500 text-center py-12">No HTTP errors in the last 24 hours.</p>
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-zinc-900 border-b border-zinc-800 text-zinc-500">
+                <tr className="text-left">
+                  <th className="py-2.5 px-5 font-medium">Method</th>
+                  <th className="py-2.5 px-3 font-medium">Path</th>
+                  <th className="py-2.5 px-3 font-medium">Status</th>
+                  <th className="py-2.5 px-3 font-medium">Latency</th>
+                  <th className="py-2.5 px-3 font-medium">Time</th>
+                  <th className="py-2.5 px-5 font-medium" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/50">
+                {rows.map((r) => (
+                  <tr
+                    key={r.id}
+                    onClick={() => setSelected(r)}
+                    className="hover:bg-zinc-800/40 cursor-pointer transition-colors"
+                  >
+                    <td className="py-2.5 px-5 font-mono text-zinc-400">{r.method}</td>
+                    <td className="py-2.5 px-3 font-mono text-zinc-300 max-w-[300px] truncate">{r.path}</td>
+                    <td className={`py-2.5 px-3 font-semibold ${statusColor(r.status_code)}`}>{r.status_code ?? "—"}</td>
+                    <td className="py-2.5 px-3 text-zinc-400">{r.duration_ms != null ? `${r.duration_ms}ms` : "—"}</td>
+                    <td className="py-2.5 px-3 text-zinc-600 whitespace-nowrap">{rel(r.created_at)}</td>
+                    <td className="py-2.5 px-5 text-zinc-600 text-right">→</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {selected && <HttpErrorDetailModal row={selected} onBack={() => setSelected(null)} />}
+    </div>
+  )
+}
+
+function HttpErrorDetailModal({ row, onBack }: { row: HttpErrorRow; onBack: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onBack}
+    >
+      <div
+        className="w-full max-w-3xl max-h-[88vh] bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 flex-shrink-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono text-xs text-zinc-400">{row.method}</span>
+              <span className={`text-sm font-bold ${statusColor(row.status_code)}`}>{row.status_code ?? "—"}</span>
+              <span className="text-xs text-zinc-600">{rel(row.created_at)}</span>
+            </div>
+            <p className="text-sm font-mono text-white truncate mt-1">{row.path}</p>
+          </div>
+          <button
+            onClick={onBack}
+            className="text-zinc-500 hover:text-zinc-200 text-2xl leading-none px-2 flex-shrink-0"
+            aria-label="Back"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {row.error_message && (
+            <DetailField label="Error message">
+              <pre className="text-xs text-red-300 font-mono whitespace-pre-wrap break-words bg-red-500/5 border border-red-500/20 rounded-md p-3">
+                {row.error_message}
+              </pre>
+            </DetailField>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <DetailField label="Status code">
+              <span className={`text-sm font-mono ${statusColor(row.status_code)}`}>{row.status_code ?? "—"}</span>
+            </DetailField>
+            <DetailField label="Latency">
+              <span className="text-sm font-mono text-zinc-300">{row.duration_ms != null ? `${row.duration_ms}ms` : "—"}</span>
+            </DetailField>
+            <DetailField label="Method">
+              <span className="text-sm font-mono text-zinc-300">{row.method}</span>
+            </DetailField>
+            <DetailField label="Timestamp">
+              <span className="text-sm font-mono text-zinc-300">{new Date(row.created_at).toLocaleString()}</span>
+            </DetailField>
+            <DetailField label="User ID">
+              <span className="text-xs font-mono text-zinc-300">{row.user_id ?? "anonymous"}</span>
+            </DetailField>
+            <DetailField label="IP address">
+              <span className="text-xs font-mono text-zinc-300">{row.ip_address ?? "—"}</span>
+            </DetailField>
+            <DetailField label="Request size">
+              <span className="text-xs font-mono text-zinc-300">{row.request_size != null ? `${row.request_size} B` : "—"}</span>
+            </DetailField>
+            <DetailField label="Response size">
+              <span className="text-xs font-mono text-zinc-300">{row.response_size != null ? `${row.response_size} B` : "—"}</span>
+            </DetailField>
+          </div>
+
+          <DetailField label="Path">
+            <code className="block text-xs font-mono text-zinc-200 bg-zinc-950 border border-zinc-800 rounded-md p-2 break-all">{row.path}</code>
+          </DetailField>
+
+          {row.user_agent && (
+            <DetailField label="User agent">
+              <code className="block text-xs font-mono text-zinc-300 bg-zinc-950 border border-zinc-800 rounded-md p-2 break-all">{row.user_agent}</code>
+            </DetailField>
+          )}
+
+          {row.trace_id && (
+            <DetailField label="Trace ID">
+              <code className="text-xs font-mono text-zinc-400">{row.trace_id}</code>
+            </DetailField>
+          )}
+
+          {row.metadata && Object.keys(row.metadata).length > 0 && (
+            <DetailField label="Metadata">
+              <pre className="text-xs font-mono text-zinc-300 bg-zinc-950 border border-zinc-800 rounded-md p-3 overflow-x-auto whitespace-pre-wrap break-words">
+                {JSON.stringify(row.metadata, null, 2)}
+              </pre>
+            </DetailField>
+          )}
+
+          <DetailField label="Log ID">
+            <code className="text-xs font-mono text-zinc-500">{row.id}</code>
+          </DetailField>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium mb-1.5">{label}</p>
+      {children}
     </div>
   )
 }
