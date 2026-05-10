@@ -1,3 +1,4 @@
+import { Suspense } from "react"
 import { requireProfile } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { MessagingLayout } from "@/components/dashboard/messaging/messaging-layout"
@@ -19,10 +20,12 @@ export default async function MessagesPage() {
     .order("full_name", { ascending: true })
 
   return (
-    <MessagingLayout
-      currentUserId={profile.id}
-      currentUserName={profile.full_name ?? profile.email}
-      profiles={(profiles ?? []) as Profile[]}
-    />
+    <Suspense>
+      <MessagingLayout
+        currentUserId={profile.id}
+        currentUserName={profile.full_name ?? profile.email}
+        profiles={(profiles ?? []) as Profile[]}
+      />
+    </Suspense>
   )
 }

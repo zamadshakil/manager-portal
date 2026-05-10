@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { MessageSquareDashed } from "lucide-react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
@@ -25,9 +26,28 @@ export function MessagingLayout({
   currentUserName,
   profiles,
 }: MessagingLayoutProps) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
   const [conversations, setConversations] = useState<Conversation[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Initialise from URL so the last-opened conversation survives a reload
+  const [selectedId, setSelectedId] = useState<string | null>(
+    searchParams.get("c") ?? null,
+  )
   const [loading, setLoading] = useState(true)
+
+  // Sync selected conversation to the URL without adding a browser-history entry.
+  // Validates that the id looks like a UUID before writing to avoid junk in URL.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const selectConversation = useCallback((id: string | null) => {
+    setSelectedId(id)
+    if (id && UUID_RE.test(id)) {
+      router.replace(`/dashboard/messages?c=${id}`, { scroll: false })
+    } else {
+      router.replace("/dashboard/messages", { scroll: false })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router])
 
   const presenceRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // Stable ref so fetchConversations can zero unread for the active conversation
@@ -151,16 +171,16 @@ export function MessagingLayout({
       if (prev.some((c) => c.id === conv.id)) return prev
       return [conv, ...prev]
     })
-    setSelectedId(conv.id)
-  }, [])
+    selectConversation(conv.id)
+  }, [selectConversation])
 
   const handleSelect = useCallback((id: string) => {
-    setSelectedId(id)
+    selectConversation(id)
     // Reset unread count locally
     setConversations((prev) =>
       prev.map((c) => (c.id === id ? { ...c, unread_count: 0 } : c)),
     )
-  }, [])
+  }, [selectConversation])
 
   const handleConversationUpdate = useCallback(
     (id: string, patch: Partial<Pick<import("@/lib/types").Conversation, "name" | "avatar_url">>) => {
@@ -173,8 +193,15 @@ export function MessagingLayout({
 
   const handleConversationHidden = useCallback((id: string) => {
     setConversations((prev) => prev.filter((c) => c.id !== id))
-    setSelectedId((prev) => (prev === id ? null : prev))
-  }, [])
+    setSelectedId((prev) => {
+      if (prev === id) {
+        // Clear the URL param when the active conversation is hidden
+        router.replace("/dashboard/messages", { scroll: false })
+        return null
+      }
+      return prev
+    })
+  }, [router])
 
   return (
     <div className="flex flex-1 min-h-0 -mx-4 lg:-mx-8 -mt-6 lg:-mt-8 -mb-24 lg:-mb-12 overflow-hidden">
