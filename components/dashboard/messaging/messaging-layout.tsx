@@ -15,6 +15,9 @@ interface MessagingLayoutProps {
   profiles: Profile[]
 }
 
+// Module-level constant — avoids recreating the RegExp on every render.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 type ConversationMemberInsertPayload = {
   new: {
     user_id: string
@@ -38,7 +41,6 @@ export function MessagingLayout({
 
   // Sync selected conversation to the URL without adding a browser-history entry.
   // Validates that the id looks like a UUID before writing to avoid junk in URL.
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   const selectConversation = useCallback((id: string | null) => {
     setSelectedId(id)
     if (id && UUID_RE.test(id)) {
@@ -107,6 +109,21 @@ export function MessagingLayout({
   useEffect(() => {
     fetchConversations(true).finally(() => setLoading(false))
   }, [fetchConversations])
+
+  // Authorization guard — runs exactly once after the initial conversation list
+  // has loaded. If the URL's ?c= value is not in this user's list the ID is
+  // either tampered, belongs to another user's conversation, or the conversation
+  // has been hidden/deleted. In all cases: silently clear the URL and state so
+  // the user sees "No conversation selected" instead of a blank stuck screen.
+  const urlValidatedRef = useRef(false)
+  useEffect(() => {
+    if (loading || urlValidatedRef.current) return
+    urlValidatedRef.current = true
+    if (selectedId && !conversations.some((c) => c.id === selectedId)) {
+      setSelectedId(null)
+      router.replace("/dashboard/messages", { scroll: false })
+    }
+  }, [loading, conversations, selectedId, router])
 
   // Safety-net poll at 30 s.
   // Realtime is the primary delivery path; this catches any events that slip
