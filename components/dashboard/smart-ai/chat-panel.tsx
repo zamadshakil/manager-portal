@@ -496,7 +496,7 @@ export function ChatPanel({
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         className={cn(
-          "flex-1 flex flex-col min-w-0 bg-card transition-all relative",
+          "flex-1 flex flex-col min-w-0 bg-card transition-all relative pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-0",
           isDragging && "bg-primary/5",
         )}
       >

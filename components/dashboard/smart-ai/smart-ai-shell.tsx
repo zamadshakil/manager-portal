@@ -72,11 +72,11 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
 
   // Portal content: tabs + credits badge side by side in the topbar
   const portalContent = (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2 min-w-0 overflow-hidden">
       <div
         role="tablist"
         aria-label="Smart AI sections"
-        className="flex items-center gap-1 rounded-xl border border-border bg-card p-1 shadow-sm overflow-x-auto scrollbar-thin"
+        className="flex items-center gap-0.5 rounded-xl border border-border bg-card p-1 shadow-sm overflow-x-auto scrollbar-thin min-w-0"
       >
         {TABS.map((tab) => {
           const Icon = tab.icon
@@ -89,14 +89,14 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
               aria-controls={`smartai-${tab.id}`}
               onClick={() => setActive(tab.id)}
               className={cn(
-                "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-semibold whitespace-nowrap transition-all",
+                "flex items-center gap-1.5 rounded-lg px-2.5 sm:px-3.5 py-1.5 text-[13px] font-semibold whitespace-nowrap transition-all",
                 isActive
                   ? "bg-primary text-primary-foreground shadow-sm"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
               )}
             >
               <Icon className="h-4 w-4" aria-hidden="true" />
-              {tab.label}
+              <span className="hidden sm:inline">{tab.label}</span>
             </button>
           )
         })}
