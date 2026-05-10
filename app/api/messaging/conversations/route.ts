@@ -125,6 +125,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: rpcErr?.message ?? "failed to create DM" }, { status: 500 })
     }
     const dm = (rpcRows as any[])[0]
+
+    // If the user previously hid this DM, un-hide it so it reappears in their sidebar
+    await admin
+      .from("conversation_members")
+      .update({ hidden_at: null } as any)
+      .eq("conversation_id", dm.id)
+      .eq("user_id", user.id)
+      .not("hidden_at", "is", null)
+
     const members = await fetchConversationWithMembers(admin, dm.id)
     return NextResponse.json(
       {
