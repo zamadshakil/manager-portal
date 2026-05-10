@@ -45,6 +45,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ...(ctx.has(CAPABILITIES.VALIDATION_RULES_READ) ? ["/dashboard/rules"] : []),
     ...(profile.role === "main_admin" || profile.role === "manager" ? ["/dashboard/reports", "/dashboard/activity"] : []),
     ...(profile.role === "main_admin" || profile.role === "manager" ? ["/dashboard/team"] : []),
+    ...(profile.role === "manager" || profile.role === "member" ? ["/dashboard/my-department"] : []),
     ...(profile.role === "main_admin" ? ["/dashboard/departments", "/dashboard/permissions", "/dashboard/ai-usage"] : []),
   ]
 
