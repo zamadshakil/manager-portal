@@ -16,11 +16,13 @@ const ERROR_EVENT_TYPES = new Set(["js_error", "unhandled_rejection", "console_e
 const SESSION_EVENT_TYPES = new Set(["session_start", "heartbeat", "logout"])
 
 export async function POST(request: NextRequest) {
-  const origin = request.headers.get("origin")
-  if (origin) {
-    const allowed = getCanonicalSiteUrl()
-    if (origin !== allowed) {
-      return NextResponse.json({ ok: false }, { status: 403 })
+  if (process.env.NODE_ENV !== "development") {
+    const origin = request.headers.get("origin")
+    if (origin) {
+      const allowed = getCanonicalSiteUrl()
+      if (origin !== allowed) {
+        return NextResponse.json({ ok: false }, { status: 403 })
+      }
     }
   }
 

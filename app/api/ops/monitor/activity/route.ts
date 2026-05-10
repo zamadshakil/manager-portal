@@ -32,11 +32,14 @@ export async function GET(request: NextRequest) {
 
     const activeQuery = await (admin as any)
       .from("system_page_views")
-      .select("user_id, user_email", { count: "exact" })
+      .select("user_id, user_email, session_id", { count: "exact" })
       .gte("created_at", new Date(Date.now() - 15 * 60 * 1000).toISOString())
-      .not("user_id", "is", null)
 
-    const uniqueActive = new Set((activeQuery.data ?? []).map((r: any) => r.user_id)).size
+    const uniqueActive = new Set(
+      (activeQuery.data ?? [])
+        .map((r: any) => r.user_id || r.user_email || r.session_id)
+        .filter(Boolean)
+    ).size
 
     const pvCountQuery = await (admin as any)
       .from("system_page_views")
