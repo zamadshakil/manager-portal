@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { withRequestLog } from "@/lib/logger"
 import { requireProfile } from "@/lib/auth"
 import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { createClient } from "@/lib/supabase/server"
@@ -47,7 +48,7 @@ interface MaterialUploadRow {
  * On success it advances archive_status → "processing" and fires the
  * background extraction job, exactly as /api/materials/register did before.
  */
-export async function POST(req: Request) {
+async function postHandler(req: Request) {
   const limited = await enforceApiRateLimit(req, {
     prefix: "api:materials:upload-proxy",
     limit: 20,
@@ -193,3 +194,5 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true, materialId, archive: isArchive })
 }
+
+export const POST = withRequestLog(postHandler as any)

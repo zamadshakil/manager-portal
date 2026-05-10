@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { withRequestLog } from "@/lib/logger"
 import { requireProfile } from "@/lib/auth"
 import { createClient as createBrowserClient } from "@/lib/supabase/server"
 import { createClient as createSBClient } from "@supabase/supabase-js"
@@ -42,7 +43,7 @@ async function getSupabase() {
  * activity. Each thread includes a preview of the last message so the UI
  * can show a meaningful label without a second round-trip.
  */
-export async function GET(req: Request) {
+async function getHandler(req: Request) {
   const profile = await requireProfile()
   const { client: supabase, mode } = await getSupabase()
 
@@ -172,7 +173,7 @@ export async function GET(req: Request) {
  * Deletes a chat thread and all its messages. Uses service-role so the
  * delete succeeds regardless of cookie session state.
  */
-export async function DELETE(req: Request) {
+async function deleteHandler(req: Request) {
   const profile = await requireProfile()
   const threadId = new URL(req.url).searchParams.get("id")
 
@@ -215,3 +216,6 @@ export async function DELETE(req: Request) {
 
   return NextResponse.json({ ok: true })
 }
+
+export const GET = withRequestLog(getHandler as any)
+export const DELETE = withRequestLog(deleteHandler as any)

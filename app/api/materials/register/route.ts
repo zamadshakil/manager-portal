@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { withRequestLog } from "@/lib/logger"
 import { requireProfile } from "@/lib/auth"
 import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { createClient } from "@/lib/supabase/server"
@@ -18,7 +19,7 @@ export const dynamic = "force-dynamic"
  * Body JSON:
  *   { materialId }
  */
-export async function POST(req: Request) {
+async function postHandler(req: Request) {
   let profile: Awaited<ReturnType<typeof requireProfile>>
   try {
     profile = await requireProfile()
@@ -98,3 +99,5 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true, materialId })
 }
+
+export const POST = withRequestLog(postHandler as any)

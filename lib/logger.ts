@@ -178,10 +178,10 @@ export function captureException(
 import { type NextRequest, NextResponse } from "next/server"
 import { headers } from "next/headers"
 
-type RouteHandler = (req: NextRequest, ctx?: { params: Record<string, string> }) => Promise<Response>
+type RouteHandler = (req: NextRequest, ctx: any) => Promise<Response>
 
 export function withRequestLog(handler: RouteHandler): RouteHandler {
-  return async (req: NextRequest, ctx?) => {
+  return async (req: NextRequest, ctx: any) => {
     const start = Date.now()
     const h = await headers()
     const traceId = h.get("x-trace-id") ?? generateTraceId()

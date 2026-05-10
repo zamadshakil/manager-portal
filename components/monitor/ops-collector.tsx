@@ -94,7 +94,8 @@ export function OpsCollector({ userId, userEmail, userRole }: OpsCollectorProps)
       user_email: userEmail,
       user_role: userRole,
     })
-    const sent = typeof navigator !== "undefined" && navigator.sendBeacon?.(INGEST_URL, payload)
+    const blob = new Blob([payload], { type: "application/json" })
+    const sent = typeof navigator !== "undefined" && navigator.sendBeacon?.(INGEST_URL, blob)
     if (!sent) {
       fetch(INGEST_URL, {
         method: "POST",

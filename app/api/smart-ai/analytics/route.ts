@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server"
+import { NextResponse, type NextRequest } from "next/server"
+import { withRequestLog } from "@/lib/logger"
 import { requireProfile } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { scopeForProfile, type RagAnalytics } from "@/lib/smart-ai/client"
@@ -19,7 +20,7 @@ export const dynamic = "force-dynamic"
  * Returns a deterministic empty payload when Supabase isn't configured so
  * the dashboard renders without a loading-error flash.
  */
-export async function GET() {
+async function getHandler(_req: NextRequest) {
   const profile = await requireProfile()
   const scope = scopeForProfile(profile)
 
@@ -272,3 +273,5 @@ function emptyAnalytics(): RagAnalytics {
     recent_queries: [],
   }
 }
+
+export const GET = withRequestLog(getHandler)

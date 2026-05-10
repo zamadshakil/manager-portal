@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { withRequestLog } from "@/lib/logger"
 import { requireProfile } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { put } from "@/lib/r2"
@@ -31,7 +32,7 @@ export const dynamic = "force-dynamic"
 
 const ACCEPTED = new Set<string>(ACCEPTED_MIME_TYPES as readonly string[])
 
-export async function POST(req: Request) {
+async function postHandler(req: Request) {
   const limited = await enforceApiRateLimit(req, {
     prefix: "api:smart-ai:upload",
     limit: 20,
@@ -234,3 +235,5 @@ export async function POST(req: Request) {
     )
   }
 }
+
+export const POST = withRequestLog(postHandler as any)

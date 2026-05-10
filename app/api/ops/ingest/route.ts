@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getCanonicalSiteUrl } from "@/lib/site-url"
 
 export const dynamic = "force-dynamic"
 
@@ -15,6 +16,14 @@ const ERROR_EVENT_TYPES = new Set(["js_error", "unhandled_rejection", "console_e
 const SESSION_EVENT_TYPES = new Set(["session_start", "heartbeat", "logout"])
 
 export async function POST(request: NextRequest) {
+  const origin = request.headers.get("origin")
+  if (origin) {
+    const allowed = getCanonicalSiteUrl()
+    if (origin !== allowed) {
+      return NextResponse.json({ ok: false }, { status: 403 })
+    }
+  }
+
   try {
     const body = await request.json()
     const { events, session_id, user_id, user_email, user_role } = body as {

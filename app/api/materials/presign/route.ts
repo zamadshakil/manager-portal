@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { withRequestLog } from "@/lib/logger"
 import { requireProfile } from "@/lib/auth"
 import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { createClient } from "@/lib/supabase/server"
@@ -28,7 +29,7 @@ const ARCHIVE_MIMES = new Set<string>(ARCHIVE_MIME_TYPES as readonly string[])
  * Response:
  *   { uploadUrl, publicUrl, materialId, key }
  */
-export async function POST(req: Request) {
+async function postHandler(req: Request) {
   const limited = await enforceApiRateLimit(req, {
     prefix: "api:materials:presign",
     limit: 30,
@@ -227,3 +228,5 @@ export async function POST(req: Request) {
     key,
   })
 }
+
+export const POST = withRequestLog(postHandler as any)

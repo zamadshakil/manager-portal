@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { withRequestLog } from "@/lib/logger"
 import { streamText, convertToModelMessages, stepCountIs, tool, type UIMessage } from "ai"
 import { createOpenAI, openai } from "@ai-sdk/openai"
 import { z } from "zod"
@@ -130,7 +131,7 @@ interface Body {
 // RAG services needed.
 // ---------------------------------------------------------------------------
 
-export async function POST(req: Request) {
+async function postHandler(req: Request) {
   const profile = await requireProfile()
 
   // Capability gate. Without `smart_ai.chat` the user cannot use Smart AI
@@ -1436,3 +1437,5 @@ export async function POST(req: Request) {
     )
   }
 }
+
+export const POST = withRequestLog(postHandler as any)

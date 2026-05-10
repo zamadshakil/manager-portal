@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
+import { withRequestLog } from "@/lib/logger"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { messageLimiter } from "@/lib/redis"
 
-export async function GET(req: NextRequest) {
+async function getHandler(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -115,7 +116,7 @@ function isAllowedMediaUrl(url: string): boolean {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function postHandler(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -233,3 +234,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(data, { status: 201 })
 }
+
+export const GET = withRequestLog(getHandler)
+export const POST = withRequestLog(postHandler)

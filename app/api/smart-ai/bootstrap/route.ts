@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { withRequestLog } from "@/lib/logger"
 import { requireProfile, requireRole } from "@/lib/auth"
 import { ensureRagSchema, getRagBootstrapState } from "@/lib/smart-ai/bootstrap"
 import { isDirectPgConfigured } from "@/lib/smart-ai/pg-client"
@@ -19,7 +20,7 @@ export const dynamic = "force-dynamic"
  * Auth: any signed-in user (the bootstrap is idempotent and exposes no
  * data — restrict further if your environment requires admin-only).
  */
-export async function POST(req: Request) {
+async function postHandler(req: Request) {
   const limited = await enforceApiRateLimit(req, {
     prefix: "api:smart-ai:bootstrap",
     limit: 5,
@@ -74,7 +75,7 @@ export async function POST(req: Request) {
  * Read-only status of the in-process bootstrap cache. Doesn't trigger
  * a run.
  */
-export async function GET(req: Request) {
+async function getHandler(req: Request) {
   const limited = await enforceApiRateLimit(req, {
     prefix: "api:smart-ai:bootstrap:get",
     limit: 30,
@@ -96,3 +97,6 @@ export async function GET(req: Request) {
     { headers: { "cache-control": "no-store" } },
   )
 }
+
+export const POST = withRequestLog(postHandler as any)
+export const GET = withRequestLog(getHandler as any)
