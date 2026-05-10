@@ -3,149 +3,15 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useCallback, useRef } from "react"
-import {
-  LayoutDashboard,
-  Megaphone,
-  FolderOpen,
-  Upload,
-  BarChart3,
-  History,
-  Users,
-  Settings,
-  ShieldCheck,
-  ListChecks,
-  Sparkles,
-  BrainCircuit,
-  MessageSquare,
-  KeyRound,
-} from "lucide-react"
 import { cn } from "@/lib/utils"
 import { roleLabel } from "@/lib/auth-shared"
 import type { UserRole } from "@/lib/types"
-
-type NavItem = {
-  label: string
-  icon: React.ComponentType<{ className?: string }>
-  href: string
-  roles: UserRole[]
-}
-
-type NavGroup = {
-  label: string
-  items: NavItem[]
-}
-
-const NAV: NavGroup[] = [
-  {
-    label: "Workspace",
-    items: [
-      {
-        label: "Overview",
-        icon: LayoutDashboard,
-        href: "/dashboard",
-        roles: ["main_admin", "manager", "member"],
-      },
-      {
-        label: "Tasks",
-        icon: ListChecks,
-        href: "/dashboard/tasks",
-        roles: ["main_admin", "manager", "member"],
-      },
-      {
-        label: "Submissions",
-        icon: Upload,
-        href: "/dashboard/submissions",
-        roles: ["main_admin", "manager", "member"],
-      },
-      {
-        label: "Messages",
-        icon: MessageSquare,
-        href: "/dashboard/messages",
-        roles: ["main_admin", "manager", "member"],
-      },
-      {
-        label: "Announcements",
-        icon: Megaphone,
-        href: "/dashboard/announcements",
-        roles: ["main_admin", "manager", "member"],
-      },
-      {
-        label: "Materials",
-        icon: FolderOpen,
-        href: "/dashboard/materials",
-        roles: ["main_admin", "manager", "member"],
-      },
-    ],
-  },
-  {
-    label: "Intelligence",
-    items: [
-      {
-        label: "Smart AI",
-        icon: Sparkles,
-        href: "/dashboard/smart-ai",
-        roles: ["main_admin", "manager", "member"],
-      },
-      {
-        label: "Reports",
-        icon: BarChart3,
-        href: "/dashboard/reports",
-        roles: ["main_admin", "manager"],
-      },
-      {
-        label: "Activity Log",
-        icon: History,
-        href: "/dashboard/activity",
-        roles: ["main_admin", "manager"],
-      },
-    ],
-  },
-  {
-    label: "Administration",
-    items: [
-      {
-        label: "Validation Rules",
-        icon: ShieldCheck,
-        href: "/dashboard/rules",
-        roles: ["main_admin", "manager"],
-      },
-      {
-        label: "Team Members",
-        icon: Users,
-        href: "/dashboard/team",
-        roles: ["main_admin", "manager"],
-      },
-      {
-        label: "Departments",
-        icon: Users,
-        href: "/dashboard/departments",
-        roles: ["main_admin"],
-      },
-      {
-        label: "Access Control",
-        icon: KeyRound,
-        href: "/dashboard/permissions",
-        roles: ["main_admin"],
-      },
-      {
-        label: "AI & Usage",
-        icon: BrainCircuit,
-        href: "/dashboard/ai-usage",
-        roles: ["main_admin"],
-      },
-      {
-        label: "Settings",
-        icon: Settings,
-        href: "/dashboard/settings",
-        roles: ["main_admin", "manager", "member"],
-      },
-    ],
-  },
-]
+import { getDashboardNavGroups } from "./navigation"
 
 export function DashboardSidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
   const router = useRouter()
+  const navGroups = getDashboardNavGroups(role)
 
   // Track which routes we've already warmed in this session so a single
   // hover or focus only triggers one prefetch per route per page.
@@ -184,9 +50,8 @@ export function DashboardSidebar({ role }: { role: UserRole }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto scrollbar-thin px-3 py-4 space-y-5">
-        {NAV.map((group) => {
-          const items = group.items.filter((i) => i.roles.includes(role))
-          if (items.length === 0) return null
+        {navGroups.map((group) => {
+          const items = group.items
           return (
             <div key={group.label}>
               <div className="px-2 mb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">

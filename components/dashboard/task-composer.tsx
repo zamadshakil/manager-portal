@@ -241,8 +241,7 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
                 </div>
               ) : (
                 <>
-                  {/* Select all / clear controls */}
-                  <div className="flex items-center gap-2 px-3.5 py-2 border-b border-border bg-background">
+                  <div className="flex flex-wrap items-center gap-2 px-3.5 py-2 border-b border-border bg-background">
                     <button
                       type="button"
                       onClick={selectAllRules}
@@ -260,30 +259,22 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
                     >
                       Clear all
                     </button>
-                    <span className="ml-auto text-[11px] text-muted-foreground">
+                    <span className="w-full text-[11px] text-muted-foreground sm:ml-auto sm:w-auto">
                       {selectedRuleIds.size}/{rules.length} selected
                     </span>
                   </div>
 
-                  {/* Rule checklist */}
                   <ul className="divide-y divide-border max-h-56 overflow-y-auto">
                     {rules.map((rule) => {
                       const checked = selectedRuleIds.has(rule.id)
                       return (
                         <li key={rule.id}>
                           <label className="flex items-start gap-3 px-3.5 py-2.5 hover:bg-muted/40 cursor-pointer transition-colors">
-                            {/* Hidden form input — only submitted when checked */}
                             <span className="mt-0.5 shrink-0">
                               {checked ? (
-                                <CheckSquare
-                                  className="h-4 w-4 text-primary"
-                                  aria-hidden="true"
-                                />
+                                <CheckSquare className="h-4 w-4 text-primary" aria-hidden="true" />
                               ) : (
-                                <Square
-                                  className="h-4 w-4 text-muted-foreground"
-                                  aria-hidden="true"
-                                />
+                                <Square className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                               )}
                             </span>
                             <input
@@ -302,16 +293,16 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
                                 >
                                   {rule.rule_name}
                                 </span>
-                                {rule.creator_role === "main_admin" && (
+                                {rule.creator_role === "main_admin" ? (
                                   <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold text-blue-600 border border-blue-100">
                                     GLOBAL
                                   </span>
-                                )}
-                                {rule.creator_role === "manager" && (
+                                ) : null}
+                                {rule.creator_role === "manager" ? (
                                   <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-600 border border-amber-100">
                                     TEAM
                                   </span>
-                                )}
+                                ) : null}
                                 <span
                                   className={cn(
                                     "rounded-full px-1.5 py-0.5 text-[10px] font-semibold shrink-0",
@@ -343,13 +334,13 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
                     })}
                   </ul>
 
-                  {noRulesSelected && (
+                  {noRulesSelected ? (
                     <div className="px-3.5 py-2 bg-amber-50 border-t border-amber-200">
                       <p className="text-[11.5px] text-amber-700 font-medium">
                         ⚠ No standing rules selected. Only task-specific AI instructions (if any) will run for this task&apos;s submissions.
                       </p>
                     </div>
-                  )}
+                  ) : null}
                 </>
               )}
             </div>
@@ -363,7 +354,7 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
             <Input id="due_at" name="due_at" type="datetime-local" required />
           </div>
           <div className="grid gap-1.5">
-            <Label className="flex items-center gap-2 mt-6">
+            <Label className="flex items-center gap-2 pt-1 sm:pt-6">
               <input
                 type="checkbox"
                 name="allow_late"
@@ -398,11 +389,11 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
 
         <fieldset className="rounded-lg border border-border p-3">
           <legend className="px-1 text-[12px] font-semibold">Assign to</legend>
-          <div className="flex gap-2 mb-3">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
               onClick={() => setMode("all")}
-              className={`px-3 h-8 rounded-md text-[12.5px] font-semibold border ${
+              className={`px-3 h-9 rounded-md text-[12.5px] font-semibold border ${
                 mode === "all"
                   ? "bg-primary text-primary-foreground border-primary"
                   : "border-border bg-background hover:bg-muted"
@@ -413,7 +404,7 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
             <button
               type="button"
               onClick={() => setMode("selected")}
-              className={`px-3 h-8 rounded-md text-[12.5px] font-semibold border ${
+              className={`px-3 h-9 rounded-md text-[12.5px] font-semibold border ${
                 mode === "selected"
                   ? "bg-primary text-primary-foreground border-primary"
                   : "border-border bg-background hover:bg-muted"
@@ -441,7 +432,9 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
                       <span className="text-[13px] font-medium truncate">
                         {m.full_name ?? m.email}
                       </span>
-                      <span className="ml-auto text-[11px] text-muted-foreground">{m.email}</span>
+                      <span className="ml-auto text-[11px] text-muted-foreground truncate max-w-[40%]">
+                        {m.email}
+                      </span>
                     </label>
                   </li>
                 ))
@@ -462,7 +455,7 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
         ) : null}
 
         <div className="flex justify-end">
-          <Button type="submit" disabled={pending || !teamId}>
+          <Button type="submit" disabled={pending || !teamId} className="w-full sm:w-auto">
             {pending ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />

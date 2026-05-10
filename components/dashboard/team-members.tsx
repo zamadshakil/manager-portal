@@ -155,7 +155,7 @@ export function TeamMembers({ members, teams, actorId, isMainAdmin = false, isMa
       {members.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5 lg:px-5">
           {/* Search */}
-          <div className="relative flex-1 min-w-40 max-w-sm">
+          <div className="relative min-w-full flex-1 sm:min-w-40 sm:max-w-sm">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <input
               type="search"
@@ -170,7 +170,7 @@ export function TeamMembers({ members, teams, actorId, isMainAdmin = false, isMa
           <select
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value as UserRole | "")}
-            className="h-8 rounded-lg border border-border bg-background px-2.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-ring"
+            className="h-8 w-full rounded-lg border border-border bg-background px-2.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-ring sm:w-auto"
             aria-label="Filter by role"
           >
             <option value="">All roles</option>
@@ -184,7 +184,7 @@ export function TeamMembers({ members, teams, actorId, isMainAdmin = false, isMa
             <select
               value={teamFilter}
               onChange={(e) => setTeamFilter(e.target.value)}
-              className="h-8 rounded-lg border border-border bg-background px-2.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-8 w-full rounded-lg border border-border bg-background px-2.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-ring sm:w-auto"
               aria-label="Filter by team"
             >
               <option value="">All teams</option>
@@ -245,7 +245,7 @@ export function TeamMembers({ members, teams, actorId, isMainAdmin = false, isMa
 
             return (
               <li key={m.id} className="px-4 py-3 lg:px-5">
-                <div className="flex items-center gap-3">
+                <div className="flex items-start gap-3">
                   {/* Avatar */}
                   <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warm-white text-[12px] font-semibold">
                     {initials || "U"}
@@ -274,14 +274,14 @@ export function TeamMembers({ members, teams, actorId, isMainAdmin = false, isMa
                   </div>
 
                   {/* Role + Team badge */}
-                  <div className="hidden sm:flex flex-col items-end leading-tight">
+                  <div className="flex flex-col items-end leading-tight">
                     <span className="text-[12px] font-semibold">{roleLabel(m.role)}</span>
                     <span className="text-[11px] text-muted-foreground">{teamName}</span>
                   </div>
 
                   {/* Actions — admin sees all; manager sees edit only */}
                   {(isMainAdmin || isManager) && !isSelf && (
-                    <div className="flex items-center gap-1 ml-2">
+                    <div className="ml-auto flex max-w-33 flex-wrap items-center justify-end gap-1 sm:ml-2 sm:max-w-none">
                       {/* View credentials toggle — admin only */}
                       {isMainAdmin && (
                         <button

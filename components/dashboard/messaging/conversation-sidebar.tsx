@@ -17,6 +17,7 @@ interface ConversationSidebarProps {
   onSelect: (id: string) => void
   onConversationCreated: (conv: Conversation) => void
   profiles: Profile[]
+  compact?: boolean
 }
 
 type MemberProfileWithDeletedAt = {
@@ -49,6 +50,7 @@ export function ConversationSidebar({
   onSelect,
   onConversationCreated,
   profiles,
+  compact = false,
 }: ConversationSidebarProps) {
   const [search, setSearch] = useState("")
   const [filter, setFilter] = useState<"all" | "unread" | "groups">("all")
@@ -91,7 +93,10 @@ export function ConversationSidebar({
 
   return (
     <aside
-      className="w-72 shrink-0 border-r border-border flex flex-col h-full bg-sidebar"
+      className={cn(
+        "flex flex-col h-full bg-sidebar",
+        compact ? "w-full min-w-0" : "w-72 shrink-0 border-r border-border",
+      )}
       aria-label="Conversations"
     >
       {/* Header */}

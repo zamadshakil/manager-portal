@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
-import { Info, Users } from "lucide-react"
+import { ChevronLeft, Info, Users } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { useIsBelowDesktop } from "@/hooks/use-mobile"
 import { MessageList, type MessageListHandle, ESTIMATED_ITEM_SIZE } from "./message-list"
 import { MessageComposer } from "./message-composer"
 import { TypingIndicator } from "./typing-indicator"
@@ -19,6 +20,7 @@ interface ConversationViewProps {
   currentUserId: string
   currentUserName: string
   profiles: Profile[]
+  onBack?: () => void
   onConversationUpdate?: (patch: Partial<Pick<Conversation, "name" | "avatar_url">>) => void
   onLastMessage?: (conversationId: string, message: Message) => void
   onConversationHidden?: (conversationId: string) => void
@@ -43,10 +45,12 @@ export function ConversationView({
   currentUserId,
   currentUserName,
   profiles,
+  onBack,
   onConversationUpdate,
   onLastMessage,
   onConversationHidden,
 }: ConversationViewProps) {
+  const isBelowDesktop = useIsBelowDesktop()
   // Stable ref so callbacks never need to re-close over onLastMessage
   const onLastMessageRef = useRef(onLastMessage)
   useEffect(() => { onLastMessageRef.current = onLastMessage }, [onLastMessage])
@@ -423,6 +427,18 @@ export function ConversationView({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0 bg-background/95 backdrop-blur-sm shadow-sm">
         <div className="flex items-center gap-3">
+          {isBelowDesktop && onBack ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onBack}
+              aria-label="Back to conversations"
+              title="Back to conversations"
+              className="shrink-0"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+          ) : null}
           <div className="relative">
             <Avatar className="h-9 w-9">
               <AvatarImage src={headerAvatarSrc} alt={headerName} />

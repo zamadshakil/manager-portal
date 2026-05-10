@@ -13,7 +13,7 @@ export function NavTabs() {
   const pathname = usePathname()
 
   return (
-    <nav className="flex items-center gap-1 -mb-px">
+    <nav className="-mb-px flex items-center gap-1 overflow-x-auto whitespace-nowrap scrollbar-thin">
       {NAV.map(({ href, label, exact }) => {
         const active = exact ? pathname === href : pathname.startsWith(href)
         return (

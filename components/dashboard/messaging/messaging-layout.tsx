@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { MessageSquareDashed } from "lucide-react"
 import { toast } from "sonner"
+import { useIsBelowDesktop } from "@/hooks/use-mobile"
 import { createClient } from "@/lib/supabase/client"
 import { ConversationSidebar } from "./conversation-sidebar"
 import { ConversationView } from "./conversation-view"
@@ -29,6 +30,7 @@ export function MessagingLayout({
   currentUserName,
   profiles,
 }: MessagingLayoutProps) {
+  const isBelowDesktop = useIsBelowDesktop()
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -220,16 +222,22 @@ export function MessagingLayout({
     })
   }, [router])
 
+  const showConversationList = isBelowDesktop ? !selectedConversation : true
+  const showConversationView = isBelowDesktop ? !!selectedConversation : !loading && !!selectedConversation
+
   return (
     <div className="flex flex-1 min-h-0 -mx-4 lg:-mx-8 -mt-6 lg:-mt-8 -mb-24 lg:-mb-12 overflow-hidden">
-      <ConversationSidebar
-        conversations={conversations}
-        selectedId={selectedId}
-        currentUserId={currentUserId}
-        onSelect={handleSelect}
-        onConversationCreated={handleConversationCreated}
-        profiles={profiles}
-      />
+      {showConversationList ? (
+        <ConversationSidebar
+          conversations={conversations}
+          selectedId={selectedId}
+          currentUserId={currentUserId}
+          onSelect={handleSelect}
+          onConversationCreated={handleConversationCreated}
+          profiles={profiles}
+          compact={isBelowDesktop}
+        />
+      ) : null}
 
       {loading ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -239,18 +247,19 @@ export function MessagingLayout({
             <p className="text-[12px] mt-0.5">Please wait a moment…</p>
           </div>
         </div>
-      ) : selectedConversation ? (
+      ) : showConversationView && selectedConversation ? (
         <ConversationView
           key={selectedConversation.id}
           conversation={selectedConversation}
           currentUserId={currentUserId}
           currentUserName={currentUserName}
           profiles={profiles}
+          onBack={isBelowDesktop ? () => selectConversation(null) : undefined}
           onConversationUpdate={(patch) => handleConversationUpdate(selectedConversation.id, patch)}
           onLastMessage={handleLastMessage}
           onConversationHidden={handleConversationHidden}
         />
-      ) : (
+      ) : !isBelowDesktop ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
           <MessageSquareDashed className="h-12 w-12 opacity-20" />
           <div className="text-center">
@@ -258,7 +267,7 @@ export function MessagingLayout({
             <p className="text-[12px] mt-0.5">Pick one from the sidebar or start a new DM</p>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

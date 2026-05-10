@@ -17,6 +17,12 @@ interface TopBarProps {
 export function TopBar({ name, email, role, avatarUrl }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
+  const primaryAction =
+    role === "member"
+      ? { href: "/dashboard/tasks", label: "Open tasks" }
+      : role === "manager"
+        ? { href: "/dashboard/tasks", label: "Assign task" }
+        : { href: "/dashboard/team?tab=provisioning", label: "Provision user" }
 
   async function handleSignOut() {
     setIsSigningOut(true)
@@ -44,34 +50,23 @@ export function TopBar({ name, email, role, avatarUrl }: TopBarProps) {
         <p className="text-[11px] text-muted-foreground">Real-time submissions and reporting</p>
       </div>
 
-      <div id="topbar-portal-target" className="flex-1 flex items-center justify-center px-4" />
+      <div id="topbar-portal-target" className="min-w-0 flex-1 flex items-center justify-center px-2 sm:px-4" />
 
       <div className="flex items-center gap-1.5 ml-auto shrink-0">
-        {role === "member" ? (
-          <Link
-            href="/dashboard/tasks"
-            className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-10 text-[14px] font-semibold text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-          >
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            Open tasks
-          </Link>
-        ) : role === "manager" ? (
-          <Link
-            href="/dashboard/tasks"
-            className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-10 text-[14px] font-semibold text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97]"
-          >
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            Assign task
-          </Link>
-        ) : (
-          <Link
-            href="/dashboard/team?tab=provisioning"
-            className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-10 text-[14px] font-semibold text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97]"
-          >
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            Provision user
-          </Link>
-        )}
+        <Link
+          href={primaryAction.href}
+          aria-label={primaryAction.label}
+          className="inline-flex sm:hidden items-center justify-center rounded-xl bg-primary h-10 w-10 text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+        </Link>
+        <Link
+          href={primaryAction.href}
+          className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 h-10 text-[14px] font-semibold text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          {primaryAction.label}
+        </Link>
 
         <div className="relative">
           <button
