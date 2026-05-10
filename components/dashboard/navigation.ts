@@ -110,6 +110,12 @@ export const dashboardNavGroups: DashboardNavGroup[] = [
         roles: ["main_admin", "manager"],
       },
       {
+        label: "My Department",
+        icon: Users,
+        href: "/dashboard/my-department",
+        roles: ["manager", "member"],
+      },
+      {
         label: "Departments",
         icon: Users,
         href: "/dashboard/departments",

@@ -406,11 +406,11 @@ export async function listDepartmentsWithStats(): Promise<DepartmentWithStats[]>
   if (!teams) return []
   const { data: profiles } = await supabase
     .from("profiles")
-    .select("id, team_id, full_name, email")
+    .select("id, team_id, full_name, email, deleted_at")
   const profs = profiles ?? []
   return teams.map((t) => {
     const team = t as Team
-    const members = profs.filter((p) => p.team_id === team.id)
+    const members = profs.filter((p) => p.team_id === team.id && p.deleted_at == null)
     const manager = profs.find((p) => p.id === team.manager_id)
     return {
       ...team,
@@ -470,6 +470,48 @@ export async function listUnassignedMembers(): Promise<Profile[]> {
   return (data ?? []) as Profile[]
 }
 
+
+// ---------------------------------------------------------------------------
+// My Department (read-only view for team members + managers)
+// ---------------------------------------------------------------------------
+
+export interface MyDepartmentView {
+  department: Team
+  manager: Profile | null
+  members: Profile[]
+}
+
+export async function getMyDepartmentView(
+  teamId: string,
+): Promise<MyDepartmentView | null> {
+  const supabase = createAdminClient()
+
+  const { data: dept, error } = await supabase
+    .from("teams")
+    .select("*")
+    .eq("id", teamId)
+    .single()
+
+  if (error || !dept) return null
+
+  const { data: members } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("team_id", teamId)
+    .is("deleted_at", null)
+    .order("full_name", { ascending: true })
+
+  const mems = (members ?? []) as Profile[]
+  const manager = dept.manager_id
+    ? (mems.find((m) => m.id === dept.manager_id) ?? null)
+    : null
+
+  return {
+    department: dept as unknown as Team,
+    manager,
+    members: mems,
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Tasks
