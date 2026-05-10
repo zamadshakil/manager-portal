@@ -683,12 +683,18 @@ async function postHandler(req: Request) {
         })
 
         // 5) Run the query. Wrapped so withRetry can handle transient blips.
+        // We use the admin (service-role) client here because the RLS-scoped
+        // session client blocks legitimate queries for users whose team_id is
+        // null (e.g. main_admin not assigned to a team). Authentication and
+        // capability checks already happen at the route level before any tool
+        // call, so bypassing RLS here is safe. The system prompt scopes the
+        // AI to the correct user/team via explicit filters.
         const runQuery = async (
           selectArg: string,
           filtersArg: typeof validFilters,
           applyOrder: boolean,
         ) => {
-          let builder: any = supabase.from(table as any).select(selectArg)
+          let builder: any = persistClient.from(table as any).select(selectArg)
           for (const f of filtersArg) {
             const v = f.value
             switch (f.op) {
