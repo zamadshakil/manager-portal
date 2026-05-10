@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { format, isToday, isYesterday } from "date-fns"
-import { Clock, AlertCircle, Pencil, Trash2, SmilePlus, CornerUpRight, FileText, CheckCheck } from "lucide-react"
+import { Clock, AlertCircle, Pencil, Trash2, SmilePlus, CornerUpRight, FileText, CheckCheck, X, Download } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -343,20 +343,67 @@ function TextWithLinks({ text, isOwn }: { text: string; isOwn: boolean }) {
 }
 
 function MessageContent({ message, isOwn }: { message: Message; isOwn: boolean }) {
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+
   if (message.type === "text") {
     return <TextWithLinks text={message.content ?? ""} isOwn={isOwn} />
   }
 
   if (message.type === "image") {
     return (
-      <div className="mt-1 max-w-65">
-        <img
-          src={message.media_url ?? ""}
-          alt="image"
-          loading="lazy"
-          className="rounded-lg object-cover max-h-64 w-auto"
-        />
-      </div>
+      <>
+        <div
+          className="mt-1 max-w-65 cursor-zoom-in"
+          onClick={() => setLightboxOpen(true)}
+          role="button"
+          aria-label="View full image"
+        >
+          <img
+            src={message.media_url ?? ""}
+            alt="image"
+            loading="lazy"
+            className="rounded-lg object-cover max-h-64 w-auto hover:opacity-90 transition-opacity"
+          />
+        </div>
+
+        {lightboxOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+            onClick={() => setLightboxOpen(false)}
+          >
+            <div
+              className="relative max-w-[90vw] max-h-[90vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img
+                src={message.media_url ?? ""}
+                alt="Full size image"
+                className="max-w-[90vw] max-h-[90vh] rounded-lg object-contain shadow-2xl"
+              />
+              {/* Close */}
+              <button
+                className="absolute top-2 right-2 rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80 transition-colors"
+                onClick={() => setLightboxOpen(false)}
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              {/* Download */}
+              <a
+                href={message.media_url ?? ""}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="absolute bottom-2 right-2 rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80 transition-colors"
+                onClick={(e) => e.stopPropagation()}
+                aria-label="Download image"
+              >
+                <Download className="h-4 w-4" />
+              </a>
+            </div>
+          </div>
+        )}
+      </>
     )
   }
 
