@@ -510,7 +510,13 @@ async function postHandler(req: Request) {
       description:
         "Manager and admin announcements. " +
         "IMPORTANT: text body is 'body' (NOT 'content'). " +
-        "priority enum: low, normal, high, urgent.",
+        "priority enum: low, normal, high, urgent. " +
+        "'expires_at' is null for permanent announcements; set to a past date for expired ones. " +
+        "ALWAYS exclude expired announcements (expires_at in the past) unless the user explicitly asks for expired/historical ones. " +
+        "To get active announcements, run TWO queries and combine: " +
+        "(1) filter {column:'expires_at', op:'is', value:'null'} for permanent ones, " +
+        "(2) filter {column:'expires_at', op:'gt', value:'<now ISO>'} for non-expired ones. " +
+        "Never show announcements where expires_at is a past date as 'current' or 'recent'.",
     },
     materials: {
       columns: [
@@ -1205,6 +1211,7 @@ async function postHandler(req: Request) {
     "   - **Failure rate per rule (last 30 days)**: 1) query `validation_runs` with `created_at >= last30`, select `rule_id, pass`, limit 100. 2) query `validation_rules` for `rule_name`. 3) Group by rule_id in your head, count pass=false / total per rule.",
     "   - **Team performance recap (this month)**: 1) query `submissions` filtered by `team_id` AND `created_at >= startOfMonth`, fetch `score, status, is_late, created_at`. 2) Optionally repeat for last month range. 3) Compute averages, pass rate, late count, and trend in your reasoning. Render as one tight paragraph.",
     "   - **Late submissions**: filter `submissions` with `{column: 'is_late', op: 'eq', value: true}`.",
+    `   - **Active announcements**: run TWO separate queries and merge — (1) \`{column:'expires_at', op:'is', value:'null'}\` for permanent ones, (2) \`{column:'expires_at', op:'gt', value:'${todayIso}'}\` for non-expired ones. NEVER include announcements where expires_at is in the past unless the user explicitly asks for expired or historical announcements.`,
     "   - **Top consumers / contributors**: fetch raw rows, group + sort + slice in reasoning.",
     "7. If a user asks about another team or user by NAME, query `teams` or `profiles` first to resolve the name → id, then use that id in subsequent filters.",
     "",
