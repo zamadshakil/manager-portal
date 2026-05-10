@@ -368,19 +368,19 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
     <>
       {/* ── Toolbar ──────────────────────────────────────────────────────── */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div className="relative w-full min-w-0 sm:w-auto">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"
               placeholder="Search capabilities…"
               value={capSearch}
               onChange={(e) => setCapSearch(e.target.value)}
-              className="h-8 w-44 pl-8 text-[13px]"
+              className="h-8 w-full pl-8 text-[13px] sm:w-44"
             />
           </div>
           <Select value={filterModule} onValueChange={setFilterModule}>
-            <SelectTrigger className="h-8 w-36 text-[13px]">
+            <SelectTrigger className="h-8 w-full text-[13px] sm:w-36">
               <SelectValue placeholder="Module" />
             </SelectTrigger>
             <SelectContent>
@@ -391,7 +391,7 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
             </SelectContent>
           </Select>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
           {someSelected && (
             <Badge variant="secondary" className="text-[12px]">
               {selectedUserIds.size} user{selectedUserIds.size > 1 ? "s" : ""} selected
@@ -447,7 +447,7 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
             )}
           </header>
 
-          <ScrollArea className="h-[540px]">
+          <ScrollArea className="h-[260px] lg:h-[540px]">
             <ul className="p-2">
               {filteredUsers.map((u) => {
                 const overrideCount = overrides.filter((o) => o.user_id === u.id).length
