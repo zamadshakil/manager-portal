@@ -62,7 +62,7 @@ export function Charts({ metrics }: Props) {
     vus: m.activeVUs,
     s2xx: m.status2xx,
     s429: m.status429,
-    s4xx: m.status4xx - m.status429,
+    s4xx: m.status4xx,
     s5xx: m.status5xx,
   }))
 

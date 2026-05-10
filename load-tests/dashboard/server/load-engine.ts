@@ -20,6 +20,7 @@ export interface MetricsSnapshot {
   requestsPerSecond: number
   activeVUs: number
   errors: number
+  networkErrors: number
   status429: number
   status2xx: number
   status4xx: number
@@ -53,6 +54,7 @@ interface LiveState {
   endTime: number
   totalRequests: number
   errors: number
+  networkErrors: number
   status429: number
   status2xx: number
   status4xx: number
@@ -116,6 +118,7 @@ function buildSnapshot(state: LiveState): MetricsSnapshot {
     requestsPerSecond: state.rps,
     activeVUs: state.activeVUs,
     errors: state.errors,
+    networkErrors: state.networkErrors,
     status429: state.status429,
     status2xx: state.status2xx,
     status4xx: state.status4xx,
@@ -194,6 +197,7 @@ async function runVU(
       } catch (err: any) {
         if (state.running) {
           state.errors += 1
+          state.networkErrors += 1
           state.totalRequests += 1
           state.latencies.push(performance.now() - reqStart)
         }
@@ -224,6 +228,7 @@ export function startTest(
     endTime: Date.now() + config.duration * 1000,
     totalRequests: 0,
     errors: 0,
+    networkErrors: 0,
     status429: 0,
     status2xx: 0,
     status4xx: 0,

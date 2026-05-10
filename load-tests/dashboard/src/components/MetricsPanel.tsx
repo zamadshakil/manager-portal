@@ -112,7 +112,7 @@ export function MetricsPanel({ snapshot, config, testStatus }: Props) {
         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
           Response Breakdown
         </h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
           <StatusPill
             label="2xx Success"
             count={s?.status2xx ?? 0}
@@ -129,7 +129,7 @@ export function MetricsPanel({ snapshot, config, testStatus }: Props) {
           />
           <StatusPill
             label="4xx Client Error"
-            count={(s?.status4xx ?? 0) - (s?.status429 ?? 0)}
+            count={s?.status4xx ?? 0}
             total={s?.totalRequests ?? 0}
             color="bg-orange-500"
             textColor="text-orange-400"
@@ -140,6 +140,14 @@ export function MetricsPanel({ snapshot, config, testStatus }: Props) {
             total={s?.totalRequests ?? 0}
             color="bg-red-500"
             textColor="text-red-400"
+          />
+          <StatusPill
+            label="Network Errors"
+            count={s?.networkErrors ?? 0}
+            total={s?.totalRequests ?? 0}
+            color="bg-purple-500"
+            textColor="text-purple-400"
+            hint="Timeouts / connection refused / Cloudflare blocks"
           />
         </div>
 
@@ -155,11 +163,15 @@ export function MetricsPanel({ snapshot, config, testStatus }: Props) {
             />
             <div
               className="bg-orange-500 transition-all duration-500"
-              style={{ width: `${((s.status4xx - s.status429) / s.totalRequests) * 100}%` }}
+              style={{ width: `${(s.status4xx / s.totalRequests) * 100}%` }}
             />
             <div
               className="bg-red-500 transition-all duration-500"
               style={{ width: `${(s.status5xx / s.totalRequests) * 100}%` }}
+            />
+            <div
+              className="bg-purple-500 transition-all duration-500"
+              style={{ width: `${(s.networkErrors / s.totalRequests) * 100}%` }}
             />
           </div>
         )}
@@ -199,16 +211,18 @@ function StatusPill({
   total,
   color,
   textColor,
+  hint,
 }: {
   label: string
   count: number
   total: number
   color: string
   textColor: string
+  hint?: string
 }) {
   const pct = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0'
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1" title={hint}>
       <div className="flex items-center gap-1.5">
         <span className={`w-2 h-2 rounded-full ${color}`} />
         <span className="text-xs text-gray-400">{label}</span>
@@ -217,6 +231,7 @@ function StatusPill({
         {count.toLocaleString()}
       </span>
       <span className="text-[10px] text-gray-600">{pct}% of total</span>
+      {hint && <span className="text-[9px] text-gray-700 leading-tight">{hint}</span>}
     </div>
   )
 }

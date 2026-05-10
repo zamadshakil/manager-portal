@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n UI,API -c cyan,magenta \"vite\" \"node --import tsx/esm server/index.ts\"",
+    "dev": "concurrently -n UI,API -c cyan,magenta \"vite\" \"node --import tsx/esm --env-file=.env server/index.ts\"",
     "dev:ui": "vite",
-    "dev:server": "node --import tsx/esm server/index.ts",
+    "dev:server": "node --import tsx/esm --env-file=.env server/index.ts",
     "build": "vite build",
     "preview": "vite preview"
   },

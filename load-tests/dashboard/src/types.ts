@@ -31,6 +31,7 @@ export interface MetricsSnapshot {
   requestsPerSecond: number
   activeVUs: number
   errors: number
+  networkErrors: number
   status429: number
   status2xx: number
   status4xx: number
@@ -64,6 +65,12 @@ export interface EndpointPreset {
 export type TestStatus = 'idle' | 'running' | 'completed' | 'stopped'
 
 export const ENDPOINT_PRESETS: EndpointPreset[] = [
+  {
+    label: '🔬 Health check (no auth needed)',
+    method: 'GET',
+    path: '/api/health',
+    description: 'Public health endpoint — use this to test raw infra throughput with no rate limits or auth overhead',
+  },
   {
     label: 'List Conversations',
     method: 'GET',

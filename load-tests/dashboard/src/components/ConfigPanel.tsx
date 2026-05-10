@@ -2,6 +2,48 @@ import { useState } from 'react'
 import type { TestConfig } from '../types'
 import { ENDPOINT_PRESETS } from '../types'
 
+const TEST_PROFILES: {
+  name: string
+  description: string
+  badge: string
+  vuCount: number
+  duration: number
+  rampUp: number
+  rateCap: number
+  thinkTime: number
+}[] = [
+  {
+    name: 'Smoke',
+    badge: 'bg-blue-700',
+    description: '5 VUs · 30s · verify it works at all',
+    vuCount: 5, duration: 30, rampUp: 0, rateCap: 0, thinkTime: 0,
+  },
+  {
+    name: 'Load',
+    badge: 'bg-green-700',
+    description: '50 VUs · 120s · realistic daily load',
+    vuCount: 50, duration: 120, rampUp: 20, rateCap: 50, thinkTime: 200,
+  },
+  {
+    name: 'Stress',
+    badge: 'bg-yellow-700',
+    description: '200 VUs · 120s · find where it slows',
+    vuCount: 200, duration: 120, rampUp: 30, rateCap: 100, thinkTime: 100,
+  },
+  {
+    name: 'Soak',
+    badge: 'bg-purple-700',
+    description: '50 VUs · 5min · memory / leak check',
+    vuCount: 50, duration: 300, rampUp: 30, rateCap: 30, thinkTime: 500,
+  },
+  {
+    name: 'Spike',
+    badge: 'bg-red-700',
+    description: '500 VUs · 60s · no ramp-up surge test',
+    vuCount: 500, duration: 60, rampUp: 0, rateCap: 0, thinkTime: 0,
+  },
+]
+
 interface Props {
   config: TestConfig
   setConfig: (c: TestConfig) => void
@@ -105,6 +147,37 @@ export function ConfigPanel({ config, setConfig, targetUrl }: Props) {
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 space-y-4">
       <h2 className="font-semibold text-white text-sm">Configuration</h2>
+
+      {/* Test profiles */}
+      <div>
+        <label className="block text-xs font-medium text-gray-400 mb-2">Test Profile</label>
+        <div className="grid grid-cols-1 gap-1.5">
+          {TEST_PROFILES.map((p) => (
+            <button
+              key={p.name}
+              onClick={() =>
+                setConfig({
+                  ...config,
+                  vuCount: p.vuCount,
+                  duration: p.duration,
+                  rampUp: p.rampUp,
+                  rateCap: p.rateCap,
+                  thinkTime: p.thinkTime,
+                })
+              }
+              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-left hover:bg-gray-800 transition-colors border border-transparent hover:border-gray-700"
+            >
+              <span className={`text-[10px] font-bold ${p.badge} text-white rounded px-1.5 py-0.5 shrink-0`}>
+                {p.name.toUpperCase()}
+              </span>
+              <span className="text-xs text-gray-400">{p.description}</span>
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-gray-600 mt-1.5">
+          ⚡ To bypass Cloudflare: set Rate cap ≤ 30 req/s + Ramp-up ≥ 20s, or test the direct Supabase URL below
+        </p>
+      </div>
 
       {/* Target URL */}
       <div>
