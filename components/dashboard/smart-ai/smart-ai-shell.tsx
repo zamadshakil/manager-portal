@@ -112,7 +112,7 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
   return (
     // Escape the layout's px-4/lg:px-8 py-6/lg:py-8 gutters so the chat
     // panel stretches flush to the content-area edges with zero dead whitespace.
-    <div className="relative -mx-4 lg:-mx-8 -mt-6 lg:-mt-8 -mb-24 lg:-mb-12 flex flex-col h-[calc(100vh-64px)]">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden -mx-4 lg:-mx-8 -mt-6 lg:-mt-8 -mb-24 lg:-mb-12">
       <div className="shrink-0">
         {portalTarget ? createPortal(portalContent, portalTarget) : null}
       </div>
@@ -126,7 +126,7 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
         id={`smartai-${active}`}
         role="tabpanel"
         aria-labelledby={`smartai-tab-${active}`}
-        className="flex-1 min-h-0 min-w-0 relative"
+        className="flex-1 min-h-0 min-w-0 flex flex-col"
       >
         {active === "chat" ? (
           <ChatPanel
@@ -138,7 +138,7 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
           />
         ) : null}
         {active === "submissions" ? (
-          <div className="h-full overflow-auto px-4 lg:px-8 py-4 lg:py-6">
+          <div className="flex-1 min-h-0 overflow-auto px-4 lg:px-8 py-4 lg:py-6">
             <SubmissionsReviewPanel
               submissions={submissions}
               onAskAi={(s) =>
@@ -150,7 +150,7 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
           </div>
         ) : null}
         {active === "analytics" ? (
-          <div className="h-full overflow-auto px-4 lg:px-8 py-4 lg:py-6">
+          <div className="flex-1 min-h-0 overflow-auto px-4 lg:px-8 py-4 lg:py-6">
             <AnalyticsPanel />
           </div>
         ) : null}

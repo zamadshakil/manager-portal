@@ -504,7 +504,7 @@ export function ChatPanel({
   }
 
   return (
-    <div className="absolute inset-0 flex overflow-hidden bg-card">
+    <div className="flex flex-1 min-h-0 overflow-hidden bg-card">
       {/* History Sidebar (Desktop) */}
       <aside className="hidden lg:block w-[260px] shrink-0 bg-background/50 border-r border-border overflow-hidden">
         <ThreadDrawer
