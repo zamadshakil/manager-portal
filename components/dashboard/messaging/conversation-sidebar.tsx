@@ -94,19 +94,19 @@ export function ConversationSidebar({
   return (
     <aside
       className={cn(
-        "flex flex-col h-full bg-sidebar",
-        compact ? "w-full min-w-0" : "w-72 shrink-0 border-r border-border",
+        "flex flex-col h-full bg-sidebar/95 text-sidebar-foreground",
+        compact ? "w-full min-w-0" : "w-72 shrink-0 border-r border-sidebar-border shadow-[inset_-1px_0_0_rgba(0,117,222,0.04)]",
       )}
       aria-label="Conversations"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3.5 border-b border-border shrink-0">
-        <span className="text-[15px] font-semibold tracking-tight">Messages</span>
-        <div className="flex gap-0.5">
+      <div className="flex items-center justify-between px-4 py-3.5 border-b border-sidebar-border bg-background/60 shrink-0">
+        <span className="text-[15px] font-semibold tracking-tight text-foreground">Messages</span>
+        <div className="flex gap-1.5">
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
+            className="h-8 w-8 rounded-lg border border-border/80 bg-background text-muted-foreground shadow-xs hover:border-primary/40 hover:bg-accent hover:text-primary focus-visible:ring-primary/30"
             title="New direct message"
             aria-label="New direct message"
             onClick={() => { setModalType("dm"); setModalOpen(true) }}
@@ -116,7 +116,7 @@ export function ConversationSidebar({
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
+            className="h-8 w-8 rounded-lg border border-border/80 bg-background text-muted-foreground shadow-xs hover:border-primary/40 hover:bg-accent hover:text-primary focus-visible:ring-primary/30"
             title="New group"
             aria-label="New group"
             onClick={() => { setModalType("group"); setModalOpen(true) }}
@@ -127,14 +127,14 @@ export function ConversationSidebar({
       </div>
 
       {/* Search */}
-      <div className="px-3 pt-3 pb-2 shrink-0">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+      <div className="px-3 pt-3 pb-2 shrink-0 bg-background/35">
+        <div className="relative rounded-xl border border-border/90 bg-background shadow-xs transition-within:border-primary/50 transition-within:ring-3 transition-within:ring-primary/15">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-primary/75 pointer-events-none" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search conversations…"
-            className="pl-8 h-8 text-sm bg-muted/50 border-transparent focus-visible:border-border focus-visible:bg-background rounded-lg"
+            className="pl-9 h-9 text-sm bg-transparent border-transparent shadow-none rounded-xl placeholder:text-muted-foreground/80 focus-visible:border-transparent focus-visible:ring-0"
             aria-label="Search conversations"
           />
         </div>
@@ -142,7 +142,7 @@ export function ConversationSidebar({
 
       {/* Filter tabs */}
       <div
-        className="flex gap-1 px-3 pb-2.5 shrink-0"
+        className="flex gap-1 mx-3 mb-2.5 rounded-xl border border-border/90 bg-background/80 p-1 shadow-xs shrink-0"
         role="tablist"
         aria-label="Filter conversations"
       >
@@ -155,10 +155,10 @@ export function ConversationSidebar({
             aria-controls={listPanelId}
             onClick={() => setFilter(key)}
             className={cn(
-              "flex-1 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "flex-1 flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1",
               filter === key
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                ? "border-primary bg-primary text-primary-foreground shadow-sm shadow-primary/20"
+                : "border-transparent text-muted-foreground hover:border-primary/20 hover:bg-accent hover:text-primary",
             )}
           >
             {label}
@@ -168,7 +168,7 @@ export function ConversationSidebar({
                   "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums",
                   filter === key
                     ? "bg-white/20 text-primary-foreground"
-                    : "bg-primary text-primary-foreground",
+                    : "bg-primary/10 text-primary ring-1 ring-primary/20",
                 )}
                 aria-label={`${count} ${label.toLowerCase()}`}
               >
@@ -187,12 +187,12 @@ export function ConversationSidebar({
         aria-label="Conversation list"
         aria-live="polite"
         onKeyDown={handleKeyDown}
-        className={cn("flex-1 overflow-y-auto", compact && "pb-[calc(4rem+env(safe-area-inset-bottom))]")}
+        className={cn("flex-1 overflow-y-auto scrollbar-thin px-2", compact && "pb-[calc(4rem+env(safe-area-inset-bottom))]")}
       >
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6 py-8">
-            <div className="rounded-full bg-muted p-3">
-              <MessageSquare className="h-5 w-5 text-muted-foreground/60" />
+            <div className="rounded-full border border-primary/15 bg-primary/10 p-3">
+              <MessageSquare className="h-5 w-5 text-primary/70" />
             </div>
             <div>
               <p className="text-sm font-medium text-foreground/70">
@@ -206,7 +206,7 @@ export function ConversationSidebar({
               <Button
                 size="sm"
                 variant="outline"
-                className="mt-1 text-xs h-7"
+                className="mt-1 h-8 rounded-lg border-primary/25 text-xs text-primary hover:bg-accent hover:text-primary"
                 onClick={() => { setModalType("dm"); setModalOpen(true) }}
               >
                 <Plus className="h-3 w-3 mr-1" /> New Message
@@ -214,7 +214,7 @@ export function ConversationSidebar({
             )}
           </div>
         ) : (
-          <div className="py-1">
+          <div className="space-y-1.5 py-1.5">
             {filtered.map((conv) => {
               const isGroup = conv.type === "group"
               const otherMember = conv.members?.find((m) => m.user_id !== currentUserId)
@@ -248,28 +248,28 @@ export function ConversationSidebar({
                   aria-label={`${name}${unread > 0 ? `, ${unread} unread` : ""}${lastMsgPreview ? `, last message: ${lastMsgPreview}` : ""}`}
                   onClick={() => onSelect(conv.id)}
                   className={cn(
-                    "group w-[calc(100%-8px)] flex items-center gap-3 px-3 py-2.5 mx-1 min-h-12 rounded-xl transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                    "group w-full flex items-center gap-3 border px-3 py-2.5 min-h-12 rounded-xl transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1 focus-visible:ring-offset-sidebar",
                     isSelected
-                      ? "bg-primary/10 text-foreground"
-                      : "hover:bg-accent/70 text-foreground",
+                      ? "border-primary/30 bg-primary/10 text-foreground shadow-sm shadow-primary/10"
+                      : "border-transparent bg-background/45 text-foreground hover:border-primary/20 hover:bg-accent/80 hover:shadow-sm",
                   )}
                 >
                   {/* Avatar with group indicator */}
                   <div className="relative shrink-0">
-                    <Avatar className={cn("h-10 w-10 transition-transform", !isSelected && "group-hover:scale-[1.03]")}>
+                    <Avatar className={cn("h-10 w-10 border border-border/70 transition-transform", !isSelected && "group-hover:scale-[1.03]")}>
                       <AvatarImage src={avatarSrc} alt={name} />
                       <AvatarFallback
                         className={cn(
                           "text-[12px] font-semibold",
-                          isSelected ? "bg-primary/20 text-primary" : "bg-muted",
+                          isSelected ? "bg-primary/15 text-primary" : "bg-muted text-foreground/80",
                         )}
                       >
                         {initials}
                       </AvatarFallback>
                     </Avatar>
                     {isGroup && (
-                      <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-sidebar border-2 border-sidebar p-0.5">
-                        <Users className="h-2.5 w-2.5 text-muted-foreground" />
+                      <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-background border-2 border-sidebar p-0.5">
+                        <Users className="h-2.5 w-2.5 text-primary" />
                       </span>
                     )}
                   </div>
@@ -277,15 +277,15 @@ export function ConversationSidebar({
                   {/* Content */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline justify-between gap-1.5 mb-0.5">
-                      <p className={cn("text-sm truncate leading-snug", unread > 0 ? "font-semibold" : "font-medium")}>
+                      <p className={cn("text-sm truncate leading-snug", unread > 0 ? "font-semibold text-foreground" : "font-medium text-foreground/90")}>
                         {name}
                       </p>
-                      <span className={cn("text-[10px] shrink-0 tabular-nums", unread > 0 ? "text-primary font-medium" : "text-muted-foreground")}>
+                      <span className={cn("text-[10px] shrink-0 tabular-nums", unread > 0 ? "text-primary font-semibold" : "text-muted-foreground")}>
                         {lastMsg ? formatConvTs(lastMsg.created_at) : ""}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-1.5">
-                      <p className={cn("text-xs truncate leading-snug", unread > 0 ? "text-foreground/80 font-medium" : "text-muted-foreground")}>
+                      <p className={cn("text-xs truncate leading-snug", unread > 0 ? "text-foreground/85 font-medium" : "text-muted-foreground")}>
                         {otherMemberDeleted ? (
                           <span className="italic">User removed</span>
                         ) : lastMsgPreview || (
@@ -293,7 +293,7 @@ export function ConversationSidebar({
                         )}
                       </p>
                       {unread > 0 && (
-                        <span className="shrink-0 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none min-w-4.5 h-4.5 px-1 tabular-nums">
+                        <span className="shrink-0 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none min-w-4.5 h-4.5 px-1 tabular-nums shadow-sm shadow-primary/25">
                           {unread > 99 ? "99+" : unread}
                         </span>
                       )}
@@ -307,13 +307,13 @@ export function ConversationSidebar({
       </div>
 
       {/* Footer new conversation shortcut */}
-      <div className="shrink-0 border-t border-border px-3 py-2.5">
+      <div className="shrink-0 border-t border-sidebar-border bg-background/55 px-3 py-2.5">
         <button
           onClick={() => { setModalType("dm"); setModalOpen(true) }}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent/70 transition-colors text-sm"
+          className="w-full flex items-center gap-2.5 rounded-xl border border-border/90 bg-background px-3 py-2 text-sm text-muted-foreground shadow-xs transition-all hover:border-primary/30 hover:bg-accent hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1 focus-visible:ring-offset-sidebar"
           aria-label="Start new conversation"
         >
-          <span className="flex items-center justify-center h-7 w-7 rounded-lg bg-muted shrink-0">
+          <span className="flex items-center justify-center h-7 w-7 rounded-lg bg-primary/10 text-primary shrink-0">
             <Plus className="h-3.5 w-3.5" />
           </span>
           <span className="font-medium">New conversation</span>
