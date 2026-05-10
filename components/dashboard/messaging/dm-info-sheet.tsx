@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Mail, Trash2, User } from "lucide-react"
+import { AlertTriangle, Mail, Trash2, User } from "lucide-react"
 import {
   Sheet,
   SheetContent,
@@ -35,7 +35,8 @@ interface DmInfoSheetProps {
 export function DmInfoSheet({ open, conversation, currentUserId, onClose, onClearHistory, onHideConversation }: DmInfoSheetProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const other = conversation.members?.find((m) => m.user_id !== currentUserId)
-  const name = other?.profile?.full_name ?? other?.profile?.email ?? "Unknown"
+  const isDeleted = !!(other?.profile?.deleted_at || other?.profile?.email?.startsWith("deleted-"))
+  const name = other?.profile?.full_name ?? (isDeleted ? "Deleted User" : (other?.profile?.email ?? "Unknown"))
   const initials = name.slice(0, 2).toUpperCase()
 
   return (
@@ -53,40 +54,55 @@ export function DmInfoSheet({ open, conversation, currentUserId, onClose, onClea
           </Avatar>
           <div className="text-center">
             <p className="text-[16px] font-semibold leading-tight">{name}</p>
-            {other?.profile?.email && (
+            {!isDeleted && other?.profile?.email && (
               <p className="text-[12px] text-muted-foreground mt-0.5">{other.profile.email}</p>
             )}
           </div>
-          {other?.role && (
+          {isDeleted ? (
+            <Badge variant="outline" className="text-[11px] text-muted-foreground border-muted-foreground/40">
+              Deleted account
+            </Badge>
+          ) : other?.role ? (
             <Badge variant="secondary" className="capitalize text-[11px]">
               {other.role}
             </Badge>
-          )}
+          ) : null}
         </div>
 
         {/* Details */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-          {other?.profile?.full_name && (
-            <div className="flex items-start gap-3">
-              <User className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-              <div>
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-0.5">
-                  Full Name
-                </p>
-                <p className="text-sm">{other.profile.full_name}</p>
-              </div>
+          {isDeleted ? (
+            <div className="flex items-start gap-3 rounded-lg bg-muted/50 border border-border px-3 py-3">
+              <AlertTriangle className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <p className="text-[12px] text-muted-foreground leading-relaxed">
+                This account has been permanently removed. You can still view past messages.
+              </p>
             </div>
-          )}
-          {other?.profile?.email && (
-            <div className="flex items-start gap-3">
-              <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-              <div>
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-0.5">
-                  Email
-                </p>
-                <p className="text-sm break-all">{other.profile.email}</p>
-              </div>
-            </div>
+          ) : (
+            <>
+              {other?.profile?.full_name && (
+                <div className="flex items-start gap-3">
+                  <User className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-0.5">
+                      Full Name
+                    </p>
+                    <p className="text-sm">{other.profile.full_name}</p>
+                  </div>
+                </div>
+              )}
+              {other?.profile?.email && (
+                <div className="flex items-start gap-3">
+                  <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-0.5">
+                      Email
+                    </p>
+                    <p className="text-sm break-all">{other.profile.email}</p>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 
