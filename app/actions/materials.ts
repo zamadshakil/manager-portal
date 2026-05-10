@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { put, del } from "@/lib/r2"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { requireProfile } from "@/lib/auth"
 import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { logActivity } from "@/lib/activity"
@@ -80,14 +81,14 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
     contentType: file.type,
   })
 
-  const supabase = await createClient()
+  const admin = createAdminClient()
   const tags = (parsed.data.tags ?? "")
     .split(",")
     .map((t) => t.trim())
     .filter(Boolean)
     .slice(0, 12)
 
-  const { data, error } = await supabase
+  const { data, error } = await admin
     .from("materials")
     .insert({
       author_id: profile.id,
@@ -115,7 +116,7 @@ export async function createMaterial(formData: FormData): Promise<{ ok: boolean;
   // Set archive_status separately so the insert succeeds even if the migration
   // has not been applied yet (column will simply not exist in schema cache).
   if (isArchive) {
-    void supabase
+    void admin
       .from("materials")
       .update({ archive_status: "processing" } as any)
       .eq("id", data.id)
@@ -166,6 +167,7 @@ export async function deleteMaterial(formData: FormData): Promise<{ ok: boolean;
   const profile = await requireProfile()
   const id = String(formData.get("id") || "")
   const supabase = await createClient()
+  const admin = createAdminClient()
   const { data: row } = await supabase
     .from("materials")
     .select("id, team_id, blob_url")
@@ -189,7 +191,7 @@ export async function deleteMaterial(formData: FormData): Promise<{ ok: boolean;
     throw err
   }
 
-  const { error } = await supabase.from("materials").delete().eq("id", id)
+  const { error } = await admin.from("materials").delete().eq("id", id)
   if (error) return { ok: false, error: error.message }
 
   try {

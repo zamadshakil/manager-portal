@@ -101,8 +101,8 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
     throw err
   }
 
-  const supabase = await createClient()
-  const { data: task, error: insertErr } = await supabase
+  const admin = createAdminClient()
+  const { data: task, error: insertErr } = await admin
     .from("tasks")
     .insert({
       team_id: parsed.data.team_id,
@@ -124,7 +124,6 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
   }
 
   // ---------- Assignments ----------
-  const admin = createAdminClient()
   let assignedCount = 0
 
   if (parsed.data.assign_mode === "all") {
@@ -219,8 +218,8 @@ export async function assignTask(formData: FormData): Promise<TaskActionResult> 
   })
   if (!parsed.success) return { ok: false, error: "Invalid input" }
 
-  const supabase = await createClient()
-  const { data: task } = await supabase
+  const admin = createAdminClient()
+  const { data: task } = await admin
     .from("tasks")
     .select("id, team_id")
     .eq("id", parsed.data.task_id)
@@ -239,7 +238,6 @@ export async function assignTask(formData: FormData): Promise<TaskActionResult> 
     throw err
   }
 
-  const admin = createAdminClient()
   let added = 0
   if (parsed.data.mode === "all") {
     const { data: count } = await admin.rpc("assign_task_to_team", {
@@ -294,8 +292,8 @@ export async function deleteTask(formData: FormData): Promise<TaskActionResult> 
   const parsed = DeleteSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: "Invalid id" }
 
-  const supabase = await createClient()
-  const { data: task } = await supabase
+  const admin = createAdminClient()
+  const { data: task } = await admin
     .from("tasks")
     .select("id, team_id")
     .eq("id", parsed.data.id)
@@ -314,7 +312,7 @@ export async function deleteTask(formData: FormData): Promise<TaskActionResult> 
     throw err
   }
 
-  const { error } = await supabase.from("tasks").delete().eq("id", task.id)
+  const { error } = await admin.from("tasks").delete().eq("id", task.id)
   if (error) return { ok: false, error: error.message }
 
   await logActivity({

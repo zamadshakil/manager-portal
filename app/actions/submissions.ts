@@ -250,8 +250,8 @@ export async function retrySubmission(formData: FormData): Promise<ActionResult>
   const parsed = RetrySchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: "Invalid submission id" }
 
-  const supabase = await createClient()
-  const { data, error } = await supabase
+  const admin = createAdminClient()
+  const { data, error } = await admin
     .from("submissions")
     .select("id, team_id, uploader_id, status, metadata, blob_url")
     .eq("id", parsed.data.id)
@@ -283,7 +283,6 @@ export async function retrySubmission(formData: FormData): Promise<ActionResult>
     (profile.id === data.uploader_id && isSystemFailure)
   if (!canRetry) return { ok: false, error: "Not authorized." }
 
-  const admin = createAdminClient()
   await admin
     .from("submissions")
     .update({ status: "queued", flags: [], score: null, summary: null })
@@ -315,8 +314,8 @@ export async function deleteSubmission(formData: FormData): Promise<ActionResult
   const parsed = DeleteSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: "Invalid submission id" }
 
-  const supabase = await createClient()
-  const { data: sub } = await supabase
+  const admin = createAdminClient()
+  const { data: sub } = await admin
     .from("submissions")
     .select("id, team_id, blob_url")
     .eq("id", parsed.data.id)
@@ -335,7 +334,7 @@ export async function deleteSubmission(formData: FormData): Promise<ActionResult
     throw err
   }
 
-  const { error } = await supabase.from("submissions").delete().eq("id", sub.id)
+  const { error } = await admin.from("submissions").delete().eq("id", sub.id)
   if (error) return { ok: false, error: error.message }
 
   try {
@@ -377,10 +376,10 @@ export async function bulkDeleteSubmissions(formData: FormData): Promise<ActionR
   const parsed = BulkDeleteSchema.safeParse({ ids: parsedIds })
   if (!parsed.success) return { ok: false, error: "Invalid submission ids" }
 
-  const supabase = await createClient()
+  const admin = createAdminClient()
   
   // Verify permissions and get blob_urls
-  const { data: subs, error: fetchErr } = await supabase
+  const { data: subs, error: fetchErr } = await admin
     .from("submissions")
     .select("id, team_id, blob_url")
     .in("id", parsed.data.ids)
@@ -408,7 +407,7 @@ export async function bulkDeleteSubmissions(formData: FormData): Promise<ActionR
     return { ok: false, error: "Not authorized to delete these submissions." }
   }
 
-  const { error } = await supabase.from("submissions").delete().in("id", allowedIds)
+  const { error } = await admin.from("submissions").delete().in("id", allowedIds)
   if (error) return { ok: false, error: error.message }
 
   // Delete blobs in parallel if possible, catch individually

@@ -113,7 +113,7 @@ export async function listSubmissions(
   profile: Profile,
   opts: { status?: Submission["status"]; limit?: number; cursor?: string } = {},
 ): Promise<{ rows: Submission[]; nextCursor?: string }> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const limit = Math.min(opts.limit ?? 50, 100)
   const canScopeToTeam =
     profile.role === "main_admin" ||
@@ -490,7 +490,7 @@ export async function listTasksForManager(profile: Profile): Promise<TaskWithSta
     await hasCapability(profile, CAPABILITIES.TASKS_ASSIGN) ||
     await hasCapability(profile, CAPABILITIES.TASKS_DELETE)
   if (!canReadTasks) return []
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   let q = supabase
     .from("tasks")
@@ -542,7 +542,7 @@ export async function listMyTasks(profile: Profile): Promise<MyTask[]> {
 }
 
 export async function getTaskById(profile: Profile, id: string): Promise<TaskWithStats | null> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data } = await supabase
     .from("tasks")
     .select("*, task_assignments(status)")

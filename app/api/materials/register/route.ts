@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireProfile } from "@/lib/auth"
 import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { processArchiveBackground } from "@/lib/archive-processor"
 import { revalidatePath } from "next/cache"
 
@@ -71,8 +72,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, materialId, alreadyRegistered: true })
   }
 
-  // Advance status to "processing"
-  const { error: updateError } = await supabase
+  // Advance status to "processing" — use admin client to bypass role-only write RLS
+  const adminClient = createAdminClient()
+  const { error: updateError } = await adminClient
     .from("materials")
     .update({ archive_status: "processing" } as any)
     .eq("id", materialId)

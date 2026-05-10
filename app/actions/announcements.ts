@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { requireProfile } from "@/lib/auth"
 import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { logActivity } from "@/lib/activity"
@@ -53,8 +54,8 @@ export async function createAnnouncement(formData: FormData): Promise<ActionResu
     teamId = parsed.data.target
   }
 
-  const supabase = await createClient()
-  const { data, error } = await supabase
+  const admin = createAdminClient()
+  const { data, error } = await admin
     .from("announcements")
     .insert({
       author_id: profile.id,
@@ -98,6 +99,7 @@ export async function deleteAnnouncement(formData: FormData): Promise<ActionResu
   const profile = await requireProfile()
   const id = String(formData.get("id") || "")
   const supabase = await createClient()
+  const admin = createAdminClient()
   const { data: row } = await supabase.from("announcements").select("id, team_id").eq("id", id).single()
   if (!row) return { ok: false, error: "Not found" }
 
@@ -117,7 +119,7 @@ export async function deleteAnnouncement(formData: FormData): Promise<ActionResu
     throw err
   }
 
-  const { error } = await supabase.from("announcements").delete().eq("id", id)
+  const { error } = await admin.from("announcements").delete().eq("id", id)
   if (error) return { ok: false, error: error.message }
 
   await logActivity({
