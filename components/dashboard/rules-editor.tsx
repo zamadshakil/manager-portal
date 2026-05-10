@@ -22,9 +22,12 @@ interface Props {
   rules: ValidationRule[]
   teams?: Team[]
   profile?: Profile
+  canCreate?: boolean
+  canUpdate?: boolean
+  canDelete?: boolean
 }
 
-export function RulesEditor({ rules, teams, profile }: Props) {
+export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdate = false, canDelete = false }: Props) {
   const router = useRouter()
   const [editing, setEditing] = useState<ValidationRule | null>(null)
   const [creating, setCreating] = useState(false)
@@ -80,16 +83,18 @@ export function RulesEditor({ rules, teams, profile }: Props) {
             Each enabled rule is run by the LLM against every new submission.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setEditing(null)
-            setCreating(true)
-          }}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-background px-3 h-9 text-[12px] font-semibold transition-colors hover:bg-muted"
-        >
-          <Plus className="h-3.5 w-3.5" aria-hidden="true" /> New rule
-        </button>
+        {canCreate && (
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(null)
+              setCreating(true)
+            }}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-background px-3 h-9 text-[12px] font-semibold transition-colors hover:bg-muted"
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" /> New rule
+          </button>
+        )}
       </header>
 
       {creating || editing ? (
@@ -246,49 +251,50 @@ export function RulesEditor({ rules, teams, profile }: Props) {
                     TEAM
                   </span>
                 )}
-                {!(profile?.role === "manager" && rule.creator_role === "main_admin") && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCreating(false)
-                        setEditing(rule)
-                      }}
-                      aria-label="Edit rule"
-                      className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted transition-colors"
-                    >
-                      <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label={`Delete rule ${rule.rule_name}`}
-                          className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted text-destructive transition-colors"
+                {/* Product guard: managers cannot touch admin-authored rules */}
+                {canUpdate && !(profile?.role === "manager" && rule.creator_role === "main_admin") && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreating(false)
+                      setEditing(rule)
+                    }}
+                    aria-label="Edit rule"
+                    className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted transition-colors"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                )}
+                {canDelete && !(profile?.role === "manager" && rule.creator_role === "main_admin") && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={`Delete rule ${rule.rule_name}`}
+                        className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted text-destructive transition-colors"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete this rule?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Future submissions will skip <strong>{rule.rule_name}</strong>. Existing
+                          validation runs are unaffected.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => onDelete(rule.id)}
+                          className="bg-destructive text-white hover:bg-destructive/90"
                         >
-                          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                        </button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Delete this rule?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Future submissions will skip <strong>{rule.rule_name}</strong>. Existing
-                            validation runs are unaffected.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => onDelete(rule.id)}
-                            className="bg-destructive text-white hover:bg-destructive/90"
-                          >
-                            Delete rule
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </>
+                          Delete rule
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 )}
               </div>
             </li>
