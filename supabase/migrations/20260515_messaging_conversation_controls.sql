@@ -29,6 +29,9 @@ ALTER TABLE public.conversation_members
   ADD COLUMN IF NOT EXISTS hidden_at timestamptz;
 
 -- ── 3. Rebuild get_conversation_previews ─────────────────────
+-- Must DROP first because we're adding a new return column (removed_members).
+-- CREATE OR REPLACE cannot change a function's return type signature.
+DROP FUNCTION IF EXISTS public.get_conversation_previews(uuid);
 CREATE OR REPLACE FUNCTION public.get_conversation_previews(p_user_id uuid)
 RETURNS TABLE(
   id              uuid,
