@@ -176,17 +176,15 @@ export function captureException(
 //   export const GET = withRequestLog(async (req) => { ... })
 
 import { type NextRequest, NextResponse } from "next/server"
-import { headers } from "next/headers"
 
 type RouteHandler = (req: NextRequest, ctx: any) => Promise<Response>
 
 export function withRequestLog(handler: RouteHandler): RouteHandler {
   return async (req: NextRequest, ctx: any) => {
     const start = Date.now()
-    const h = await headers()
-    const traceId = h.get("x-trace-id") ?? generateTraceId()
-    const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null
-    const ua = h.get("user-agent") ?? null
+    const traceId = req.headers.get("x-trace-id") ?? generateTraceId()
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null
+    const ua = req.headers.get("user-agent") ?? null
 
     let status = 500
     let errorMsg: string | null = null
