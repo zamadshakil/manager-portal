@@ -61,6 +61,11 @@ async function main() {
     path.join(standaloneDir, ".next", "static"),
     ".next/static/",
   )
+  await safeCopy(
+    path.join(root, "supabase", "migrations"),
+    path.join(standaloneDir, "supabase", "migrations"),
+    "supabase/migrations/",
+  )
 
   console.log("[postbuild] standalone bundle ready")
 }
