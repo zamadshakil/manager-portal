@@ -11,7 +11,8 @@
     "build": "next build",
     "postbuild": "node scripts/postbuild-standalone.mjs",
     "start": "node .next/standalone/server.js",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "seed:test": "node scripts/seed-test-data.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.67",
