@@ -132,7 +132,6 @@ export function ChatPanel({
   const [threadId, setThreadId] = useState<string | null>(null)
   const threadIdRef = useRef<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [isDragging, setIsDragging] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [loadingThread, setLoadingThread] = useState(false)
@@ -457,23 +456,6 @@ export function ChatPanel({
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-  function onDragOver(e: React.DragEvent) {
-    e.preventDefault()
-    setIsDragging(true)
-  }
-
-  function onDragLeave(e: React.DragEvent) {
-    e.preventDefault()
-    setIsDragging(false)
-  }
-
-  function onDrop(e: React.DragEvent) {
-    e.preventDefault()
-    setIsDragging(false)
-    const files = Array.from(e.dataTransfer.files)
-    files.forEach(handleUpload)
-  }
-
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const trimmed = input.trim()
@@ -524,26 +506,8 @@ export function ChatPanel({
       {/* Conversation */}
       <section
         aria-label="Conversation"
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-        className={cn(
-          "flex-1 flex flex-col min-w-0 bg-card transition-all relative pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-0",
-          isDragging && "bg-primary/5",
-        )}
+        className="flex-1 flex flex-col min-w-0 bg-card transition-all relative pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-0"
       >
-        {isDragging ? (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-primary/10 backdrop-blur-[2px] pointer-events-none">
-            <div className="flex flex-col items-center gap-3 rounded-2xl bg-background px-8 py-6 shadow-2xl border border-primary/20">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                <ArrowUp className="h-6 w-6" />
-              </div>
-              <p className="text-[15px] font-semibold text-foreground">
-                Drop files to index and discuss
-              </p>
-            </div>
-          </div>
-        ) : null}
         {/* Mobile Thread drawer */}
         <div className="lg:hidden">
           <ThreadDrawer
