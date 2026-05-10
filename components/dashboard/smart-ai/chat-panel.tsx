@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { useChat } from "@ai-sdk/react"
-import { useSWRConfig } from "swr"
+import useSWR, { useSWRConfig } from "swr"
 import { DefaultChatTransport, type UIMessage } from "ai"
 import {
   ArrowUp,
@@ -55,6 +55,16 @@ interface PortalUIMessageMetadata {
 }
 
 type PortalUIMessage = UIMessage<PortalUIMessageMetadata>
+
+interface AiCreditStatus {
+  used: number
+  limit: number
+  remaining: number
+  isUnlimited: boolean
+  hasLimit: boolean
+}
+
+const creditFetcher = (url: string) => fetch(url).then((r) => r.json())
 
 const SUGGESTIONS: SuggestedPrompt[] = [
   {
@@ -129,6 +139,7 @@ export function ChatPanel({
   const scrollerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const initializedRef = useRef(false)
 
   // Keep the ref in sync so the transport callback below always reads
@@ -230,6 +241,9 @@ export function ChatPanel({
         // Refresh the sidebar when the assistant finishes its response
         // so the last message preview and timestamp are updated.
         mutate("/api/smart-ai/threads")
+        // Immediately refresh credit badge so the new count is shown
+        // without waiting for the 60-second polling interval.
+        mutate("/api/ai-credits/me")
       },
     })
 
@@ -338,6 +352,15 @@ export function ChatPanel({
   )
 
   const isStreaming = status === "streaming" || status === "submitted"
+
+  const { data: creditData } = useSWR<AiCreditStatus>(
+    "/api/ai-credits/me",
+    creditFetcher,
+    { refreshInterval: 60_000, revalidateOnFocus: true },
+  )
+  const creditsExhausted = !!(
+    creditData?.hasLimit && !creditData?.isUnlimited && (creditData?.remaining ?? 1) <= 0
+  )
 
   function startNewConversation() {
     // Don't mint a thread ID yet — it will be created lazily when
@@ -450,7 +473,7 @@ export function ChatPanel({
     const trimmed = input.trim()
     const readyAttachments = attachments.filter((a) => a.status === "ready")
 
-    if ((!trimmed && readyAttachments.length === 0) || isStreaming) return
+    if ((!trimmed && readyAttachments.length === 0) || isStreaming || creditsExhausted) return
 
     const metadata: PortalUIMessageMetadata | undefined =
       readyAttachments.length > 0
@@ -470,10 +493,13 @@ export function ChatPanel({
     setInput("")
     setAttachments([])
     setUploadError(null)
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto"
+    }
   }
 
   function handleSuggestion(p: SuggestedPrompt) {
-    if (isStreaming) return
+    if (isStreaming || creditsExhausted) return
     dispatchMessage(p.prompt)
   }
 
@@ -614,9 +640,21 @@ export function ChatPanel({
           className="border-t border-border bg-background/50 px-3 py-2.5 lg:px-4 lg:py-3"
         >
           <div className="rounded-xl border border-border bg-background shadow-sm focus-within:ring-2 focus-within:ring-ring focus-within:border-ring transition-all">
+            {creditsExhausted ? (
+              <div className="flex items-start gap-2 px-3.5 pt-2.5 pb-1 text-[12px] text-red-600 dark:text-red-400">
+                <Zap className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span>You&apos;ve used all your AI credits for this period. Contact your administrator to increase your limit.</span>
+              </div>
+            ) : null}
             <textarea
+              ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value)
+                const el = e.target
+                el.style.height = "auto"
+                el.style.height = `${el.scrollHeight}px`
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault()
@@ -624,8 +662,12 @@ export function ChatPanel({
                 }
               }}
               placeholder="Ask about submissions, tasks, validation rules, or team performance…"
-              rows={2}
-              className="w-full resize-none bg-transparent px-3.5 py-2.5 text-[14px] leading-relaxed placeholder:text-muted-foreground focus:outline-none"
+              rows={1}
+              disabled={creditsExhausted}
+              className={cn(
+                "w-full resize-none bg-transparent px-3.5 py-2.5 text-[14px] leading-relaxed placeholder:text-muted-foreground focus:outline-none max-h-[120px] overflow-y-auto",
+                creditsExhausted && "opacity-50 cursor-not-allowed",
+              )}
               aria-label="Message Smart AI"
             />
             <FilePreview
@@ -681,8 +723,9 @@ export function ChatPanel({
                 <button
                   type="submit"
                   disabled={
-                    !input.trim() &&
-                    attachments.filter((a) => a.status === "ready").length === 0
+                    creditsExhausted ||
+                    (!input.trim() &&
+                    attachments.filter((a) => a.status === "ready").length === 0)
                   }
                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-all hover:bg-[#005bab] active:scale-[0.95] disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed"
                   aria-label="Send message"

@@ -71,6 +71,7 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
   }
 
   // Portal content: tabs + credits badge side by side in the topbar
+  // On mobile the badge is hidden here and shown below the topbar instead.
   const portalContent = (
     <div className="flex items-center gap-2 min-w-0 overflow-hidden">
       <div
@@ -101,7 +102,10 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
           )
         })}
       </div>
-      <CreditsBadge />
+      {/* Desktop: badge sits next to the tabs; hidden on mobile to avoid wrapping */}
+      <div className="hidden sm:flex items-center">
+        <CreditsBadge />
+      </div>
     </div>
   )
 
@@ -111,6 +115,10 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
     <div className="relative -mx-4 lg:-mx-8 -mt-6 lg:-mt-8 -mb-24 lg:-mb-12 flex flex-col h-[calc(100vh-64px)]">
       <div className="shrink-0">
         {portalTarget ? createPortal(portalContent, portalTarget) : null}
+      </div>
+      {/* Mobile: show credit badge below the topbar tabs as a thin strip */}
+      <div className="sm:hidden flex items-center gap-2 px-4 py-1.5 border-b border-border bg-background/50">
+        <CreditsBadge />
       </div>
 
       {/* Panels */}
