@@ -112,7 +112,7 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
   return (
     // Escape the layout's px-4/lg:px-8 py-6/lg:py-8 gutters so the chat
     // panel stretches flush to the content-area edges with zero dead whitespace.
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden -mx-4 lg:-mx-8 -mt-6 lg:-mt-8 -mb-24 lg:-mb-12">
+    <div className="flex flex-col flex-none h-[calc(100vh-64px)] overflow-hidden -mx-4 lg:-mx-8 -mt-6 lg:-mt-8 -mb-24 lg:-mb-12">
       <div className="shrink-0">
         {portalTarget ? createPortal(portalContent, portalTarget) : null}
       </div>
