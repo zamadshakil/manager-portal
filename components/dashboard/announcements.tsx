@@ -66,7 +66,7 @@ export function Announcements({ rows, emptyHint, canDelete = false, canDeleteGlo
                 <span className="ml-auto text-[11px] text-muted-foreground">
                   {formatRelative(a.created_at)}
                 </span>
-                {canDelete && (a.team_id === currentTeamId || (a.team_id === null && canDeleteGlobal)) ? (
+                {canDelete && (canDeleteGlobal || a.team_id === currentTeamId) ? (
                   <DeleteIconButton
                     id={a.id}
                     action={deleteAnnouncement}

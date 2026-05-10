@@ -7,7 +7,6 @@ import {
   getTaskById,
   getMyAssignmentForTask,
   listAssignmentsForTask,
-  listTeamMembers,
 } from "@/lib/data"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { TaskSubmissionForm } from "@/components/dashboard/task-submission-form"
@@ -48,48 +47,20 @@ export default async function TaskDetailPage({
   if (!canReadTask && !canManageTask && !myAssignment) {
     notFound()
   }
-  
-  const rawAssignments = canManageTask ? await listAssignmentsForTask(id) : []
-  const allTeamMembers = canManageTask ? await listTeamMembers(profile) : []
-  
-  const assignments = (() => {
-    if (!canManageTask) return []
-    
-    const merged = [...rawAssignments].map(a => {
-      if (a.status === "assigned" && !a.submission_id) {
-        return { ...a, status: "pending" as any }
-      }
-      return a
-    })
+  // Plain members without an assignment and without any management capability
+  // must not access this task
+  if (profile.role === "member" && !myAssignment && !canManageTask) {
+    notFound()
+  }
 
-    const assignedIds = new Set(merged.map(a => a.assignee_id))
-    
-    allTeamMembers
-      .filter(m => m.team_id === task.team_id && m.role === "member")
-      .forEach(member => {
-        if (!assignedIds.has(member.id)) {
-          merged.push({
-            id: `virtual-${member.id}`,
-            task_id: id,
-            assignee_id: member.id,
-            status: "pending" as any,
-            submission_id: null,
-            late_reason: null,
-            submitted_at: null,
-            created_at: member.created_at,
-            updated_at: member.created_at,
-            assignee: {
-              full_name: member.full_name,
-              email: member.email,
-              avatar_url: member.avatar_url
-            },
-            submission: null
-          })
+  const assignments = canManageTask
+    ? (await listAssignmentsForTask(id)).map((a) => {
+        if (a.status === "assigned" && !a.submission_id) {
+          return { ...a, status: "pending" as any }
         }
+        return a
       })
-      
-    return merged
-  })()
+    : []
 
   const due = task.due_at ? new Date(task.due_at) : null
   const overdue = due ? due.getTime() < Date.now() : false
@@ -165,7 +136,7 @@ export default async function TaskDetailPage({
       ) : null}
 
       {/* Member submission form (or read-only state) */}
-      {profile.role === "member" || myAssignment ? (
+      {myAssignment ? (
         <section className="rounded-xl border border-border bg-card shadow-card">
           <header className="px-4 py-3.5 lg:px-5 border-b border-border flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f2f9ff] text-[#097fe8]">
@@ -187,11 +158,7 @@ export default async function TaskDetailPage({
             </div>
           </header>
           <div className="p-4 lg:p-5">
-            {!myAssignment ? (
-              <p className="text-[13px] text-muted-foreground">
-                Ask your manager to add you to this task.
-              </p>
-            ) : myAssignment.status === "assigned" ? (
+            {myAssignment.status === "assigned" ? (
               <TaskSubmissionForm
                 taskId={task.id}
                 taskTitle={task.title}

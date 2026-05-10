@@ -90,7 +90,7 @@ export function Materials({ rows, emptyHint, canDelete = false, canDeleteGlobal 
                   >
                     <Download className="h-4 w-4" aria-hidden="true" />
                   </a>
-                  {canDelete && (m.team_id === currentTeamId || (m.team_id === null && canDeleteGlobal)) ? (
+                  {canDelete && (canDeleteGlobal || m.team_id === currentTeamId) ? (
                     <DeleteIconButton
                       id={m.id}
                       action={deleteMaterial}
