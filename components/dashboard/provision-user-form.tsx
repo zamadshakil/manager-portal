@@ -100,7 +100,7 @@ export function ProvisionUserForm({ teams }: { teams: Team[] }) {
         </div>
       </header>
       <form onSubmit={onSubmit} onChange={clearBanners} className="p-4 lg:p-5 space-y-3">
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3">
           <label className="block">
             <span className="text-[12px] font-semibold text-muted-foreground">Full name</span>
             <input
@@ -178,7 +178,7 @@ export function ProvisionUserForm({ teams }: { teams: Team[] }) {
               </span>
             </label>
           )}
-          <div className="md:col-span-2">
+          <div>
             <div className="flex items-center justify-between">
               <label
                 htmlFor="provision-password"

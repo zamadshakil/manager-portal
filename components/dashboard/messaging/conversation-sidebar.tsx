@@ -187,7 +187,7 @@ export function ConversationSidebar({
         aria-label="Conversation list"
         aria-live="polite"
         onKeyDown={handleKeyDown}
-        className="flex-1 overflow-y-auto"
+        className={cn("flex-1 overflow-y-auto", compact && "pb-[calc(4rem+env(safe-area-inset-bottom))]")}
       >
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6 py-8">
