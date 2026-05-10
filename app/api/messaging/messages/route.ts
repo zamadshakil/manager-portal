@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
     .select("user_id")
     .eq("conversation_id", conv)
     .eq("user_id", user.id)
+    .is("removed_at", null)
     .maybeSingle()
   if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
@@ -184,8 +185,16 @@ export async function POST(req: NextRequest) {
     .select("user_id")
     .eq("conversation_id", conversation_id)
     .eq("user_id", user.id)
+    .is("removed_at", null)
     .maybeSingle()
   if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  await admin
+    .from("conversation_members")
+    .update({ hidden_at: null } as any)
+    .eq("conversation_id", conversation_id)
+    .eq("user_id", user.id)
+    .not("hidden_at", "is", null)
 
   // If replying, verify the parent message belongs to the same conversation
   if (reply_to_id) {

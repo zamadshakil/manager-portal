@@ -76,7 +76,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Re-activate formerly-removed members (keep their existing role)
   const { error: reactivateErr } = await admin
     .from("conversation_members")
-    .update({ removed_at: null, removed_by: null } as any)
+    .update({ removed_at: null, removed_by: null, hidden_at: null, cleared_at: null } as any)
     .eq("conversation_id", id)
     .in("user_id", liveIds)
     .not("removed_at", "is", null)

@@ -336,8 +336,14 @@ export function ChatPanel({
   )
 
   // Auto-stick to the bottom whenever new tokens arrive.
+  // IMPORTANT: scrollIntoView() bubbles up and scrolls every scrollable
+  // ancestor (including the dashboard's <main overflow-y-auto>), which causes
+  // the whole page to scroll up as messages stream in ("goes up and up").
+  // Scroll only the inner conversation container to keep the page stable.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "instant" })
+    const el = scrollerRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
   }, [messages, status])
 
   // Honor a seed prompt jumped in from another tab.

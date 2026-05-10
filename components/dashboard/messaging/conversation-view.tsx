@@ -22,7 +22,7 @@ interface ConversationViewProps {
   profiles: Profile[]
   onBack?: () => void
   onConversationUpdate?: (patch: Partial<Pick<Conversation, "name" | "avatar_url">>) => void
-  onLastMessage?: (conversationId: string, message: Message) => void
+  onLastMessage?: (conversationId: string, message: Message | null) => void
   onConversationHidden?: (conversationId: string) => void
 }
 
@@ -38,6 +38,38 @@ function mergeReplyMessage(
     sender: replyTo.sender ?? fallback.sender,
     reactions: replyTo.reactions ?? fallback.reactions,
   }
+}
+
+function getLatestVisibleMessage(messages: Message[]): Message | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (!messages[index]?.deleted_at) return messages[index]
+  }
+  return null
+}
+
+function applyReactionChange(
+  messages: Message[],
+  reaction: MessageReaction & { action: "added" | "removed" | "updated" },
+): Message[] {
+  return messages.map((message) => {
+    if (message.id !== reaction.message_id) return message
+    const reactions = message.reactions ?? []
+    if (reaction.action === "removed") {
+      return {
+        ...message,
+        reactions: reactions.filter((item) => !(item.user_id === reaction.user_id && item.emoji === reaction.emoji)),
+      }
+    }
+
+    const nextReactions = reactions.filter((item) => item.user_id !== reaction.user_id)
+    if (
+      nextReactions.length === reactions.length - 1 &&
+      reactions.some((item) => item.user_id === reaction.user_id && item.emoji === reaction.emoji)
+    ) {
+      return message
+    }
+    return { ...message, reactions: [...nextReactions, reaction] }
+  })
 }
 
 export function ConversationView({
@@ -66,6 +98,7 @@ export function ConversationView({
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([])
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const replyToRef = useRef<Message | null>(null)
+  const messagesRef = useRef<Message[]>([])
   // Tracks the most recent visible message without being a useCallback dep.
   // Used by handleReact to optimistically bump the sidebar without needing
   // `messages` in the callback's dependency array.
@@ -78,7 +111,8 @@ export function ConversationView({
   }, [replyTo])
 
   useEffect(() => {
-    if (messages.length > 0) lastMessageRef.current = messages[messages.length - 1]
+    messagesRef.current = messages
+    lastMessageRef.current = getLatestVisibleMessage(messages)
   }, [messages])
 
   const fetchMessages = useCallback(async (before?: string) => {
@@ -187,12 +221,10 @@ export function ConversationView({
   }, [])
 
   const handleMessageUpdated = useCallback((partial: Partial<Message> & { id: string }) => {
-    setMessages((prev) =>
-      prev.map((m) => {
+    let nextMessages: Message[] = []
+    setMessages((prev) => {
+      nextMessages = prev.map((m) => {
         if (m.id !== partial.id) return m
-        // Preserve joined fields (reply_to, sender, reactions) that raw DB rows omit.
-        // Supabase nested joins can return null for reply_to even when the data exists;
-        // never overwrite a populated reply_to with null from the server.
         const incomingReplyTo = partial.reply_to
         const mergedReplyTo = incomingReplyTo !== undefined
           ? mergeReplyMessage(incomingReplyTo, m.reply_to ?? null)
@@ -204,30 +236,15 @@ export function ConversationView({
           sender:   partial.sender   !== undefined ? partial.sender   : m.sender,
           reactions: partial.reactions !== undefined ? partial.reactions : m.reactions,
         }
-      }),
-    )
-  }, [])
+      })
+      return nextMessages
+    })
+    onLastMessageRef.current?.(conversation.id, getLatestVisibleMessage(nextMessages))
+  }, [conversation.id])
 
   const handleReactionChange = useCallback(
     (reaction: MessageReaction & { action: "added" | "removed" | "updated" }) => {
-      setMessages((prev) =>
-        prev.map((m) => {
-          if (m.id !== reaction.message_id) return m
-          const reactions = m.reactions ?? []
-          if (reaction.action === "removed") {
-            return { ...m, reactions: reactions.filter((r) => !(r.user_id === reaction.user_id && r.emoji === reaction.emoji)) }
-          }
-
-          const nextReactions = reactions.filter((r) => r.user_id !== reaction.user_id)
-          if (
-            nextReactions.length === reactions.length - 1 &&
-            reactions.some((r) => r.user_id === reaction.user_id && r.emoji === reaction.emoji)
-          ) {
-            return m
-          }
-          return { ...m, reactions: [...nextReactions, reaction] }
-        }),
-      )
+      setMessages((prev) => applyReactionChange(prev, reaction))
     },
     [],
   )
@@ -259,7 +276,7 @@ export function ConversationView({
       ? requestedReplyId
       : null
     const replyTarget = persistedReplyId
-      ? (messages.find((message) => message.id === persistedReplyId) ?? null)
+      ? (messagesRef.current.find((message) => message.id === persistedReplyId) ?? null)
       : null
     const optimistic: Message = {
       id: tmpId,
@@ -333,7 +350,7 @@ export function ConversationView({
       )
       toast.error("Failed to send message")
     }
-  }, [conversation.id, currentUserId, currentUserName, messages])
+  }, [conversation.id, currentUserId, currentUserName])
 
   const handleRetry = useCallback((msg: Message) => {
     // Remove failed message and resend
@@ -348,41 +365,96 @@ export function ConversationView({
   }, [handleSend])
 
   const handleReact = useCallback(async (msgId: string, emoji: string) => {
-    await fetch(`/api/messaging/messages/${msgId}/reactions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ emoji }),
-    })
-    // Reactions count as conversation activity — keep this conversation at
-    // the top of the sidebar just like sending a message does.
-    if (lastMessageRef.current) {
-      onLastMessageRef.current?.(conversation.id, lastMessageRef.current)
+    const targetMessage = messagesRef.current.find((message) => message.id === msgId)
+    if (!targetMessage) return
+
+    const previousReactions = [...(targetMessage.reactions ?? [])]
+    const existingReaction = previousReactions.find((reaction) => reaction.user_id === currentUserId)
+    const optimisticAction = existingReaction?.emoji === emoji ? "removed" : existingReaction ? "updated" : "added"
+    const optimisticReaction: MessageReaction & { action: "added" | "removed" | "updated" } = {
+      message_id: msgId,
+      user_id: currentUserId,
+      emoji,
+      created_at: new Date().toISOString(),
+      action: optimisticAction,
     }
-  }, [conversation.id])
+
+    setMessages((prev) => applyReactionChange(prev, optimisticReaction))
+
+    try {
+      const res = await fetch(`/api/messaging/messages/${msgId}/reactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emoji }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const { action } = await res.json() as { action: "added" | "removed" | "updated" }
+      setMessages((prev) => applyReactionChange(prev, { ...optimisticReaction, action, created_at: new Date().toISOString() }))
+      if (lastMessageRef.current) {
+        onLastMessageRef.current?.(conversation.id, lastMessageRef.current)
+      }
+    } catch {
+      setMessages((prev) => prev.map((message) => (
+        message.id === msgId ? { ...message, reactions: previousReactions } : message
+      )))
+      toast.error("Failed to update reaction")
+    }
+  }, [conversation.id, currentUserId])
 
   const handleEdit = useCallback((msg: Message, newContent: string) => {
     if (!newContent.trim() || newContent === msg.content) return
+    const previousContent = msg.content
+    const previousEditedAt = msg.edited_at
+    const optimisticEditedAt = new Date().toISOString()
     setMessages((prev) =>
-      prev.map((m) => m.id === msg.id ? { ...m, content: newContent, edited_at: new Date().toISOString() } : m)
+      prev.map((m) => m.id === msg.id ? { ...m, content: newContent, edited_at: optimisticEditedAt } : m)
     )
+    if (lastMessageRef.current?.id === msg.id) {
+      onLastMessageRef.current?.(conversation.id, { ...msg, content: newContent, edited_at: optimisticEditedAt })
+    }
     fetch(`/api/messaging/messages/${msg.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: newContent }),
     })
       .then((r) => r.ok ? r.json() : Promise.reject(r))
-      .then((updated: Message) =>
-        setMessages((prev) => prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))),
-      )
-      .catch(() => toast.error("Failed to edit message"))
-  }, [])
+      .then((updated: Message) => {
+        setMessages((prev) => prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)))
+        if (lastMessageRef.current?.id === updated.id) {
+          onLastMessageRef.current?.(conversation.id, { ...msg, ...updated })
+        }
+      })
+      .catch(() => {
+        setMessages((prev) => prev.map((m) => (
+          m.id === msg.id ? { ...m, content: previousContent, edited_at: previousEditedAt } : m
+        )))
+        if (lastMessageRef.current?.id === msg.id) {
+          onLastMessageRef.current?.(conversation.id, msg)
+        }
+        toast.error("Failed to edit message")
+      })
+  }, [conversation.id])
 
   const handleDelete = useCallback(async (msgId: string) => {
-    await fetch(`/api/messaging/messages/${msgId}`, { method: "DELETE" })
-    setMessages((prev) =>
-      prev.map((m) => m.id === msgId ? { ...m, deleted_at: new Date().toISOString() } : m),
-    )
-  }, [])
+    const originalMessages = messagesRef.current
+    const targetMessage = originalMessages.find((message) => message.id === msgId)
+    if (!targetMessage) return
+
+    const deletedAt = new Date().toISOString()
+    const optimisticMessages = originalMessages.map((message) => (
+      message.id === msgId ? { ...message, deleted_at: deletedAt } : message
+    ))
+
+    setMessages(optimisticMessages)
+    onLastMessageRef.current?.(conversation.id, getLatestVisibleMessage(optimisticMessages))
+
+    const res = await fetch(`/api/messaging/messages/${msgId}`, { method: "DELETE" })
+    if (!res.ok) {
+      setMessages(originalMessages)
+      onLastMessageRef.current?.(conversation.id, getLatestVisibleMessage(originalMessages))
+      toast.error("Failed to delete message")
+    }
+  }, [conversation.id])
 
   const handleClearHistory = useCallback(async () => {
     const res = await fetch(`/api/messaging/conversations/${conversation.id}/clear`, { method: "POST" })
@@ -398,7 +470,16 @@ export function ConversationView({
     if (res.ok) {
       onConversationHidden?.(conversation.id)
     } else {
-      toast.error("Failed to delete conversation")
+      toast.error("Failed to hide conversation")
+    }
+  }, [conversation.id, onConversationHidden])
+
+  const handleDeleteConversation = useCallback(async () => {
+    const res = await fetch(`/api/messaging/conversations/${conversation.id}`, { method: "DELETE" })
+    if (res.ok) {
+      onConversationHidden?.(conversation.id)
+    } else {
+      toast.error("Failed to permanently delete group")
     }
   }, [conversation.id, onConversationHidden])
 
@@ -550,6 +631,7 @@ export function ConversationView({
           onClearHistory={handleClearHistory}
           onGroupUpdated={onConversationUpdate}
           onHideConversation={handleHideConversation}
+          onDeleteConversation={handleDeleteConversation}
         />
       ) : (
         <DmInfoSheet

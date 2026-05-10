@@ -318,6 +318,7 @@ export async function listTeamMembers(profile: Profile): Promise<Profile[]> {
   let q = supabase
     .from("profiles")
     .select("*")
+    .is("deleted_at", null)
     .order("created_at", { ascending: true })
 
   // Scope members by team:
@@ -438,6 +439,7 @@ export async function getDepartmentById(id: string): Promise<DepartmentWithStats
     .from("profiles")
     .select("id")
     .eq("team_id", id)
+    .is("deleted_at", null)
 
   // Fetch manager
   let manager = null
@@ -463,6 +465,7 @@ export async function listUnassignedMembers(): Promise<Profile[]> {
     .from("profiles")
     .select("*")
     .is("team_id", null)
+    .is("deleted_at", null)
     .order("full_name", { ascending: true })
   return (data ?? []) as Profile[]
 }

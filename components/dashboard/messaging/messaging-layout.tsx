@@ -22,6 +22,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 type ConversationMemberInsertPayload = {
   new: {
     user_id: string
+    conversation_id?: string
   }
 }
 
@@ -68,14 +69,18 @@ export function MessagingLayout({
   // client-side members array is preserved to avoid flickering.
   const fetchConversations = useCallback(async (showErrorToast = false) => {
     try {
-      const res = await fetch("/api/messaging/conversations")
+      const res = await fetch("/api/messaging/conversations", { cache: "no-store" })
       if (!res.ok) throw new Error("Failed to load conversations")
       const data: Conversation[] = await res.json()
       setConversations((prev) =>
         (data as Conversation[]).map((fc) => {
+          const existing = prev.find((c) => c.id === fc.id)
           if (fc.id === selectedIdRef.current) {
-            const existing = prev.find((c) => c.id === fc.id)
-            return { ...fc, members: existing?.members ?? fc.members, unread_count: 0 }
+            return {
+              ...fc,
+              last_message: existing?.last_message?.status === "sending" ? existing.last_message : fc.last_message,
+              unread_count: 0,
+            }
           }
           return fc
         }),
@@ -95,12 +100,16 @@ export function MessagingLayout({
 
   // Instantly update a conversation's last-message preview without a network
   // round-trip. Called by ConversationView on every send + every received message.
-  const handleLastMessage = useCallback((convId: string, message: import("@/lib/types").Message) => {
+  const handleLastMessage = useCallback((convId: string, message: import("@/lib/types").Message | null) => {
     setConversations((prev) => {
       const idx = prev.findIndex((c) => c.id === convId)
       if (idx === -1) return prev
       const updated = { ...prev[idx], last_message: message }
-      // Re-sort: move this conversation to the top (most-recent first)
+      if (!message) {
+        const next = [...prev]
+        next[idx] = updated
+        return next
+      }
       const next = [...prev]
       next.splice(idx, 1)
       next.unshift(updated)
@@ -117,10 +126,8 @@ export function MessagingLayout({
   // either tampered, belongs to another user's conversation, or the conversation
   // has been hidden/deleted. In all cases: silently clear the URL and state so
   // the user sees "No conversation selected" instead of a blank stuck screen.
-  const urlValidatedRef = useRef(false)
   useEffect(() => {
-    if (loading || urlValidatedRef.current) return
-    urlValidatedRef.current = true
+    if (loading || !selectedId) return
     if (selectedId && !conversations.some((c) => c.id === selectedId)) {
       setSelectedId(null)
       router.replace("/dashboard/messages", { scroll: false })
@@ -136,28 +143,46 @@ export function MessagingLayout({
     return () => clearInterval(timer)
   }, [fetchConversations]) // stable — no selectedId dep needed
 
-  // Supabase Realtime: sidebar channel for new conversations and message updates.
-  // Both handlers call scheduleRefresh() (debounced 400 ms) instead of fetching
-  // directly — this coalesces bursts and avoids duplicate in-flight requests.
-  // The effect no longer depends on selectedId, so the channel is not recreated
-  // every time the user clicks a different conversation.
   useEffect(() => {
     const supabase = createClient()
     let active = true
 
-    const channel = supabase
-      .channel(`sidebar:${currentUserId}`)
+    const membershipChannel = supabase
+      .channel(`sidebar-membership:${currentUserId}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "conversation_members" },
-        (payload: ConversationMemberInsertPayload) => {
-          if (!active || payload.new.user_id !== currentUserId) return
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "conversation_members",
+          filter: `user_id=eq.${currentUserId}`,
+        },
+        () => {
+          if (!active) return
           scheduleRefresh()
         },
       )
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "conversation_members",
+          filter: `user_id=eq.${currentUserId}`,
+        },
+        () => {
+          if (!active) return
+          scheduleRefresh()
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "conversation_members",
+          filter: `user_id=eq.${currentUserId}`,
+        },
         () => {
           if (!active) return
           scheduleRefresh()
@@ -168,9 +193,143 @@ export function MessagingLayout({
     return () => {
       active = false
       if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
-      supabase.removeChannel(channel)
+      supabase.removeChannel(membershipChannel)
     }
   }, [currentUserId, scheduleRefresh])
+
+  useEffect(() => {
+    if (!selectedId) return
+    const supabase = createClient()
+    let active = true
+
+    const channel = supabase
+      .channel(`sidebar-selected-members:${selectedId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "conversation_members",
+          filter: `conversation_id=eq.${selectedId}`,
+        },
+        () => {
+          if (!active) return
+          scheduleRefresh()
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "conversation_members",
+          filter: `conversation_id=eq.${selectedId}`,
+        },
+        () => {
+          if (!active) return
+          scheduleRefresh()
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "conversation_members",
+          filter: `conversation_id=eq.${selectedId}`,
+        },
+        () => {
+          if (!active) return
+          scheduleRefresh()
+        },
+      )
+      .subscribe()
+
+    return () => {
+      active = false
+      supabase.removeChannel(channel)
+    }
+  }, [selectedId, scheduleRefresh])
+
+  const conversationIdsKey = conversations.map((conversation) => conversation.id).sort().join(",")
+
+  useEffect(() => {
+    if (!conversationIdsKey) return
+
+    const supabase = createClient()
+    let active = true
+    const channels = conversations.map((conversation) => (
+      supabase
+        .channel(`sidebar-conversation:${conversation.id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "messages",
+            filter: `conversation_id=eq.${conversation.id}`,
+          },
+          () => {
+            if (!active) return
+            scheduleRefresh()
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "messages",
+            filter: `conversation_id=eq.${conversation.id}`,
+          },
+          () => {
+            if (!active) return
+            scheduleRefresh()
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "conversations",
+            filter: `id=eq.${conversation.id}`,
+          },
+          () => {
+            if (!active) return
+            scheduleRefresh()
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "DELETE",
+            schema: "public",
+            table: "conversations",
+            filter: `id=eq.${conversation.id}`,
+          },
+          () => {
+            if (!active) return
+            setConversations((prev) => prev.filter((item) => item.id !== conversation.id))
+            setSelectedId((prev) => {
+              if (prev === conversation.id) {
+                router.replace("/dashboard/messages", { scroll: false })
+                return null
+              }
+              return prev
+            })
+          },
+        )
+        .subscribe()
+    ))
+
+    return () => {
+      active = false
+      channels.forEach((channel) => {
+        supabase.removeChannel(channel)
+      })
+    }
+  }, [conversationIdsKey, conversations, router, scheduleRefresh])
 
   // Presence heartbeat every 30 s
   useEffect(() => {

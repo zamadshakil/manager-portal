@@ -7,11 +7,11 @@ import type { Message, MessageReaction, TypingUser } from "@/lib/types"
 // Poll intervals — kept active for reliability.
 // Realtime can be "SUBSCRIBED" yet not deliver DB events if publication is
 // misconfigured, so polling remains the guaranteed delivery path.
-const MSG_POLL_MS    = 2000
-const MOD_POLL_MS    = 3000
-const REACT_POLL_MS  = 2500
+const MSG_POLL_MS    = 1500
+const MOD_POLL_MS    = 2000
+const REACT_POLL_MS  = 1500
 const TYPING_POLL_MS = 1500
-const FULL_SYNC_MS   = 30_000
+const FULL_SYNC_MS   = 12_000
 
 interface UseConversationRealtimeOptions {
   conversationId: string | null
@@ -147,27 +147,27 @@ export function useConversationRealtime({
     let typingTimer:   ReturnType<typeof setInterval> | null = null
     let fullSyncTimer: ReturnType<typeof setInterval> | null = null
 
-    function startPolling() {
-      realtimeActive = false
+    function startFallbackPolling() {
+      if (realtimeActive) return
       if (!msgTimer)      msgTimer      = setInterval(fetchNewMessages, MSG_POLL_MS)
       if (!modTimer)      modTimer      = setInterval(fetchModified,    MOD_POLL_MS)
       if (!reactTimer)    reactTimer    = setInterval(fetchReactions,   REACT_POLL_MS)
-      if (!fullSyncTimer) fullSyncTimer = setInterval(fullSync,         FULL_SYNC_MS)
       void fetchNewMessages()
       void fetchModified()
       void fetchReactions()
     }
 
-    function stopPolling() {
+    function stopFallbackPolling() {
       if (msgTimer)      { clearInterval(msgTimer);      msgTimer      = null }
       if (modTimer)      { clearInterval(modTimer);      modTimer      = null }
       if (reactTimer)    { clearInterval(reactTimer);    reactTimer    = null }
-      if (fullSyncTimer) { clearInterval(fullSyncTimer); fullSyncTimer = null }
     }
 
     // Typing always uses HTTP (Redis-backed, not in Realtime publication)
     typingTimer = setInterval(fetchTyping, TYPING_POLL_MS)
+    fullSyncTimer = setInterval(fullSync, FULL_SYNC_MS)
     void fetchTyping()
+    void fullSync()
 
     // ── Supabase Realtime ─────────────────────────────────────────────────────
 
@@ -196,9 +196,9 @@ export function useConversationRealtime({
           table: "messages",
           filter: `conversation_id=eq.${conversationId}`,
         },
-        (payload: any) => {
+        () => {
           if (!active) return
-          onMessageUpdatedRef.current(payload.new as Message)
+          void fetchModified()
         },
       )
       .on(
@@ -247,25 +247,27 @@ export function useConversationRealtime({
         if (!active) return
         if (status === "SUBSCRIBED") {
           realtimeActive = true
-          // Keep polling active even when subscribed; Realtime is used as an
-          // accelerator, not the only source of truth.
+          stopFallbackPolling()
+          void fetchNewMessages()
+          void fetchModified()
+          void fetchReactions()
         } else if (
           status === "CHANNEL_ERROR" ||
           status === "TIMED_OUT" ||
           status === "CLOSED"
         ) {
-          // Fall back to polling if Realtime drops
-          startPolling()
+          realtimeActive = false
+          startFallbackPolling()
         }
       })
 
-    // Start polling immediately; Realtime accelerates updates when available
-    startPolling()
+    startFallbackPolling()
 
     return () => {
       active = false
       realtimeActive = false
-      stopPolling()
+      stopFallbackPolling()
+      if (fullSyncTimer) clearInterval(fullSyncTimer)
       if (typingTimer) clearInterval(typingTimer)
       supabase.removeChannel(channel)
     }

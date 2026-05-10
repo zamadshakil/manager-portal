@@ -37,9 +37,10 @@ interface GroupInfoSheetProps {
   onClearHistory?: () => void
   onGroupUpdated?: (patch: Partial<Pick<Conversation, "name" | "avatar_url">>) => void
   onHideConversation?: () => void
+  onDeleteConversation?: () => void
 }
 
-export function GroupInfoSheet({ open, conversation, currentUserId, profiles, onClose, onClearHistory, onGroupUpdated, onHideConversation }: GroupInfoSheetProps) {
+export function GroupInfoSheet({ open, conversation, currentUserId, profiles, onClose, onClearHistory, onGroupUpdated, onHideConversation, onDeleteConversation }: GroupInfoSheetProps) {
   // Active members: not removed and profile not deleted
   const [localMembers, setLocalMembers] = useState<ConversationMember[]>([])
   // Former members: those who were removed from the group
@@ -47,6 +48,7 @@ export function GroupInfoSheet({ open, conversation, currentUserId, profiles, on
   const [removing, setRemoving] = useState<string | null>(null)
   const [readding, setReadding] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameValue, setNameValue] = useState(conversation.name ?? "")
   const [savingName, setSavingName] = useState(false)
@@ -552,7 +554,18 @@ export function GroupInfoSheet({ open, conversation, currentUserId, profiles, on
               onClick={() => { onHideConversation(); onClose() }}
             >
               <UserMinus className="h-4 w-4" />
-              Delete Conversation
+              Hide Conversation
+            </Button>
+          )}
+          {isAdmin && onDeleteConversation && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => setDeleteConfirmOpen(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+              Permanently Delete Group
             </Button>
           )}
         </div>
@@ -576,6 +589,29 @@ export function GroupInfoSheet({ open, conversation, currentUserId, profiles, on
               }}
             >
               Clear History
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Permanently delete this group?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove the group, all memberships, and all messages for every member. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                onDeleteConversation?.()
+                onClose()
+              }}
+            >
+              Permanently Delete Group
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

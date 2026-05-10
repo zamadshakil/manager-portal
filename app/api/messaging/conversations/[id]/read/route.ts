@@ -17,6 +17,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
     .select("user_id")
     .eq("conversation_id", id)
     .eq("user_id", user.id)
+    .is("removed_at", null)
     .maybeSingle()
   if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 

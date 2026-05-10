@@ -93,3 +93,46 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   return NextResponse.json(data)
 }
+
+export async function DELETE(_req: NextRequest, { params }: Params) {
+  const { id } = await params
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  const admin = createAdminClient()
+
+  const { data: conv } = await admin
+    .from("conversations")
+    .select("id, type")
+    .eq("id", id)
+    .maybeSingle()
+  if (!conv) return NextResponse.json({ error: "Not found" }, { status: 404 })
+  if (conv.type !== "group") {
+    return NextResponse.json({ error: "Only groups can be permanently deleted" }, { status: 400 })
+  }
+
+  const { data: membership } = await admin
+    .from("conversation_members")
+    .select("role")
+    .eq("conversation_id", id)
+    .eq("user_id", user.id)
+    .is("removed_at", null)
+    .maybeSingle()
+  if (!membership || membership.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  const { data: deletedRows, error } = await admin
+    .from("conversations")
+    .delete()
+    .eq("id", id)
+    .select("id")
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!deletedRows || deletedRows.length === 0) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
+  return NextResponse.json({ ok: true, id })
+}

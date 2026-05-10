@@ -125,7 +125,7 @@ export function DmInfoSheet({ open, conversation, currentUserId, onClose, onClea
               onClick={() => { onHideConversation(); onClose() }}
             >
               <Trash2 className="h-4 w-4" />
-              Delete Conversation
+              Hide Conversation
             </Button>
           )}
         </div>

@@ -256,6 +256,7 @@ export async function assignTask(formData: FormData): Promise<TaskActionResult> 
       .from("profiles")
       .select("id")
       .eq("team_id", task.team_id)
+      .is("deleted_at", null)
       .in("id", ids)
     const validIds = new Set((validMembers ?? []).map((m) => (m as { id: string }).id))
     const rows = ids
