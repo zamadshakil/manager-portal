@@ -87,6 +87,18 @@ export async function presignPut(
   return { uploadUrl, publicUrl, key }
 }
 
+/**
+ * Generate a pre-signed GET URL so the server can redirect the browser
+ * directly to R2, bypassing the PUBLIC_URL prefix dependency entirely.
+ *
+ * @param key       R2 object key, e.g. "materials/uuid/file.pdf"
+ * @param expiresIn Seconds until the pre-signed URL expires (default 60)
+ */
+export async function presignGet(key: string, expiresIn = 60): Promise<string> {
+  const command = new GetObjectCommand({ Bucket: BUCKET, Key: key })
+  return getSignedUrl(r2, command, { expiresIn })
+}
+
 export async function putRaw(
   key: string,
   body: Buffer,

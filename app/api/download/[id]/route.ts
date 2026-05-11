@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { get as getBlob } from "@/lib/r2"
+import { get as getBlob, presignGet } from "@/lib/r2"
 import { createClient } from "@/lib/supabase/server"
 import { requireProfile } from "@/lib/auth"
 
@@ -27,6 +27,7 @@ export async function GET(
   const supabase = await createClient()
 
   let blobUrl: string | null = null
+  let blobPathname: string | null = null
   let fileName: string | null = null
   let mimeType: string | null = null
 
@@ -38,7 +39,8 @@ export async function GET(
       .maybeSingle()
     if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 })
     blobUrl = data.blob_url as string
-    fileName = (data.blob_pathname as string | null)?.split("/").pop() ?? (data.title as string)
+    blobPathname = data.blob_pathname as string | null
+    fileName = blobPathname?.split("/").pop() ?? (data.title as string)
     mimeType = (data.file_type as string | null) ?? "application/octet-stream"
   } else if (type === "chat_attachment") {
     const { data } = await supabase
@@ -58,12 +60,31 @@ export async function GET(
       .maybeSingle()
     if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 })
     blobUrl = data.blob_url as string
-    fileName = (data.blob_pathname as string | null)?.split("/").pop() ?? (data.title as string)
+    blobPathname = data.blob_pathname as string | null
+    fileName = blobPathname?.split("/").pop() ?? (data.title as string)
     mimeType = (data.mime_type as string | null) ?? "application/octet-stream"
   }
 
   if (!blobUrl) return NextResponse.json({ error: "No file" }, { status: 404 })
 
+  // For material and submission: redirect to a short-lived presigned GET URL.
+  // This uses blob_pathname (the stored R2 key) directly, bypassing the
+  // PUBLIC_URL prefix-stripping that breaks for rows uploaded under a different
+  // domain/prefix configuration.
+  if (type !== "chat_attachment") {
+    // Prefer the stored pathname; fall back to stripping any leading origin
+    // from the URL so at least something is attempted for very old rows.
+    const key = blobPathname ?? blobUrl.replace(/^https?:\/\/[^/]+\//, "")
+    try {
+      const signedUrl = await presignGet(key)
+      return NextResponse.redirect(signedUrl)
+    } catch (err) {
+      console.error("[download] presign failed", key, err)
+      return NextResponse.json({ error: "Upstream fetch failed" }, { status: 502 })
+    }
+  }
+
+  // chat_attachment: stream as before — no blob_pathname column available.
   try {
     const blobResult = await getBlob(blobUrl)
     if (!blobResult) {
