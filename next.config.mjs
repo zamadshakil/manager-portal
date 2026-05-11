@@ -1,6 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  // Trust X-Forwarded-Host / X-Forwarded-Proto headers from Railway's reverse
+  // proxy. Without this, Next.js uses the internal bind address (0.0.0.0:PORT)
+  // when constructing URLs in middleware, causing auth redirects to point at
+  // https://0.0.0.0:8080/auth/login instead of the real public domain.
+  trustHost: true,
   // Server Actions in Next.js cap request bodies at 1 MB by default. Our UI
   // advertises 25 MB document uploads, so we raise the limit. Long-term we
   // intend to move to a client-token flow that streams browser→
