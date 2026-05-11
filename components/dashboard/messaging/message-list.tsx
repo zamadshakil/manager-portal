@@ -190,7 +190,11 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
 
     // On initial load + new items: auto-scroll to bottom unless user scrolled up
     useEffect(() => {
-      if (listItems.length === 0) return
+      if (listItems.length === 0) {
+        // Reset so the next load (e.g. switching conversations) is treated as initial
+        prevListItemCountRef.current = 0
+        return
+      }
       const prevCount = prevListItemCountRef.current
       const isInitialLoad = prevCount === 0
       prevListItemCountRef.current = listItems.length
@@ -205,13 +209,16 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
         setShowScrollBadge(false)
         return
       }
+      // Only auto-scroll for genuinely new messages; edits/reactions don't add items
+      // and should never drag the user away from their current scroll position.
+      const isNewItems = listItems.length > prevCount
+      if (!isNewItems) return
       if (!outer) return
       const distanceFromBottom = outer.scrollHeight - outer.scrollTop - outer.clientHeight
-      const isNewItems = listItems.length > prevCount
-      if (!isNewItems || distanceFromBottom < 150) {
+      if (distanceFromBottom < 150) {
         scrollToBottom("auto")
         setShowScrollBadge(false)
-      } else if (isNewItems) {
+      } else {
         setShowScrollBadge(true)
       }
     }, [listItems.length, scrollToBottom])
