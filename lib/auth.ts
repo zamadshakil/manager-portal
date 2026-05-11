@@ -1,4 +1,5 @@
 import { cache } from "react"
+import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import type { Profile, UserRole } from "@/lib/types"
@@ -34,6 +35,25 @@ const getCurrentUserAndProfile = cache(async (): Promise<{
   return { user, profile: (data as Profile | null) ?? null }
 })
 
+async function hasSupabaseAuthCookie(): Promise<boolean> {
+  const cookieStore = await cookies()
+  return cookieStore.getAll().some((cookie) => /^sb-.*-auth-token(\.|$)/.test(cookie.name))
+}
+
+async function buildRecoveryHref(fallbackPath: string): Promise<string> {
+  const headerStore = await headers()
+  const pathname = headerStore.get("x-pathname") ?? fallbackPath
+  const safePath = pathname.startsWith("/") ? pathname : fallbackPath
+  return `/auth/session-recovery?next=${encodeURIComponent(safePath)}`
+}
+
+export async function redirectToAuthEntry(fallbackPath = "/dashboard"): Promise<never> {
+  if (await hasSupabaseAuthCookie()) {
+    redirect(await buildRecoveryHref(fallbackPath))
+  }
+  redirect("/auth/login")
+}
+
 export async function getSessionUser() {
   return (await getCurrentUserAndProfile()).user
 }
@@ -44,8 +64,8 @@ export async function getCurrentProfile(): Promise<Profile | null> {
 
 export async function requireProfile(): Promise<Profile> {
   const profile = await getCurrentProfile()
-  if (!profile) redirect("/auth/login")
-  return profile
+  if (profile) return profile
+  return redirectToAuthEntry()
 }
 
 export async function requireRole(roles: UserRole[]): Promise<Profile> {

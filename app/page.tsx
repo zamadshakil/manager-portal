@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation"
-import { getCurrentProfile } from "@/lib/auth"
+import { getCurrentProfile, redirectToAuthEntry } from "@/lib/auth"
 import { getSupabaseEnv } from "@/lib/env"
 
 export const dynamic = "force-dynamic"
@@ -48,6 +48,6 @@ export default async function RootPage() {
   }
 
   const profile = await getCurrentProfile()
-  if (!profile) redirect("/auth/login")
+  if (!profile) return redirectToAuthEntry("/")
   redirect("/dashboard")
 }

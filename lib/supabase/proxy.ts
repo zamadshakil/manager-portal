@@ -95,25 +95,16 @@ export async function updateSession(request: NextRequest) {
 
   if (!user && !isPublic) {
     if (hadAuthCookie) {
-      // Auth cookie was present but the session no longer resolves —
-      // typically a failed refresh-token rotation or GoTrue rejecting
-      // the JWT. Surface a single, trace-tagged warn so we can correlate
-      // user reports of "I got logged out" with the exact request.
       console.warn(
         `[proxy] auth cookie present but getUser() returned null trace=${traceId} path=${pathname}`,
       )
     }
     const url = request.nextUrl.clone()
-    url.pathname = "/auth/login"
+    url.pathname = hadAuthCookie ? "/auth/session-recovery" : "/auth/login"
     url.searchParams.set("next", pathname)
     const redirectResponse = NextResponse.redirect(url)
     redirectResponse.headers.set("x-trace-id", traceId)
     redirectResponse.headers.set("x-pathname", request.nextUrl.pathname)
-    // Carry over any cookies Supabase staged during getUser() (e.g. a
-    // partial refresh that succeeded). Without this, freshly rotated
-    // tokens are dropped on the redirect and the user has to log in
-    // again instead of being seamlessly re-authenticated on the next
-    // navigation.
     for (const cookie of supabaseResponse.cookies.getAll()) {
       redirectResponse.cookies.set(cookie)
     }
