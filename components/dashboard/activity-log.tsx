@@ -111,7 +111,7 @@ export function ActivityLog({ rows: initialRows, expanded = false }: ActivityLog
   return (
     <section
       aria-labelledby="activity-heading"
-      className="rounded-xl border border-border bg-card shadow-card overflow-hidden"
+      className="rounded-xl border border-border bg-card shadow-card overflow-hidden shrink-0"
     >
       <header className="flex items-center gap-3 border-b border-border bg-muted/30 px-5 py-4">
         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
