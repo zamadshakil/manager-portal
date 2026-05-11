@@ -264,7 +264,7 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
                     </span>
                   </div>
 
-                  <ul className="divide-y divide-border max-h-56 overflow-y-auto">
+                  <ul className="divide-y divide-border max-h-56 overflow-y-auto overscroll-contain">
                     {rules.map((rule) => {
                       const checked = selectedRuleIds.has(rule.id)
                       return (
