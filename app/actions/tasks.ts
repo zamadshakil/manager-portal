@@ -203,6 +203,131 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
   return { ok: true, taskId: task.id, assignedCount }
 }
 
+const UpdateTaskSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().trim().min(2, "Title is too short").max(200),
+  description: z.string().trim().max(2000).optional().or(z.literal("")),
+  instructions: z.string().trim().max(8000).optional().or(z.literal("")),
+  due_at: z.string().min(1, "Deadline is required"),
+  allow_late: z.coerce.boolean().default(true),
+  late_submission_deadline: z
+    .string()
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v ? v : null)),
+  require_late_reason: z.coerce.boolean().default(true),
+  rule_ids: z.array(z.string().uuid()).nullable().default(null),
+}).superRefine((data, ctx) => {
+  if (data.allow_late && !data.late_submission_deadline) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Late submission deadline is required when late submissions are allowed.",
+      path: ["late_submission_deadline"],
+    })
+  }
+  if (data.due_at && data.late_submission_deadline) {
+    if (new Date(data.late_submission_deadline) <= new Date(data.due_at)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Late submission deadline must be after the main deadline.",
+        path: ["late_submission_deadline"],
+      })
+    }
+  }
+})
+
+export async function updateTask(formData: FormData): Promise<TaskActionResult> {
+  const profile = await requireProfile()
+
+  const rawRuleIds = formData.getAll("rule_ids").map((v) => String(v)).filter(Boolean)
+
+  const parsed = UpdateTaskSchema.safeParse({
+    id: formData.get("id"),
+    title: formData.get("title") || "",
+    description: formData.get("description") ?? "",
+    instructions: formData.get("instructions") ?? "",
+    due_at: formData.get("due_at") ?? "",
+    allow_late: formData.get("allow_late") === "on" || formData.get("allow_late") === "true",
+    late_submission_deadline: formData.get("late_submission_deadline") ?? "",
+    require_late_reason:
+      formData.get("require_late_reason") === "on" ||
+      formData.get("require_late_reason") === "true",
+    rule_ids:
+      formData.get("rules_section_shown") === "1"
+        ? rawRuleIds.length > 0 ? rawRuleIds : []
+        : null,
+  })
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
+  }
+
+  const admin = createAdminClient()
+  const { data: task } = await admin
+    .from("tasks")
+    .select("id, team_id")
+    .eq("id", parsed.data.id)
+    .maybeSingle()
+  if (!task) return { ok: false, error: "Task not found." }
+
+  try {
+    await assertCapability(profile, CAPABILITIES.TASKS_UPDATE, {
+      team_id: task.team_id,
+      is_global: false,
+    })
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return { ok: false, error: "You do not have permission to edit this task." }
+    }
+    throw err
+  }
+
+  const { error: updateErr } = await admin
+    .from("tasks")
+    .update({
+      title: parsed.data.title,
+      description: parsed.data.description || null,
+      instructions: parsed.data.instructions || null,
+      due_at: parsed.data.due_at,
+      allow_late: parsed.data.allow_late,
+      late_submission_deadline: parsed.data.late_submission_deadline,
+      require_late_reason: parsed.data.require_late_reason,
+      rule_ids: parsed.data.rule_ids,
+    })
+    .eq("id", task.id)
+  if (updateErr) return { ok: false, error: updateErr.message }
+
+  await logActivity({
+    actorId: profile.id,
+    teamId: task.team_id,
+    action: "task.updated",
+    entityType: "task",
+    entityId: task.id,
+    metadata: { title: parsed.data.title },
+  })
+
+  void indexDocument({
+    source_type: "task",
+    source_id: task.id,
+    team_id: task.team_id,
+    owner_id: profile.id,
+    title: parsed.data.title,
+    content: joinContent([
+      parsed.data.title,
+      parsed.data.description ?? null,
+      parsed.data.instructions ?? null,
+      parsed.data.due_at ? `Deadline: ${parsed.data.due_at}` : null,
+    ]),
+    metadata: {
+      due_at: parsed.data.due_at,
+      allow_late: parsed.data.allow_late,
+    },
+  })
+
+  revalidatePath("/dashboard/tasks")
+  revalidatePath(`/dashboard/tasks/${task.id}`)
+  return { ok: true, taskId: task.id }
+}
+
 const AssignSchema = z.object({
   task_id: z.string().uuid(),
   mode: z.enum(["all", "selected"]),

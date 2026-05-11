@@ -7,11 +7,13 @@ import {
   getTaskById,
   getMyAssignmentForTask,
   listAssignmentsForTask,
+  listRules,
 } from "@/lib/data"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { TaskSubmissionForm } from "@/components/dashboard/task-submission-form"
 import { StatusBadge } from "@/components/dashboard/status-badge"
 import { DeleteTaskButton } from "@/components/dashboard/delete-task-button"
+import { TaskEditor } from "@/components/dashboard/task-editor"
 import { AssignmentsRealtimeListener } from "@/components/dashboard/assignments-realtime-listener"
 import { formatRelative } from "@/lib/format"
 import {
@@ -42,6 +44,7 @@ export default async function TaskDetailPage({
   const canCreateTask = ctx.hasScoped(CAPABILITIES.TASKS_CREATE, scope)
   const canAssignTask = ctx.hasScoped(CAPABILITIES.TASKS_ASSIGN, scope)
   const canDeleteTask = ctx.hasScoped(CAPABILITIES.TASKS_DELETE, scope)
+  const canUpdateTask = ctx.hasScoped(CAPABILITIES.TASKS_UPDATE, scope)
   const canManageTask = canCreateTask || canAssignTask || canDeleteTask
 
   if (!canReadTask && !canManageTask && !myAssignment) {
@@ -52,6 +55,8 @@ export default async function TaskDetailPage({
   if (profile.role === "member" && !myAssignment && !canManageTask) {
     notFound()
   }
+
+  const rules = canUpdateTask ? await listRules(profile) : []
 
   const assignments = canManageTask
     ? (await listAssignmentsForTask(id)).map((a) => {
@@ -80,6 +85,8 @@ export default async function TaskDetailPage({
         description={task.description ?? "Task details and submission."}
         action={canDeleteTask ? <DeleteTaskButton taskId={task.id} /> : undefined}
       />
+
+      {canUpdateTask ? <TaskEditor task={task} rules={rules} /> : null}
 
       {/* Meta strip */}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 shadow-card">

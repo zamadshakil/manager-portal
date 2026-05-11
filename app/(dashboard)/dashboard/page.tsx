@@ -109,12 +109,12 @@ async function RecentSubmissionsSection({ profile }: { profile: Profile }) {
 
 async function MaterialsSection({ profile }: { profile: Profile }) {
   const rows = await listMaterials(profile, 6)
-  return <Materials rows={rows} />
+  return <Materials rows={rows} showViewAll />
 }
 
 async function AnnouncementsSection({ profile }: { profile: Profile }) {
   const rows = await listAnnouncements(profile, 5)
-  return <Announcements rows={rows} />
+  return <Announcements rows={rows} showViewAll />
 }
 
 async function ActivitySection({ profile }: { profile: Profile }) {

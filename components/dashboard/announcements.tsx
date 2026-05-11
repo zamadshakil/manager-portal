@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { Megaphone, Clock, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatRelative, formatDate } from "@/lib/format"
@@ -19,24 +20,33 @@ interface AnnouncementsProps {
   canDeleteGlobal?: boolean
   currentTeamId?: string | null
   showAll?: boolean
+  showViewAll?: boolean
 }
 
-export function Announcements({ rows, emptyHint, canDelete = false, canDeleteGlobal = false, currentTeamId }: AnnouncementsProps) {
+export function Announcements({ rows, emptyHint, canDelete = false, canDeleteGlobal = false, currentTeamId, showViewAll = false }: AnnouncementsProps) {
   return (
     <section
       aria-labelledby="announcements-heading"
       className="rounded-xl border border-border bg-card shadow-card"
     >
       <header className="flex items-center gap-2.5 border-b border-border px-4 py-3.5 lg:px-5">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-warm-white">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-warm-white shrink-0">
           <Megaphone className="h-4 w-4" aria-hidden="true" />
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h2 id="announcements-heading" className="text-[15px] font-semibold tracking-tight">
             Announcements
           </h2>
           <p className="text-[12px] text-muted-foreground">Updates from administrators and managers.</p>
         </div>
+        {showViewAll ? (
+          <Link
+            href="/dashboard/announcements"
+            className="shrink-0 text-[13px] font-semibold text-primary hover:underline"
+          >
+            View all
+          </Link>
+        ) : null}
       </header>
 
       {rows.length === 0 ? (

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { FolderOpen, Download, Clock, Users, Trash2, Loader2, CheckSquare, Square } from "lucide-react"
 import { fileIconLabel, formatBytes, formatRelative, formatDate } from "@/lib/format"
 import { DeleteIconButton } from "@/components/dashboard/delete-icon-button"
@@ -25,9 +26,10 @@ interface MaterialsProps {
   canDelete?: boolean
   canDeleteGlobal?: boolean
   currentTeamId?: string | null
+  showViewAll?: boolean
 }
 
-export function Materials({ rows, emptyHint, canDelete = false, canDeleteGlobal = false, currentTeamId }: MaterialsProps) {
+export function Materials({ rows, emptyHint, canDelete = false, canDeleteGlobal = false, currentTeamId, showViewAll = false }: MaterialsProps) {
   const router = useRouter()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
@@ -89,6 +91,14 @@ export function Materials({ rows, emptyHint, canDelete = false, canDeleteGlobal 
             Templates, references, and shared resources.
           </p>
         </div>
+        {showViewAll ? (
+          <Link
+            href="/dashboard/materials"
+            className="shrink-0 text-[13px] font-semibold text-primary hover:underline"
+          >
+            View all
+          </Link>
+        ) : null}
         {canDelete && deletableIds.length > 0 && rows.length > 0 && (
           <div className="flex items-center gap-2 shrink-0">
             <button
