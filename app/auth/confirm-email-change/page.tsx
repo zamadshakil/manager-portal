@@ -28,7 +28,12 @@ export default async function ConfirmEmailChangePage({ searchParams }: PageProps
   if (!uid || !token) {
     result = { ok: false, error: "This confirmation link is missing required parameters." }
   } else {
-    result = await confirmEmailChange(uid, token)
+    try {
+      result = await confirmEmailChange(uid, token)
+    } catch (err) {
+      console.error("[confirm-email-change] unhandled error:", err)
+      result = { ok: false, error: "An unexpected server error occurred. Please try again or contact your administrator." }
+    }
   }
 
   return (

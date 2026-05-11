@@ -813,8 +813,10 @@ export async function confirmEmailChange(
     metadata: { old_email: target.email, new_email: target.pending_email },
   })
 
-  revalidatePath("/dashboard/team")
-  revalidatePath("/dashboard/admin/users")
+  // NOTE: revalidatePath is intentionally absent here. This function runs during
+  // a server-component GET render (the confirmation link click), and revalidatePath
+  // throws an invariant error outside of POST/action mutation contexts. The admin
+  // dashboard refreshes stale data naturally on the next navigation.
   return { ok: true, newEmail: target.pending_email }
 }
 
