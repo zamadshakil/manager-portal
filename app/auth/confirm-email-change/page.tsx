@@ -95,9 +95,17 @@ export default async function ConfirmEmailChangePage({ searchParams }: PageProps
         </div>
 
         <footer className="flex items-center justify-end gap-3 border-t border-border bg-muted/30 px-6 py-4">
-          <Button asChild>
-            <Link href="/auth/login">{result.ok ? "Sign in" : "Back to sign in"}</Link>
-          </Button>
+          {result.ok ? (
+            /* POST to signout so the old JWT is cleared before re-login.
+               If not signed in, signout is a no-op that still redirects to /auth/login. */
+            <form action="/auth/signout" method="POST">
+              <Button type="submit">Sign in with new email</Button>
+            </form>
+          ) : (
+            <Button asChild>
+              <Link href="/auth/login">Back to sign in</Link>
+            </Button>
+          )}
         </footer>
       </div>
     </main>

@@ -201,6 +201,10 @@ export async function sendEmailChangeVerification({
   const safeNewEmail = escapeHtml(newEmail)
   const safeOldEmail = escapeHtml(oldEmail)
   const safeVerifyLink = encodeURI(verifyLink)
+  // HTML href attributes require & to be &amp; — without this, strict email
+  // clients (Outlook, Apple Mail) may truncate the query string at the first &
+  // and deliver a broken confirmation link.
+  const safeVerifyLinkHtml = safeVerifyLink.replace(/&/g, '&amp;')
   const safeAddress = escapeHtml(companyAddress)
   const safeExpires = escapeHtml(
     new Date(expiresAt).toLocaleString("en-US", {
@@ -239,9 +243,10 @@ export async function sendEmailChangeVerification({
                 </tr>
               </table>
               <p style="margin:0 0 6px;text-align:center;font-family:Arial,Helvetica,sans-serif;">
-                <a href="${safeVerifyLink}" style="color:#2563eb;font-size:16px;font-weight:700;text-decoration:underline;font-family:Arial,Helvetica,sans-serif;">Confirm email change &#8594;</a>
+                <a href="${safeVerifyLinkHtml}" style="color:#2563eb;font-size:16px;font-weight:700;text-decoration:underline;font-family:Arial,Helvetica,sans-serif;">Confirm email change &#8594;</a>
               </p>
               <p style="margin:0 0 24px;text-align:center;font-size:12px;color:#9ca3af;word-break:break-all;font-family:Arial,Helvetica,sans-serif;">${safeVerifyLink}</p>
+              <!-- Note: plain-text display uses the unescaped URL intentionally -->
               <p style="margin:0 0 10px;font-size:13px;color:#6b7280;font-family:Arial,Helvetica,sans-serif;">This link expires on <strong style="color:#111827;">${safeExpires}</strong>. Until confirmed, your account will continue to use <strong style="color:#111827;">${safeOldEmail}</strong> for sign-in.</p>
               <p style="margin:0;font-size:13px;color:#6b7280;font-family:Arial,Helvetica,sans-serif;">If you did not expect this change, ignore this email or contact your administrator immediately.</p>
             </td>
@@ -315,6 +320,145 @@ This is a transactional security email.`
     return true
   } catch (err) {
     console.error("[email] Exception sending email-change verification:", err)
+    return false
+  }
+}
+
+export interface EmailChangeAlertProps {
+  /** The CURRENT (old) email address — alert mail goes here. */
+  oldEmail: string
+  /** The NEW requested email address (informational only). */
+  newEmail: string
+  /** Display name of the user. */
+  fullName: string
+  /** ISO string when the pending token expires. */
+  expiresAt: string
+}
+
+/**
+ * Sends a heads-up to the CURRENT email address whenever an admin initiates
+ * an email change. The recipient does not need to act — the actual swap only
+ * happens after the new address is confirmed. This is a pure security notice.
+ */
+export async function sendEmailChangeAlert({
+  oldEmail,
+  newEmail,
+  fullName,
+  expiresAt,
+}: EmailChangeAlertProps): Promise<boolean> {
+  const apiKey = process.env.BREVO_API_KEY
+  const senderEmail = process.env.BREVO_SENDER_EMAIL
+  const senderName = process.env.BREVO_SENDER_NAME || "AI Manager Portal"
+  const companyAddress = process.env.COMPANY_ADDRESS || "Johar Town, Lahore"
+
+  if (!apiKey || !senderEmail) return false
+
+  const safeSenderName = escapeHtml(senderName)
+  const safeFullName = escapeHtml(fullName)
+  const safeNewEmail = escapeHtml(newEmail)
+  const safeAddress = escapeHtml(companyAddress)
+  const safeExpires = escapeHtml(
+    new Date(expiresAt).toLocaleString("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }),
+  )
+
+  const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation">
+    <tr>
+      <td align="center" style="padding:40px 20px;background-color:#f3f4f6;">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" role="presentation" style="max-width:600px;width:100%;">
+          <tr>
+            <td style="background-color:#92400e;padding:28px 32px;text-align:center;border-radius:8px 8px 0 0;">
+              <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;font-family:Arial,Helvetica,sans-serif;">&#9888; Security Notice</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#ffffff;padding:36px 32px 32px;">
+              <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#111827;font-family:Arial,Helvetica,sans-serif;">Hi ${safeFullName},</h1>
+              <p style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#4b5563;font-family:Arial,Helvetica,sans-serif;">An administrator on <strong style="color:#111827;">${safeSenderName}</strong> has initiated an email address change for your account.</p>
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="background-color:#fef3c7;border:1px solid #f59e0b;border-radius:6px;margin-bottom:24px;">
+                <tr>
+                  <td style="padding:16px 20px;">
+                    <p style="margin:0 0 8px;font-size:14px;color:#4b5563;font-family:Arial,Helvetica,sans-serif;"><strong style="color:#78350f;">Requested new email:</strong>&nbsp;<span style="color:#111827;font-family:'Courier New',Courier,monospace;font-weight:600;">${safeNewEmail}</span></p>
+                    <p style="margin:0;font-size:13px;color:#92400e;font-family:Arial,Helvetica,sans-serif;">A verification link has been sent to the new address. <strong>The change only takes effect after it is confirmed.</strong></p>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 10px;font-size:13px;color:#6b7280;font-family:Arial,Helvetica,sans-serif;">This pending change expires on <strong style="color:#111827;">${safeExpires}</strong>. Until confirmed, your account will continue to use this email address for sign-in.</p>
+              <p style="margin:0;font-size:13px;color:#6b7280;font-family:Arial,Helvetica,sans-serif;">If you did not expect this change, contact your administrator immediately.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;border-radius:0 0 8px 8px;">
+              <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;font-family:Arial,Helvetica,sans-serif;">&copy; ${new Date().getFullYear()} ${safeSenderName}. All rights reserved.</p>
+              <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;font-family:Arial,Helvetica,sans-serif;">${safeAddress}</p>
+              <p style="margin:0;font-size:11px;color:#d1d5db;font-family:Arial,Helvetica,sans-serif;">This is a transactional security email.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+
+  const textContent = `Security Notice \u2014 ${senderName}
+
+Hi ${fullName},
+
+An administrator on ${senderName} has initiated an email address change for your account.
+
+Requested new email: ${newEmail}
+
+A verification link was sent to the new address. The change only takes effect after it is confirmed.
+
+This pending change expires on ${new Date(expiresAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}.
+
+Until confirmed, your account continues to use this address for sign-in.
+
+If you did not expect this, contact your administrator immediately.
+
+---
+${senderName}
+${companyAddress}
+This is a transactional security email.`
+
+  try {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "api-key": apiKey,
+        "content-type": "application/json",
+        "accept": "application/json",
+      },
+      body: JSON.stringify({
+        sender: { email: senderEmail, name: senderName },
+        replyTo: { email: senderEmail, name: senderName },
+        to: [{ email: oldEmail, name: fullName }],
+        subject: `Security notice: email change requested \u2014 ${senderName}`,
+        htmlContent,
+        textContent,
+        headers: {
+          "X-Priority": "1",
+          "Importance": "high",
+        },
+      }),
+    })
+    if (!res.ok) {
+      console.error("[email] Failed to send email-change alert to old address:", await res.text())
+      return false
+    }
+    return true
+  } catch (err) {
+    console.error("[email] Exception sending email-change alert:", err)
     return false
   }
 }

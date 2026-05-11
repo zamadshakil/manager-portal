@@ -6,8 +6,8 @@ import { z } from "zod"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireRole } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
-import { sendWelcomeEmail, sendEmailChangeVerification } from "@/lib/email"
-import { getConfiguredSiteUrl } from "@/lib/site-url"
+import { sendWelcomeEmail, sendEmailChangeVerification, sendEmailChangeAlert } from "@/lib/email"
+import { getCanonicalSiteUrl } from "@/lib/site-url"
 
 // ---------------------------------------------------------------------------
 // Email change verification helpers
@@ -26,10 +26,6 @@ function generateEmailChangeToken(): { raw: string; hash: string } {
 
 function hashEmailChangeToken(raw: string): string {
   return createHash("sha256").update(raw).digest("hex")
-}
-
-function getCanonicalSiteUrl(): string | null {
-  return getConfiguredSiteUrl()
 }
 
 function buildVerifyLink(siteUrl: string, userId: string, rawToken: string): string {
@@ -513,13 +509,9 @@ export async function updateUserProfile(
     return { ok: false, error: "That email already has a verification pending on another account." }
   }
 
-  // 3c. We need a valid site URL to build the verification link. Without it
-  //     we cannot safely deliver the user a working confirmation page.
+  // 3c. Build the verification link. Falls back to the hardcoded production URL
+  //     when NEXT_PUBLIC_SITE_URL is absent so we never silently block the flow.
   const siteUrl = getCanonicalSiteUrl()
-  if (!siteUrl) {
-    console.error("[updateUserProfile] NEXT_PUBLIC_SITE_URL not set — cannot generate verification link.")
-    return { ok: false, error: "Server is not configured to send verification links." }
-  }
 
   // 3d. Generate token + persist hashed copy on the profile row.
   const { raw, hash } = generateEmailChangeToken()
@@ -568,6 +560,17 @@ export async function updateUserProfile(
       .eq("id", parsed.data.userId)
     return { ok: false, error: "Could not send the verification email. Please try again." }
   }
+
+  // 3f. Non-blocking security alert to the OLD address so the account holder
+  //     knows their email is being changed before it takes effect.
+  sendEmailChangeAlert({
+    oldEmail: targetProfile.email ?? "",
+    newEmail: parsed.data.email,
+    fullName: requestedName || targetProfile.full_name || parsed.data.email,
+    expiresAt,
+  }).catch((err) => {
+    console.warn("[updateUserProfile] sendEmailChangeAlert to old address threw:", err)
+  })
 
   await logActivity({
     actorId: actor.id,
@@ -665,7 +668,6 @@ export async function resendEmailChangeVerification(
   }
 
   const siteUrl = getCanonicalSiteUrl()
-  if (!siteUrl) return { ok: false, error: "Server is not configured to send verification links." }
 
   const { raw, hash } = generateEmailChangeToken()
   const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TOKEN_TTL_MS).toISOString()

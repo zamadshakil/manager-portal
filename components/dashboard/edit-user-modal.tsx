@@ -232,7 +232,7 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
               />
               {isEmailChange && (
                 <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
-                  <MailWarning className="h-3.5 w-3.5 shrink-0 mt-[1px]" />
+                  <MailWarning className="h-3.5 w-3.5 shrink-0 mt-px" />
                   <span>
                     A verification link will be sent to the <strong>new address</strong>.
                     The change only takes effect after the user confirms it — until then,
@@ -274,7 +274,7 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
             {/* Password reset controls */}
             <div className="rounded-xl border border-border bg-muted/20 p-3.5 space-y-2.5">
               <div className="flex items-start gap-3">
-                <KeyRound className="h-4 w-4 text-muted-foreground shrink-0 mt-[2px]" aria-hidden="true" />
+                <KeyRound className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" aria-hidden="true" />
                 <div className="flex-1 min-w-0">
                   <p className="text-[12.5px] font-semibold">Password</p>
                   <p className="text-[11.5px] text-muted-foreground leading-relaxed">
@@ -338,7 +338,7 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
             {hasPending && (
               <div className="rounded-xl border border-amber-300/60 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 p-3.5 space-y-2.5">
                 <div className="flex items-start gap-2">
-                  <MailWarning className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-[2px]" aria-hidden="true" />
+                  <MailWarning className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
                   <div className="min-w-0">
                     <p className="text-[12.5px] font-semibold text-amber-900 dark:text-amber-200">
                       Email under verification
@@ -387,7 +387,7 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
             {/* Success banner */}
             {success && (
               <p className="text-[12px] font-semibold text-emerald-700 dark:text-emerald-400 flex items-start gap-1.5 animate-in slide-in-from-top-2">
-                <MailCheck className="h-4 w-4 shrink-0 mt-[1px]" aria-hidden="true" />
+                <MailCheck className="h-4 w-4 shrink-0 mt-px" aria-hidden="true" />
                 <span>{success}</span>
               </p>
             )}
@@ -395,7 +395,7 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
             {/* Error */}
             {error && (
               <p className="text-[12px] font-bold text-destructive flex items-start gap-1.5 animate-in slide-in-from-top-2">
-                <XCircle className="h-4 w-4 shrink-0 mt-[1px]" />
+                <XCircle className="h-4 w-4 shrink-0 mt-px" />
                 <span>{error}</span>
               </p>
             )}
