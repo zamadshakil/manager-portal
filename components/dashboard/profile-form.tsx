@@ -47,8 +47,9 @@ export function ProfileForm({ profile }: { profile: Profile }) {
     })
   }
 
-  function onEmailChangeSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
+  function onEmailChangeSubmit(e?: React.FormEvent | React.MouseEvent | React.KeyboardEvent) {
+    e?.preventDefault()
+    if (!newEmail.trim()) return
     setEmailError(null)
     setEmailSuccess(null)
     startEmail(async () => {
@@ -246,18 +247,18 @@ export function ProfileForm({ profile }: { profile: Profile }) {
               </div>
             )}
 
-            {/* Change email form */}
+            {/* Change email — NOT a <form> to avoid nesting inside the outer profile form */}
             {showEmailChange && !pendingEmail && (
-              <form onSubmit={onEmailChangeSubmit} className="rounded-xl border border-border bg-muted/30 p-3 space-y-2.5">
+              <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2.5">
                 <p className="text-[11.5px] text-muted-foreground leading-relaxed">
                   A verification link will be sent to the new address. Your current email stays active until confirmed.
                 </p>
                 <input
                   type="email"
-                  required
                   placeholder="new@example.com"
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onEmailChangeSubmit(e) } }}
                   disabled={emailPending}
                   autoComplete="off"
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
@@ -271,14 +272,15 @@ export function ProfileForm({ profile }: { profile: Profile }) {
                     Cancel
                   </button>
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={onEmailChangeSubmit}
                     disabled={emailPending || !newEmail.trim()}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 h-8 text-[12px] font-semibold text-primary-foreground hover:bg-[#005bab] transition-colors disabled:opacity-60"
                   >
                     {emailPending ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending…</> : "Send verification"}
                   </button>
                 </div>
-              </form>
+              </div>
             )}
 
             {/* Email action feedback */}
