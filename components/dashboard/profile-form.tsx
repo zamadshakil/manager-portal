@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { User, Loader2, Check, Image as ImageIcon } from "lucide-react"
+import { User, Loader2, Check, Image as ImageIcon, Mail, MailWarning, MailCheck, Ban, RefreshCw, XCircle, ChevronDown } from "lucide-react"
 import { updateProfile } from "@/app/actions/profile"
+import { updateUserProfile, cancelPendingEmailChange, resendEmailChangeVerification } from "@/app/actions/users"
 import type { Profile } from "@/lib/types"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
@@ -16,6 +17,18 @@ export function ProfileForm({ profile }: { profile: Profile }) {
   const [avatarUploading, setAvatarUploading] = useState(false)
   const [avatarError, setAvatarError] = useState<string | null>(null)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(profile.avatar_url)
+
+  // Email-change state — main_admin only
+  const isMainAdmin = profile.role === "main_admin"
+  const [showEmailChange, setShowEmailChange] = useState(false)
+  const [newEmail, setNewEmail] = useState("")
+  const [pendingEmail, setPendingEmail] = useState<string | null>(profile.pending_email ?? null)
+  const [pendingExpiry, setPendingExpiry] = useState<string | null>(profile.email_change_token_expires_at ?? null)
+  const [emailSuccess, setEmailSuccess] = useState<string | null>(null)
+  const [emailError, setEmailError] = useState<string | null>(null)
+  const [emailPending, startEmail] = useTransition()
+  const [cancelPendingT, startCancel] = useTransition()
+  const [resendPendingT, startResend] = useTransition()
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -31,6 +44,54 @@ export function ProfileForm({ profile }: { profile: Profile }) {
       }
       setSaved(true)
       router.refresh()
+    })
+  }
+
+  function onEmailChangeSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setEmailError(null)
+    setEmailSuccess(null)
+    startEmail(async () => {
+      const res = await updateUserProfile(profile.id, profile.full_name ?? name, newEmail.trim())
+      if (!res.ok) {
+        setEmailError(res.error ?? "Could not initiate email change.")
+        return
+      }
+      if (res.pendingEmail) {
+        setPendingEmail(res.pendingEmail)
+        setPendingExpiry(null)
+        setEmailSuccess(`Verification email sent to ${res.pendingEmail}. Click the link in that inbox to confirm.`)
+        setNewEmail("")
+        setShowEmailChange(false)
+      }
+    })
+  }
+
+  function onCancelEmailChange() {
+    setEmailError(null)
+    setEmailSuccess(null)
+    startCancel(async () => {
+      const res = await cancelPendingEmailChange(profile.id)
+      if (!res.ok) {
+        setEmailError(res.error ?? "Could not cancel.")
+        return
+      }
+      setPendingEmail(null)
+      setPendingExpiry(null)
+      setEmailSuccess("Pending email change cancelled.")
+    })
+  }
+
+  function onResendEmailChange() {
+    setEmailError(null)
+    setEmailSuccess(null)
+    startResend(async () => {
+      const res = await resendEmailChangeVerification(profile.id)
+      if (!res.ok) {
+        setEmailError(res.error ?? "Could not resend.")
+        return
+      }
+      setEmailSuccess(`Verification email resent to ${pendingEmail}.`)
     })
   }
 
@@ -125,14 +186,125 @@ export function ProfileForm({ profile }: { profile: Profile }) {
             ) : null}
           </div>
         </div>
-        <label className="block">
-          <span className="text-[12px] font-semibold text-muted-foreground">Email</span>
-          <input
-            value={profile.email}
-            disabled
-            className="mt-1 w-full rounded-lg border border-border bg-muted px-3 py-2 text-[13px] text-muted-foreground"
-          />
-        </label>
+        {/* Email section */}
+        {isMainAdmin ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-[12px] font-semibold text-muted-foreground mb-0.5">Email</p>
+                <p className="text-[13px] font-mono truncate">{profile.email}</p>
+              </div>
+              {!pendingEmail && (
+                <button
+                  type="button"
+                  onClick={() => { setShowEmailChange((v) => !v); setEmailError(null); setEmailSuccess(null) }}
+                  className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 h-8 text-[12px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                >
+                  <Mail className="h-3.5 w-3.5" aria-hidden="true" />
+                  {showEmailChange ? "Cancel" : "Change"}
+                  {!showEmailChange && <ChevronDown className="h-3 w-3" aria-hidden="true" />}
+                </button>
+              )}
+            </div>
+
+            {/* Pending banner */}
+            {pendingEmail && (
+              <div className="rounded-xl border border-amber-300/60 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <MailWarning className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-px" aria-hidden="true" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[12px] font-semibold text-amber-900 dark:text-amber-200">Email under verification</p>
+                    <p className="text-[11.5px] text-amber-800/80 dark:text-amber-200/80 leading-relaxed">
+                      Pending change to{" "}
+                      <span className="font-mono font-semibold break-all">{pendingEmail}</span>
+                      {pendingExpiry && (
+                        <> — expires {new Date(pendingExpiry).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-1.5 pl-6">
+                  <button
+                    type="button"
+                    onClick={onResendEmailChange}
+                    disabled={resendPendingT}
+                    className="inline-flex items-center gap-1 rounded-lg bg-amber-100 dark:bg-amber-500/20 border border-amber-300/60 dark:border-amber-500/30 px-2.5 h-7 text-[11.5px] font-semibold text-amber-900 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                  >
+                    {resendPendingT ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                    Resend link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onCancelEmailChange}
+                    disabled={cancelPendingT}
+                    className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 h-7 text-[11.5px] font-semibold text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  >
+                    {cancelPendingT ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />}
+                    Cancel pending change
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Change email form */}
+            {showEmailChange && !pendingEmail && (
+              <form onSubmit={onEmailChangeSubmit} className="rounded-xl border border-border bg-muted/30 p-3 space-y-2.5">
+                <p className="text-[11.5px] text-muted-foreground leading-relaxed">
+                  A verification link will be sent to the new address. Your current email stays active until confirmed.
+                </p>
+                <input
+                  type="email"
+                  required
+                  placeholder="new@example.com"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  disabled={emailPending}
+                  autoComplete="off"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowEmailChange(false); setNewEmail(""); setEmailError(null) }}
+                    className="rounded-lg border border-border px-3 h-8 text-[12px] font-semibold hover:bg-muted transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={emailPending || !newEmail.trim()}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 h-8 text-[12px] font-semibold text-primary-foreground hover:bg-[#005bab] transition-colors disabled:opacity-60"
+                  >
+                    {emailPending ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending…</> : "Send verification"}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Email action feedback */}
+            {emailSuccess && (
+              <p className="text-[12px] font-semibold text-emerald-700 dark:text-emerald-400 flex items-start gap-1.5">
+                <MailCheck className="h-4 w-4 shrink-0 mt-px" aria-hidden="true" />
+                <span>{emailSuccess}</span>
+              </p>
+            )}
+            {emailError && (
+              <p className="text-[12px] font-bold text-destructive flex items-start gap-1.5">
+                <XCircle className="h-4 w-4 shrink-0 mt-px" />
+                <span>{emailError}</span>
+              </p>
+            )}
+          </div>
+        ) : (
+          <label className="block">
+            <span className="text-[12px] font-semibold text-muted-foreground">Email</span>
+            <input
+              value={profile.email}
+              disabled
+              className="mt-1 w-full rounded-lg border border-border bg-muted px-3 py-2 text-[13px] text-muted-foreground"
+            />
+          </label>
+        )}
         <label className="block">
           <span className="text-[12px] font-semibold text-muted-foreground">Full name</span>
           <input
