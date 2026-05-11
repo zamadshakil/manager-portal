@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { 
   History, 
   FileText, 
@@ -15,7 +15,10 @@ import {
   ListTodo,
   BrainCircuit,
   MessageSquare,
-  CreditCard
+  CreditCard,
+  Search,
+  X,
+  SlidersHorizontal
 } from "lucide-react"
 import { formatRelative } from "@/lib/format"
 import type { ActivityLogEntry } from "@/lib/types"
@@ -55,13 +58,70 @@ function getActionDetails(action: string) {
   }
 }
 
+const CATEGORIES = [
+  { value: "all",          label: "All" },
+  { value: "submission",   label: "Submissions" },
+  { value: "announcement", label: "Announcements" },
+  { value: "material",     label: "Materials" },
+  { value: "rule",         label: "Rules" },
+  { value: "user",         label: "Users" },
+  { value: "task",         label: "Tasks" },
+  { value: "ai",           label: "AI & Credits" },
+]
+
+const PERIODS = [
+  { value: "all",   label: "All time" },
+  { value: "today", label: "Today" },
+  { value: "7d",    label: "Last 7 days" },
+  { value: "30d",   label: "Last 30 days" },
+]
+
 export function ActivityLog({ rows: initialRows, expanded = false }: ActivityLogProps) {
   const [rows, setRows] = useState(initialRows)
+  const [search, setSearch] = useState("")
+  const [category, setCategory] = useState("all")
+  const [period, setPeriod] = useState("all")
   void expanded
 
   useEffect(() => {
     setRows(initialRows)
   }, [initialRows])
+
+  const filteredRows = useMemo(() => {
+    let result = rows
+
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      result = result.filter(r =>
+        (r.actor_name?.toLowerCase().includes(q) ?? false) ||
+        (r.actor_email?.toLowerCase().includes(q) ?? false)
+      )
+    }
+
+    if (category !== "all") {
+      if (category === "ai") {
+        result = result.filter(r => r.action.startsWith("smart_ai") || r.action.startsWith("ai_credits"))
+      } else {
+        result = result.filter(r => r.action.startsWith(category))
+      }
+    }
+
+    if (period !== "all") {
+      const now = Date.now()
+      const ms = period === "today" ? 86_400_000 : period === "7d" ? 7 * 86_400_000 : 30 * 86_400_000
+      result = result.filter(r => now - new Date(r.created_at).getTime() <= ms)
+    }
+
+    return result
+  }, [rows, search, category, period])
+
+  const hasActiveFilters = search.trim() !== "" || category !== "all" || period !== "all"
+
+  function clearFilters() {
+    setSearch("")
+    setCategory("all")
+    setPeriod("all")
+  }
 
   useEffect(() => {
     const supabase = createClient()
@@ -125,16 +185,91 @@ export function ActivityLog({ rows: initialRows, expanded = false }: ActivityLog
         </div>
       </header>
 
+      {/* Filter bar */}
+      <div className="px-5 py-3.5 border-b border-border bg-muted/10 space-y-3">
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search by actor name or email…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-8 pr-8 py-2 text-[13px] rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Category pills */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          {CATEGORIES.map(c => (
+            <button
+              key={c.value}
+              onClick={() => setCategory(c.value)}
+              className={`px-2.5 py-1 rounded-full text-[11.5px] font-medium transition-colors ${
+                category === c.value
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Time period pills */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <History className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          {PERIODS.map(p => (
+            <button
+              key={p.value}
+              onClick={() => setPeriod(p.value)}
+              className={`px-2.5 py-1 rounded-full text-[11.5px] font-medium transition-colors ${
+                period === p.value
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Results summary + clear */}
+        <div className="flex items-center justify-between pt-0.5">
+          <p className="text-[11.5px] text-muted-foreground">
+            {filteredRows.length} {filteredRows.length === 1 ? "entry" : "entries"}{hasActiveFilters ? ` of ${rows.length}` : ""}
+          </p>
+          {hasActiveFilters && (
+            <button onClick={clearFilters} className="text-[11.5px] text-primary hover:underline font-medium">
+              Clear filters
+            </button>
+          )}
+        </div>
+      </div>
+
       {rows.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 px-5 text-center">
           <History className="h-10 w-10 text-muted-foreground/30 mb-3" />
           <p className="text-[14px] font-medium text-foreground">No activity recorded</p>
           <p className="text-[13px] text-muted-foreground mt-1">Actions taken by your team will appear here.</p>
         </div>
+      ) : filteredRows.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 px-5 text-center">
+          <Search className="h-10 w-10 text-muted-foreground/30 mb-3" />
+          <p className="text-[14px] font-medium text-foreground">No matching entries</p>
+          <p className="text-[13px] text-muted-foreground mt-1">Try adjusting your filters.</p>
+          <button onClick={clearFilters} className="mt-3 text-[12.5px] text-primary hover:underline font-medium">Clear filters</button>
+        </div>
       ) : (
         <div className="p-5 lg:p-6">
           <div className="relative space-y-6 before:absolute before:top-4 before:bottom-4 before:left-[1.125rem] before:w-px before:bg-border/60">
-            {rows.map((entry) => {
+            {filteredRows.map((entry) => {
               const details = getActionDetails(entry.action)
               const Icon = details.icon
               
