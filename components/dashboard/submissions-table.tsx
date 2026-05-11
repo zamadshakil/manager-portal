@@ -96,7 +96,12 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
   const [isDeleting, startDeleting] = useTransition()
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [targetIds, setTargetIds] = useState<string[]>([])
-  const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set())
+  const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(() => {
+    if (!grouped || rows.length === 0) return new Set()
+    const keys = new Set<string>()
+    for (const row of rows) keys.add(row.task_id ?? "__no_task__")
+    return keys
+  })
 
   function detailHref(id: string) {
     const qs = fromStatus ? `?fromStatus=${encodeURIComponent(fromStatus)}` : ""
