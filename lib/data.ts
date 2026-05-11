@@ -617,7 +617,7 @@ export async function getMyAssignmentForTask(
   profile: Profile,
   taskId: string,
 ): Promise<TaskAssignment | null> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data } = await supabase
     .from("task_assignments")
     .select("*")
