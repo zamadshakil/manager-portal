@@ -7,27 +7,10 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { listSubmissions } from "@/lib/data"
 import { PageHeader } from "@/components/dashboard/page-header"
-import { SubmissionsTable } from "@/components/dashboard/submissions-table"
-import { SubmissionsFilter } from "@/components/dashboard/submissions-filter"
 import { BulkExportDialog } from "@/components/dashboard/bulk-export-dialog"
-import type { SubmissionStatus } from "@/lib/types"
+import { SubmissionsClientView } from "@/components/dashboard/submissions-client-view"
 
-interface PageProps {
-  searchParams: Promise<{ status?: string }>
-}
-
-const VALID: SubmissionStatus[] = [
-  "queued",
-  "parsing",
-  "validating",
-  "passed",
-  "failed",
-  "needs_review",
-  "late_submitted",
-  "missed",
-]
-
-export default async function SubmissionsPage({ searchParams }: PageProps) {
+export default async function SubmissionsPage() {
   const profile = await requireProfile()
   const ctx = await getAccessContext(profile)
   const canReadSubmissions = ctx.has(CAPABILITIES.SUBMISSIONS_READ)
@@ -45,13 +28,7 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
     ? await supabase.from("teams").select("id, name").order("name")
     : { data: [] }
 
-  const params = await searchParams
-  const status =
-    params.status && (VALID as string[]).includes(params.status)
-      ? (params.status as SubmissionStatus)
-      : undefined
-
-  const { rows } = await listSubmissions(profile, { status, limit: 100 })
+  const { rows } = await listSubmissions(profile, { limit: 100 })
 
   const taskIds = [...new Set(rows.filter((r) => r.task_id).map((r) => r.task_id as string))]
   const uploaderIds = [...new Set(rows.map((r) => r.uploader_id))]
@@ -103,21 +80,10 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
         }
       />
 
-      <SubmissionsFilter />
-
-      <SubmissionsTable
+      <SubmissionsClientView
         rows={rows}
-        showFooterLink={false}
-        emptyHint={
-          status
-            ? `No submissions match the "${status.replace("_", " ")}" filter.`
-            : !canUpdateSubmissions && !canDeleteSubmissions
-              ? "Upload your first document to start the validation pipeline."
-              : "Your team hasn't uploaded anything yet."
-        }
         canDelete={canDeleteSubmissions}
-        fromStatus={status}
-        grouped
+        canUpdateOrDelete={canUpdateSubmissions || canDeleteSubmissions}
         taskMap={taskMap}
         userMap={userMap}
       />
