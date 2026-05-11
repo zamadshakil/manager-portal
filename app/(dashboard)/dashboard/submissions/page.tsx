@@ -4,6 +4,7 @@ import { Plus } from "lucide-react"
 import { requireProfile } from "@/lib/auth"
 import { CAPABILITIES, getAccessContext } from "@/lib/permissions"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { listSubmissions } from "@/lib/data"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { SubmissionsTable } from "@/components/dashboard/submissions-table"
@@ -52,6 +53,27 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
 
   const { rows } = await listSubmissions(profile, { status, limit: 100 })
 
+  const taskIds = [...new Set(rows.filter((r) => r.task_id).map((r) => r.task_id as string))]
+  const uploaderIds = [...new Set(rows.map((r) => r.uploader_id))]
+
+  const admin = createAdminClient()
+  const [tasksRes, profilesRes] = await Promise.all([
+    taskIds.length > 0
+      ? admin.from("tasks").select("id, title").in("id", taskIds)
+      : Promise.resolve({ data: [] as { id: string; title: string }[] }),
+    uploaderIds.length > 0
+      ? admin.from("profiles").select("id, full_name, email").in("id", uploaderIds)
+      : Promise.resolve({ data: [] as { id: string; full_name: string | null; email: string }[] }),
+  ])
+
+  const taskMap = Object.fromEntries(
+    ((tasksRes.data ?? []) as { id: string; title: string }[]).map((t) => [t.id, t]),
+  ) as Record<string, { id: string; title: string }>
+
+  const userMap = Object.fromEntries(
+    ((profilesRes.data ?? []) as { id: string; full_name: string | null; email: string }[]).map((p) => [p.id, p]),
+  ) as Record<string, { id: string; full_name: string | null; email: string }>
+
   return (
     <>
       <PageHeader
@@ -95,6 +117,9 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
         }
         canDelete={canDeleteSubmissions}
         fromStatus={status}
+        grouped
+        taskMap={taskMap}
+        userMap={userMap}
       />
     </>
   )
