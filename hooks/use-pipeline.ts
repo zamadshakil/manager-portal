@@ -21,7 +21,15 @@ const TERMINAL_STATUSES = new Set([
   "missed",
 ])
 
-const POLL_INTERVAL_MS = 3_000
+// Exponential-backoff schedule (ms). The pipeline finishes in ~30-60s so the
+// first few polls catch the bulk of state transitions; later polls slow down
+// to spare the rate limiter when something is stuck.
+const POLL_SCHEDULE_MS = [2_000, 3_000, 5_000, 8_000, 10_000]
+
+// Hard ceiling — if we're still polling 5 min after starting, the pipeline is
+// definitively stuck and the cron will mark it failed shortly. The user can
+// always reload to resume polling on the new state.
+const POLL_CEILING_MS = 5 * 60_000
 
 interface UsePipelineOpts {
   /** Auto-refresh the page via router.refresh() when the pipeline reaches a terminal state. */
@@ -51,43 +59,59 @@ export function usePipeline(opts: UsePipelineOpts = {}) {
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
-      clearInterval(pollingRef.current)
+      clearTimeout(pollingRef.current)
       pollingRef.current = null
     }
   }, [])
 
   const poll = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<{ done: boolean }> => {
       try {
         const res = await fetch(`/api/pipeline/${id}`, { cache: "no-store" })
-        if (!res.ok) return
+        if (!res.ok) return { done: false }
         const data = await res.json()
         setStatus(data.status as PipelineStatus)
         setScore(data.score ?? null)
 
         if (data.terminal) {
-          stopPolling()
-          if (refreshOnComplete) {
-            router.refresh()
-          }
+          if (refreshOnComplete) router.refresh()
+          return { done: true }
         }
       } catch {
         // Network blip — keep polling, it'll recover.
       }
+      return { done: false }
     },
-    [stopPolling, refreshOnComplete, router],
+    [refreshOnComplete, router],
   )
 
   const startPolling = useCallback(
     (id: string) => {
       stopPolling()
-      // Immediate first poll after a short delay to give the pipeline time to start.
-      const timeout = setTimeout(() => {
-        poll(id)
-        pollingRef.current = setInterval(() => poll(id), POLL_INTERVAL_MS)
-      }, 1_500)
-      // Store the timeout handle so cleanup can clear it.
-      pollingRef.current = timeout as unknown as ReturnType<typeof setInterval>
+      const startedAt = Date.now()
+      let attempt = 0
+
+      const schedule = (delay: number) => {
+        pollingRef.current = setTimeout(async () => {
+          // Bail if we've been polling longer than the ceiling — the cron
+          // will pick the row up shortly. The user can refresh to resume.
+          if (Date.now() - startedAt > POLL_CEILING_MS) {
+            stopPolling()
+            return
+          }
+          const { done } = await poll(id)
+          if (done) {
+            stopPolling()
+            return
+          }
+          // Move to the next interval, capped at the final entry.
+          attempt = Math.min(attempt + 1, POLL_SCHEDULE_MS.length - 1)
+          schedule(POLL_SCHEDULE_MS[attempt])
+        }, delay) as unknown as ReturnType<typeof setInterval>
+      }
+
+      // Initial poll with a short delay to give the pipeline a head start.
+      schedule(1_500)
     },
     [poll, stopPolling],
   )

@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { ShieldCheck, Trash2, Edit3, Loader2, Plus } from "lucide-react"
 import { upsertRule, deleteRule } from "@/app/actions/rules"
-import type { ValidationRule, Profile, Team } from "@/lib/types"
+import type { ValidationRule, ValidationRuleType, Profile, Team } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {
   AlertDialog,
@@ -33,11 +33,39 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
   const [creating, setCreating] = useState(false)
   const [pending, start] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  const [ruleType, setRuleType] = useState<ValidationRuleType>("scored")
+  const promptRef = useRef<HTMLTextAreaElement | null>(null)
+
+  function openEdit(rule: ValidationRule) {
+    setCreating(false)
+    setEditing(rule)
+    setRuleType(rule.rule_type ?? "scored")
+    setError(null)
+  }
+
+  function openCreate() {
+    setEditing(null)
+    setCreating(true)
+    setRuleType("scored")
+    setError(null)
+  }
 
   function reset() {
     setEditing(null)
     setCreating(false)
     setError(null)
+  }
+
+  function insertTextPlaceholder() {
+    const ta = promptRef.current
+    if (!ta) return
+    const start = ta.selectionStart ?? ta.value.length
+    const end = ta.selectionEnd ?? ta.value.length
+    const next = ta.value.slice(0, start) + "{{TEXT}}" + ta.value.slice(end)
+    ta.value = next
+    ta.focus()
+    const cursor = start + "{{TEXT}}".length
+    ta.setSelectionRange(cursor, cursor)
   }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -86,10 +114,7 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
         {canCreate && (
           <button
             type="button"
-            onClick={() => {
-              setEditing(null)
-              setCreating(true)
-            }}
+            onClick={openCreate}
             className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-background px-3 h-9 text-[12px] font-semibold transition-colors hover:bg-muted"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" /> New rule
@@ -99,6 +124,48 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
 
       {creating || editing ? (
         <form onSubmit={onSubmit} className="border-b border-border bg-warm-white p-4 lg:p-5 space-y-3">
+
+          <fieldset className="rounded-lg border border-border bg-background p-3">
+            <legend className="px-1 text-[11.5px] font-semibold text-muted-foreground">
+              Rule type
+            </legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className={cn(
+                "flex cursor-pointer items-start gap-2 rounded-md border p-2.5 text-[12px]",
+                ruleType === "scored" ? "border-primary bg-[#f2f9ff]" : "border-border",
+              )}>
+                <input
+                  type="radio"
+                  name="rule_type"
+                  value="scored"
+                  checked={ruleType === "scored"}
+                  onChange={() => setRuleType("scored")}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block font-semibold">Scored (0–100)</span>
+                  <span className="text-muted-foreground">For substantive quality criteria. Pass when score ≥ threshold.</span>
+                </span>
+              </label>
+              <label className={cn(
+                "flex cursor-pointer items-start gap-2 rounded-md border p-2.5 text-[12px]",
+                ruleType === "binary" ? "border-primary bg-[#f2f9ff]" : "border-border",
+              )}>
+                <input
+                  type="radio"
+                  name="rule_type"
+                  value="binary"
+                  checked={ruleType === "binary"}
+                  onChange={() => setRuleType("binary")}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block font-semibold">Binary (yes/no)</span>
+                  <span className="text-muted-foreground">For exact checks like “contains the word X”. Score is 100 on pass, 0 on fail.</span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
 
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
@@ -112,8 +179,10 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </label>
-            <label className="block">
-              <span className="text-[12px] font-semibold text-muted-foreground">Threshold (0-100)</span>
+            <label className={cn("block", ruleType === "binary" && "opacity-60 pointer-events-none")}> 
+              <span className="text-[12px] font-semibold text-muted-foreground">
+                Threshold (0-100){ruleType === "binary" ? " — not used for binary rules" : ""}
+              </span>
               <input
                 name="threshold"
                 type="number"
@@ -121,7 +190,7 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
                 max={100}
                 step="0.5"
                 required
-                defaultValue={editing?.threshold ?? 70}
+                defaultValue={editing?.threshold ?? (ruleType === "binary" ? 100 : 70)}
                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </label>
@@ -158,19 +227,36 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
             />
           </label>
           <label className="block">
-            <span className="text-[12px] font-semibold text-muted-foreground">
-              Prompt template
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="text-[12px] font-semibold text-muted-foreground">
+                Prompt template
+              </span>
+              <button
+                type="button"
+                onClick={insertTextPlaceholder}
+                className="text-[11px] font-semibold text-primary hover:underline"
+              >
+                Insert {"{{TEXT}}"} placeholder
+              </button>
+            </div>
             <textarea
+              ref={promptRef}
               name="prompt_template"
               required
-              minLength={20}
+              minLength={30}
               maxLength={4_000}
               rows={5}
               defaultValue={editing?.prompt_template ?? ""}
-              placeholder="Inspect the document for X. Score from 0-100 and list specific issues."
+              placeholder={
+                ruleType === "binary"
+                  ? "Check whether the document contains the word \"hello\". Reply yes or no with the exact phrase you found."
+                  : "Evaluate the document for X. List specific issues and cite evidence from the text."
+              }
               className="mt-1 w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-ring"
             />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Tip: use <code className="font-mono">{"{{TEXT}}"}</code> to insert the document inline; otherwise the document is appended automatically.
+            </p>
           </label>
           {error ? (
             <p role="alert" className="text-[12px] font-semibold text-destructive">
@@ -229,6 +315,16 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
                   >
                     {rule.enabled ? "ENABLED" : "DISABLED"}
                   </span>
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                      (rule.rule_type ?? "scored") === "binary"
+                        ? "bg-purple-50 text-purple-700 border border-purple-100"
+                        : "bg-slate-50 text-slate-700 border border-slate-100",
+                    )}
+                  >
+                    {(rule.rule_type ?? "scored") === "binary" ? "BINARY" : "SCORED"}
+                  </span>
                 </div>
                 {rule.description ? (
                   <p className="mt-0.5 text-[12px] text-muted-foreground line-clamp-2">
@@ -255,10 +351,7 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
                 {canUpdate && !(profile?.role === "manager" && rule.creator_role === "main_admin") && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setCreating(false)
-                      setEditing(rule)
-                    }}
+                    onClick={() => openEdit(rule)}
                     aria-label="Edit rule"
                     className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted transition-colors"
                   >

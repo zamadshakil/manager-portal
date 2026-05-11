@@ -1,6 +1,4 @@
-import { NextResponse } from "next/server"
-// @ts-ignore
-import { unstable_after as after } from "next/server"
+import { NextResponse, after } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { processSubmission } from "@/lib/llm/pipeline"
@@ -91,20 +89,13 @@ export async function POST(
     })
   }
 
-  // Fire-and-forget using Next.js after() to ensure background execution isn't killed
-  // by the serverless runtime.
-  if (typeof after === 'function') {
-    after(() => {
-      processSubmission(submissionId).catch((err) => {
-        console.error("[pipeline] background crash for", submissionId, err)
-      })
-    })
-  } else {
-    // Fallback if after is not available (e.g. Next.js 14 non-experimental)
+  // Fire-and-forget via after() so the background work survives sending the
+  // response. Stable in Next.js 16+.
+  after(() => {
     processSubmission(submissionId).catch((err) => {
       console.error("[pipeline] background crash for", submissionId, err)
     })
-  }
+  })
 
   // Return immediately so the client can begin polling.
   return NextResponse.json({
@@ -124,13 +115,6 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const limited = await enforceApiRateLimit(request, {
-    prefix: "api:pipeline:get",
-    limit: 120,
-    windowMs: 60_000,
-  })
-  if (limited) return limited
-
   const { id: submissionId } = await params
 
   const supabase = await createClient()
@@ -140,6 +124,17 @@ export async function GET(
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+
+  // Per-user rate limit: a user polling many submissions shares one bucket
+  // instead of getting one bucket per path. 120 GETs/min comfortably covers
+  // the exponential-backoff polling schedule for several concurrent uploads.
+  const limited = await enforceApiRateLimit(request, {
+    prefix: "api:pipeline:get",
+    limit: 120,
+    windowMs: 60_000,
+    identifier: user.id,
+  })
+  if (limited) return limited
 
   // Use the user-scoped client so RLS applies.
   const { data: sub } = await supabase

@@ -7,8 +7,17 @@ import { createClient } from "@/lib/supabase/server"
 import { StatusBadge } from "@/components/dashboard/status-badge"
 import { SubmissionActions } from "@/components/dashboard/submission-actions"
 import { fileIconLabel, formatBytes, formatRelative } from "@/lib/format"
-import type { Submission, ValidationRun } from "@/lib/types"
+import type { Submission, ValidationRun, ValidationOutcome } from "@/lib/types"
 import { cn } from "@/lib/utils"
+
+const OUTCOME_BADGE: Record<
+  NonNullable<ValidationOutcome>,
+  { label: string; cls: string }
+> = {
+  passed: { label: "AI: Passed", cls: "bg-[#e8f8eb] text-[#157a2a]" },
+  failed: { label: "AI: Failed", cls: "bg-[#fff1e6] text-[#a4400a]" },
+  needs_review: { label: "AI: Needs review", cls: "bg-[#fff8e1] text-[#7a5b00]" },
+}
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -46,6 +55,11 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
   const isSystemFailure =
     (submission.status === "failed" || submission.status === "needs_review") &&
     !((submission.metadata as any)?.rules_evaluated > 0)
+
+  const validationOutcome = (submission.metadata as any)?.validation_outcome as ValidationOutcome | undefined
+  const reviewReason = (submission.metadata as any)?.review_reason as string | undefined
+  const extractedText = (submission as any).extracted_text as string | undefined
+  const textTruncated = (submission.metadata as any)?.truncated as boolean | undefined
   const scope = { team_id: submission.team_id, owner_id: submission.uploader_id }
 
   const canRetry =
@@ -83,8 +97,20 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
               {formatBytes(submission.size_bytes)} · uploaded{" "}
               {formatRelative(submission.created_at)}
             </p>
-            <div className="mt-2 flex items-center gap-2">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               <StatusBadge status={submission.status} />
+              {/* For late submissions, show the AI verdict as a secondary badge
+                  so managers see both the timeliness AND the quality outcome. */}
+              {submission.status === "late_submitted" && validationOutcome ? (
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none whitespace-nowrap",
+                    OUTCOME_BADGE[validationOutcome]?.cls ?? "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {OUTCOME_BADGE[validationOutcome]?.label ?? validationOutcome}
+                </span>
+              ) : null}
               {submission.score !== null ? (
                 <span className="text-[12px] font-semibold text-muted-foreground">
                   Score {Number(submission.score).toFixed(0)}/100
@@ -247,6 +273,25 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
               Open original
             </a>
           </section>
+
+          {extractedText ? (
+            <section className="rounded-xl border border-border bg-card p-5 shadow-card">
+              <h2 className="text-[15px] font-semibold tracking-tight">Extracted text</h2>
+              <p className="mt-2.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-warm-white px-3 py-2 text-[11.5px] font-mono text-muted-foreground leading-relaxed">
+                {extractedText}
+              </p>
+              {textTruncated ? (
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  Showing first 60,000 characters — the document was truncated for analysis.
+                </p>
+              ) : null}
+              {reviewReason === "no_text" ? (
+                <p className="mt-1.5 text-[11px] font-semibold text-amber-700">
+                  The AI could not extract enough readable text from this file.
+                </p>
+              ) : null}
+            </section>
+          ) : null}
 
           {submission.task_id ? (
             <section className="rounded-xl border border-border bg-card p-5 shadow-card">

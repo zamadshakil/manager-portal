@@ -131,9 +131,9 @@ export async function get(url: string, options?: any) {
   // AWS SDK v3 returns `res.Body` as a Node.js Readable in the Node runtime,
   // which does NOT expose the Web Streams API (`.getReader()`).
   // Normalize to a Web ReadableStream so consumers can call `.getReader()`
-  // (used by lib/llm/pipeline.ts) AND `for await ... of` (Web ReadableStream
-  // is async-iterable in Node 18+, used by lib/pipeline/process.ts) AND pass
-  // it to `new NextResponse(stream, ...)` (used by /api/download/[id]).
+  // and `for await ... of` (Web ReadableStream is async-iterable in Node 18+,
+  // used by lib/llm/pipeline.ts) AND pass it to `new NextResponse(stream, ...)`
+  // (used by /api/download/[id]).
   const body = res.Body as any
   const stream =
     body && typeof body.transformToWebStream === "function"

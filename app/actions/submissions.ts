@@ -1,15 +1,17 @@
 "use server"
 
+import { after } from "next/server"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
-import { put, del } from "@/lib/r2"
+import { putRaw, del } from "@/lib/r2"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireProfile } from "@/lib/auth"
 import { AccessDeniedError, assertCapability, CAPABILITIES, hasScopedCapability } from "@/lib/permissions"
 import { logActivity } from "@/lib/activity"
-import { uploadLimiter } from "@/lib/redis"
-import { clearPipelineLock } from "@/lib/llm/pipeline"
+import { uploadLimiter, acquireUploadLock, releaseUploadLock } from "@/lib/redis"
+import { clearPipelineLock, processSubmission } from "@/lib/llm/pipeline"
 import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
+import { verifyMimeAgainstBuffer } from "@/lib/mime-sniff"
 import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
 
 
@@ -45,6 +47,31 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   // M-12: Require a non-empty, explicitly allow-listed MIME type.
   if (!file.type || !ACCEPTED_MIME_TYPES.includes(file.type as (typeof ACCEPTED_MIME_TYPES)[number])) {
     return { ok: false, error: `Unsupported or missing file type: ${file.type || "unknown"}` }
+  }
+
+  // Magic-byte sniff so a renamed `.exe` (or any other spoofed payload) never
+  // reaches R2 or the parser. We read the buffer once here and reuse it for
+  // the upload below so we don't pay the I/O cost twice for legitimate files.
+  const fileBuffer = Buffer.from(await file.arrayBuffer())
+  const mimeCheck = verifyMimeAgainstBuffer(fileBuffer, file.type)
+  if (!mimeCheck.ok) {
+    return { ok: false, error: mimeCheck.reason }
+  }
+
+  // Dedup mutex: reject a duplicate in-flight upload for the exact same bytes
+  // from the same user (e.g. accidental double-click or network retry that
+  // succeeded on the first attempt). Key = SHA-256 of userId:fileBytes, so
+  // two different users uploading the same PDF share nothing.
+  const { createHash } = await import("crypto")
+  const fileHash = createHash("sha256").update(fileBuffer).digest("hex").slice(0, 16)
+  const dedupKey = `${profile.id}:${fileHash}`
+  const lockAcquired = await acquireUploadLock(dedupKey)
+  if (!lockAcquired) {
+    return {
+      ok: false,
+      error:
+        "A duplicate upload of this file is already being processed. Wait a moment, then check your submissions list.",
+    }
   }
 
   const parsed = UploadSchema.safeParse({
@@ -132,13 +159,17 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   // ---------- Upload to R2 ----------
   // We add a random suffix so the URL is unguessable; the client never receives
   // `blob_url` directly — they hit `/api/download/[id]` which re-checks RLS.
+  // We use `putRaw` with the buffer we already read above; calling
+  // `file.arrayBuffer()` twice on a server-action File can yield 0 bytes
+  // because the underlying stream is consumed on first read.
   const safeName = file.name.replace(/[^\w.\-]+/g, "_")
-  const pathname = `submissions/${profile.team_id}/${profile.id}/${safeName}`
-  const blob = await put(pathname, file, {
-    access: "private",
-    addRandomSuffix: true,
-    contentType: file.type,
-  })
+  const dotIdx = safeName.lastIndexOf(".")
+  const base = dotIdx > 0 ? safeName.slice(0, dotIdx) : safeName
+  const ext = dotIdx > 0 ? safeName.slice(dotIdx + 1) : ""
+  const suffix = Math.random().toString(36).slice(2, 8)
+  const finalName = ext ? `${base}-${suffix}.${ext}` : `${base}-${suffix}`
+  const pathname = `submissions/${profile.team_id}/${profile.id}/${finalName}`
+  const blob = await putRaw(pathname, fileBuffer, file.type)
 
   // ---------- Insert submission row ----------
   const adminClient = supabase
@@ -163,11 +194,17 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
     .single()
 
   if (error || !data) {
-    try {
-      await del(blob.url)
-    } catch {}
+    try { await del(blob.url) } catch {}
+    // Release the lock so the user can retry immediately after a DB failure.
+    await releaseUploadLock(dedupKey)
     return { ok: false, error: error?.message ?? "Could not save submission." }
   }
+
+  // Lock acquired + DB row durably inserted: release so the user can upload
+  // the same file again intentionally if they want (e.g. re-submission after
+  // rejection). The 30s TTL would expire anyway but releasing explicitly keeps
+  // the UX responsive.
+  await releaseUploadLock(dedupKey)
 
   // Mirror initial state onto the assignment immediately so manager dashboards
   // reflect the submission within their next refresh — the pipeline will
@@ -282,6 +319,12 @@ export async function retrySubmission(formData: FormData): Promise<ActionResult>
     (profile.id === data.uploader_id && isSystemFailure)
   if (!canRetry) return { ok: false, error: "Not authorized." }
 
+  // Clear validation_runs from the previous attempt so the UI never shows
+  // stale rule results next to a "queued" / "failed" status. The pipeline's
+  // own Stage-3 cleanup only runs after parsing succeeds, so a retry that
+  // fails before parsing would otherwise leak old rows.
+  await admin.from("validation_runs").delete().eq("submission_id", parsed.data.id)
+
   await admin
     .from("submissions")
     .update({ status: "queued", flags: [], score: null, summary: null })
@@ -301,8 +344,16 @@ export async function retrySubmission(formData: FormData): Promise<ActionResult>
   revalidatePath("/dashboard/submissions")
   revalidatePath(`/dashboard/submissions/${data.id}`)
 
-  // Return submissionId so the client can trigger the pipeline via
-  // POST /api/pipeline/[id] independently.
+  // Trigger the pipeline server-side so the retry isn't dependent on the
+  // client posting to /api/pipeline/[id]. If the user closes the tab or has a
+  // flaky connection, the retry still runs. The client can still poll GET
+  // /api/pipeline/[id] for live status — we just don't rely on a client POST.
+  after(() => {
+    processSubmission(parsed.data.id).catch((err) => {
+      console.error("[retrySubmission] background pipeline crash for", parsed.data.id, err)
+    })
+  })
+
   return { ok: true, submissionId: data.id }
 }
 

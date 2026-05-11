@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getRedis } from "@/lib/redis";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -55,21 +56,62 @@ export async function GET(request: Request) {
     }
 
     // 2. Auto-fail stuck submissions (pipeline crash recovery).
+    //
+    // Two-phase to avoid racing a still-running pipeline:
+    //   a) Select rows that have been in queued/parsing/validating for > 5 min
+    //      (a healthy run completes in ~30-60s).
+    //   b) Skip any row whose Redis lock `pipeline:lock:<id>` is still held —
+    //      that lock is set with a 10-minute TTL by `processSubmission()` and
+    //      is the authoritative "a worker is currently running" signal.
+    //
+    // Rows whose lock has expired or never existed (Redis unavailable, server
+    // restart, etc.) are the genuine zombies and get marked failed.
     const stuckCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const { data: stuck } = await admin
+    const { data: stuckCandidates } = await admin
       .from("submissions")
-      .update({
-        status: "failed",
-        flags: [
-          {
-            severity: "fail",
-            message: "Validation pipeline timed out. Please retry.",
-          },
-        ],
-      } as any)
+      .select("id")
       .in("status", ["queued", "parsing", "validating"])
-      .lt("updated_at", stuckCutoff)
-      .select("id");
+      .lt("updated_at", stuckCutoff);
+
+    let stuckRecoveredIds: string[] = [];
+    const candidateRows = (stuckCandidates as any[]) || [];
+    if (candidateRows.length > 0) {
+      const redis = getRedis();
+      const idsToFail: string[] = [];
+
+      for (const row of candidateRows) {
+        // If Redis is unavailable, fall back to the old behaviour: assume
+        // the pipeline is gone and mark the row failed. Better to surface
+        // a stuck submission than leave it pending indefinitely.
+        let lockHeld = false;
+        if (redis) {
+          try {
+            const lock = await redis.get(`pipeline:lock:${row.id}`);
+            lockHeld = lock !== null;
+          } catch {
+            lockHeld = false;
+          }
+        }
+        if (!lockHeld) idsToFail.push(row.id);
+      }
+
+      if (idsToFail.length > 0) {
+        await admin
+          .from("submissions")
+          .update({
+            status: "failed",
+            flags: [
+              {
+                severity: "fail",
+                message: "Validation pipeline timed out. Please retry.",
+              },
+            ],
+          } as any)
+          .in("id", idsToFail);
+        stuckRecoveredIds = idsToFail;
+      }
+    }
+    const stuck = stuckRecoveredIds.map((id) => ({ id }));
 
     // 3. Clean up expired announcements
     const { data: expiredAnnouncements } = await admin

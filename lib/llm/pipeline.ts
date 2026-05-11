@@ -1,16 +1,29 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { extractText } from "@/lib/parse"
-import { runRule, summarize, describeImage, PROMPT_VERSION } from "@/lib/llm/validate"
+import {
+  runRule,
+  summarize,
+  describeImage,
+  isSafetyFilterError,
+  PROMPT_VERSION,
+} from "@/lib/llm/validate"
 import { llmLimiter, getRedis } from "@/lib/redis"
-import type { Submission, SubmissionFlag, ValidationRule, Task } from "@/lib/types"
+import type {
+  Submission,
+  SubmissionFlag,
+  ValidationRule,
+  Task,
+  ValidationOutcome,
+  ReviewReason,
+} from "@/lib/types"
 
 /**
  * Max rules to evaluate concurrently per submission. Tuned for the Gemini
  * free/Flash-Lite tier — going higher trades token throughput for an
  * avalanche of 429s. Override via env if a paid tier is in use.
  */
-const RULE_CONCURRENCY = Number(process.env.LLM_RULE_CONCURRENCY ?? 4)
+const RULE_CONCURRENCY = Number(process.env.LLM_RULE_CONCURRENCY ?? 6)
 
 /**
  * Max characters to persist in `submissions.extracted_text`. The full text can
@@ -22,10 +35,13 @@ const EXTRACTED_TEXT_PREVIEW_CHARS = 2_000
 
 /**
  * Soft pipeline deadline. Railway doesn't impose a strict function timeout,
- * but we keep a budget to prevent runaway submissions. The primary pipeline
- * entry point is `lib/pipeline/process.ts` called from `/api/pipeline/[id]`.
+ * but we keep a budget to prevent runaway submissions. The pipeline entry
+ * point is `processSubmission()` below, called from `/api/pipeline/[id]`.
+ *
+ * Default 75s — leaves headroom for many-rule teams (parse + 6-way parallel
+ * rules + summary + DB writes) without blowing the Railway request envelope.
  */
-const PIPELINE_BUDGET_MS = Number(process.env.PIPELINE_BUDGET_MS ?? 50_000)
+const PIPELINE_BUDGET_MS = Number(process.env.PIPELINE_BUDGET_MS ?? 75_000)
 
 // ---------------------------------------------------------------------------
 // Inline concurrency limiter (replaces p-limit to avoid ESM-only dep issues).
@@ -196,6 +212,62 @@ async function runPipeline(submissionId: string) {
       console.warn("[pipeline] credit pre-check failed (non-fatal):", creditErr?.message)
     }
 
+    // ── Stage 0: pre-flight checks (cheap, run before any parse work) ────
+    // (a) Verify the blob actually exists in R2. Without this, the pipeline
+    //     downloads a 404 body and the failure shows up as a confusing parse
+    //     error half-way through. HEAD is a single API call and saves the
+    //     full GET if the file is gone.
+    try {
+      const { head } = await import("@/lib/r2")
+      await head(submission.blob_url)
+    } catch (headErr) {
+      const headMsg = headErr instanceof Error ? headErr.message : String(headErr)
+      console.error("[pipeline] blob HEAD failed for", submissionId, headMsg)
+      await admin
+        .from("submissions")
+        .update({
+          status: "failed",
+          flags: [
+            {
+              severity: "fail" as const,
+              message:
+                "The uploaded file is no longer available in storage. Please upload the submission again.",
+            },
+          ] satisfies SubmissionFlag[],
+        })
+        .eq("id", submissionId)
+      clearTimeout(deadlineTimer)
+      return
+    }
+
+    // (b) Pre-parse LLM rate-limit check. The post-parse check at Stage 2
+    //     is still kept (concurrent submissions can still trip it after we
+    //     pass here), but this avoids wasting parse cycles on a doc we'll
+    //     refuse to validate anyway.
+    const preLimit = await llmLimiter().limit(`team:${submission.team_id}`)
+    if (!preLimit.success) {
+      const reviewMeta: { validation_outcome: ValidationOutcome; review_reason: ReviewReason } = {
+        validation_outcome: "needs_review",
+        review_reason: "llm_quota",
+      }
+      await admin
+        .from("submissions")
+        .update({
+          status: "needs_review",
+          flags: [
+            {
+              severity: "warn" as const,
+              message:
+                "Your team has reached its AI validation quota for this window. Marked for manual review — retry shortly to attempt validation again.",
+            },
+          ] satisfies SubmissionFlag[],
+          metadata: reviewMeta as any,
+        })
+        .eq("id", submissionId)
+      clearTimeout(deadlineTimer)
+      return
+    }
+
     await admin.from("submissions").update({ status: "parsing" }).eq("id", submissionId)
 
     // ── Stage 1: Fetch + Parse ────────────────────────────────────────────
@@ -238,6 +310,10 @@ async function runPipeline(submissionId: string) {
         } catch (visionErr) {
           const msg = visionErr instanceof Error ? visionErr.message : String(visionErr)
           console.error("[pipeline] vision extraction failed", msg)
+          const reviewMeta: { validation_outcome: ValidationOutcome; review_reason: ReviewReason } = {
+            validation_outcome: "needs_review",
+            review_reason: "ocr_failed",
+          }
           await admin
             .from("submissions")
             .update({
@@ -248,6 +324,7 @@ async function runPipeline(submissionId: string) {
                   message: `Could not extract text from image (${msg.slice(0, 120)}). Marked for manual review.`,
                 },
               ] satisfies SubmissionFlag[],
+              metadata: reviewMeta as any,
             })
             .eq("id", submissionId)
           return
@@ -264,6 +341,10 @@ async function runPipeline(submissionId: string) {
       console.log("[pipeline] extracted text length:", text.length, "truncated:", truncated)
 
       if (!text || text.trim().length < 20) {
+        const reviewMeta: { validation_outcome: ValidationOutcome; review_reason: ReviewReason } = {
+          validation_outcome: "needs_review",
+          review_reason: "no_text",
+        }
         await admin
           .from("submissions")
           .update({
@@ -274,6 +355,7 @@ async function runPipeline(submissionId: string) {
                 message: "Could not extract enough text from the file.",
               },
             ] satisfies SubmissionFlag[],
+            metadata: reviewMeta as any,
           })
           .eq("id", submissionId)
         return
@@ -304,6 +386,10 @@ async function runPipeline(submissionId: string) {
     // Bail early if the parse already used most of our budget.
     if (remaining() < 5_000) {
       console.warn("[pipeline] parse stage exhausted budget for", submissionId)
+      const reviewMeta: { validation_outcome: ValidationOutcome; review_reason: ReviewReason } = {
+        validation_outcome: "needs_review",
+        review_reason: "budget_exhausted",
+      }
       await admin
         .from("submissions")
         .update({
@@ -316,31 +402,17 @@ async function runPipeline(submissionId: string) {
                 "Document parsing took too long. Marked for manual review — please retry to attempt full validation.",
             },
           ] satisfies SubmissionFlag[],
-          metadata: { timing, total_ms: Date.now() - pipelineStart },
+          metadata: { ...reviewMeta, timing, total_ms: Date.now() - pipelineStart } as any,
         })
         .eq("id", submissionId)
       return
     }
 
-    // ── Stage 2: Rate limit check (AFTER parsing so parse work isn't wasted) ─
-    const limit = await llmLimiter().limit(`team:${submission.team_id}`)
-    if (!limit.success) {
-      await admin
-        .from("submissions")
-        .update({
-          status: "needs_review",
-          extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
-          flags: [
-            {
-              severity: "warn" as const,
-              message: "LLM quota reached for this team. Marked for manual review.",
-            },
-          ] satisfies SubmissionFlag[],
-        })
-        .eq("id", submissionId)
-      return
-    }
-
+    // We already checked the LLM rate limit pre-parse at Stage 0. The window
+    // is sliding so a flood of concurrent submissions could still tip us over
+    // here, but in practice the pre-parse check + parse latency is enough of
+    // a gate. If you observe new "limit exceeded" errors during validation,
+    // re-introduce the post-parse `llmLimiter().limit()` check here.
     await admin
       .from("submissions")
       .update({ status: "validating", extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS) })
@@ -379,6 +451,7 @@ async function runPipeline(submissionId: string) {
         rule_name: `Task brief: ${task.title}`,
         description: task.description,
         prompt_template: task.instructions,
+        rule_type: "scored",
         threshold: 70,
         weight: 2,
         enabled: true,
@@ -390,6 +463,10 @@ async function runPipeline(submissionId: string) {
 
     // ── P3: Handle zero-rule case explicitly ────────────────────────────
     if (filteredRules.length === 0) {
+      const reviewMeta: { validation_outcome: ValidationOutcome; review_reason: ReviewReason } = {
+        validation_outcome: "needs_review",
+        review_reason: "no_rules",
+      }
       await admin
         .from("submissions")
         .update({
@@ -405,12 +482,13 @@ async function runPipeline(submissionId: string) {
             },
           ] satisfies SubmissionFlag[],
           metadata: {
+            ...reviewMeta,
             rules_evaluated: 0,
             had_task: Boolean(task),
             truncated,
             timing,
             total_ms: Date.now() - pipelineStart,
-          },
+          } as any,
         })
         .eq("id", submissionId)
       return
@@ -425,6 +503,7 @@ async function runPipeline(submissionId: string) {
     // failure mode.
     const ruleLimit = pLimit(Math.max(1, RULE_CONCURRENCY))
     const rulesStart = Date.now()
+    const safetyBlockedRules: string[] = []
     const ruleOutputs = await Promise.all(
       filteredRules.map((rule) =>
         ruleLimit(async () => {
@@ -436,7 +515,15 @@ async function runPipeline(submissionId: string) {
           try {
             return await runRule(text, rule, { truncated, abortSignal })
           } catch (err) {
-            console.error("[pipeline] rule failed", rule.rule_name, err)
+            // Safety-filter rejections are permanent. Track them separately
+            // so we can surface a clear "needs_review: safety_filter" outcome
+            // rather than treating them as a generic transient skip.
+            if ((err as any)?.code === "SAFETY_FILTER" || isSafetyFilterError(err)) {
+              safetyBlockedRules.push(rule.rule_name)
+              console.warn("[pipeline] rule blocked by safety filter", rule.rule_name)
+            } else {
+              console.error("[pipeline] rule failed", rule.rule_name, err)
+            }
             return null
           }
         }),
@@ -494,13 +581,32 @@ async function runPipeline(submissionId: string) {
       )
     }
 
-    // Weighted aggregate score.
+    // Weighted aggregate score (rounded to integer for cleaner UI; the raw
+    // per-rule scores are still in `validation_runs` for audit).
     const totalWeight = successful.reduce((s, r) => s + Number(r.weight || 1), 0) || 1
-    const aggScore =
-      successful.reduce((s, r) => s + Number(r.score) * Number(r.weight || 1), 0) / totalWeight
+    const aggScore = Math.round(
+      successful.reduce((s, r) => s + Number(r.score) * Number(r.weight || 1), 0) / totalWeight,
+    )
 
     const allPassed = successful.length > 0 && successful.every((r) => r.pass)
     const anyHardFail = successful.some((r) => r.flags.some((f) => f.severity === "fail"))
+
+    // ── Skip-tolerance policy ───────────────────────────────────────────
+    // Old behaviour: ANY skipped rule → needs_review. That was too strict —
+    // production teams with 20+ rules where one transient hiccup occurred
+    // would always land in manual review. New policy:
+    //   - >10% of rules skipped, OR
+    //   - any high-weight (weight >= 2) rule skipped, OR
+    //   - safety filter blocked any rule
+    // → needs_review. Otherwise we trust the score from the successful
+    // rules and let the normal pass/fail logic decide.
+    const skipRatio = filteredRules.length > 0 ? skipped / filteredRules.length : 0
+    const successfulIds = new Set(successful.map((r) => r.rule_id))
+    const skippedHighWeight = filteredRules.some(
+      (r) => !successfulIds.has(r.id) && Number(r.weight || 1) >= 2,
+    )
+    const skipsForceReview =
+      skipped > 0 && (skipRatio > 0.1 || skippedHighWeight || safetyBlockedRules.length > 0)
 
     // ── Stage 5: Summary + predictive flags ─────────────────────────────
     let summary = ""
@@ -536,10 +642,20 @@ async function runPipeline(submissionId: string) {
       })),
     ]
 
-    if (skipped > 0) {
+    if (safetyBlockedRules.length > 0) {
       aggregateFlags.unshift({
         severity: "warn",
-        message: `${skipped} of ${filteredRules.length} rules were skipped because the validation budget ran out. Retry to evaluate them.`,
+        message: `AI safety filter blocked ${safetyBlockedRules.length} rule(s) (${safetyBlockedRules
+          .slice(0, 3)
+          .join(", ")}${safetyBlockedRules.length > 3 ? "…" : ""}). The document was not evaluated against those rules — please review manually.`,
+      })
+    }
+
+    if (skipped > safetyBlockedRules.length) {
+      const transientSkipped = skipped - safetyBlockedRules.length
+      aggregateFlags.unshift({
+        severity: "warn",
+        message: `${transientSkipped} of ${filteredRules.length} rule(s) were skipped because the validation budget ran out or the AI service hiccuped. Retry to evaluate them.`,
       })
     }
 
@@ -550,18 +666,37 @@ async function runPipeline(submissionId: string) {
       latency_ms: r.latency_ms,
     })) as unknown as number // type coerce for metadata
 
-    // Final status preserves "late_submitted" if the row was already marked late
-    // at upload time — the AI verdict still influences score/flags but a late
-    // submission never reverts to plain "passed".
-    let finalStatus: Submission["status"]
-    if (submission.is_late) {
-      finalStatus = "late_submitted"
-    } else if (skipped > 0 && successful.length > 0) {
-      // Partial result — defer to manager review.
-      finalStatus = "needs_review"
+    // ── Compute the AI validation outcome FIRST, independent of timeliness.
+    // This is what managers care about: did the AI think the work passed?
+    // Then layer the late_submitted status on top so the headline status
+    // reflects the assignment lifecycle without losing the AI verdict.
+    let validationOutcome: ValidationOutcome
+    let reviewReason: ReviewReason | null = null
+
+    if (skipsForceReview) {
+      validationOutcome = "needs_review"
+      reviewReason = safetyBlockedRules.length > 0 ? "safety_filter" : "partial_validation"
+    } else if (allPassed && !anyHardFail) {
+      validationOutcome = "passed"
+    } else if (anyHardFail) {
+      validationOutcome = "failed"
     } else {
-      finalStatus = allPassed && !anyHardFail ? "passed" : anyHardFail ? "failed" : "needs_review"
+      // Mix of passes and non-fail-severity warnings — defer to manager.
+      validationOutcome = "needs_review"
+      reviewReason = "warnings_present"
     }
+
+    // The headline submission status:
+    //   - is_late: keep "late_submitted" so the assignment lifecycle stays
+    //     accurate. The AI verdict is still surfaced via validation_outcome.
+    //   - otherwise: mirror validation_outcome onto the row's status.
+    const finalStatus: Submission["status"] = submission.is_late
+      ? "late_submitted"
+      : validationOutcome === "passed"
+        ? "passed"
+        : validationOutcome === "failed"
+          ? "failed"
+          : "needs_review"
 
     timing.total_ms = Date.now() - pipelineStart
 
@@ -569,13 +704,16 @@ async function runPipeline(submissionId: string) {
       .from("submissions")
       .update({
         status: finalStatus,
-        score: Number(aggScore.toFixed(2)),
+        score: aggScore,
         summary,
         flags: aggregateFlags as unknown as any,
         extracted_text: text.slice(0, EXTRACTED_TEXT_PREVIEW_CHARS),
         metadata: {
+          validation_outcome: validationOutcome,
+          review_reason: reviewReason,
           rules_evaluated: persistable.length,
           rules_skipped: skipped,
+          rules_safety_blocked: safetyBlockedRules.length,
           topics: predictive,
           truncated,
           had_task: Boolean(task),

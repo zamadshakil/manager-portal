@@ -14,7 +14,8 @@ import { logActivity } from "@/lib/activity"
 const Schema = z.object({
   rule_name: z.string().trim().min(2).max(200),
   description: z.string().trim().max(1_000).optional().or(z.literal("")),
-  prompt_template: z.string().trim().min(20).max(4_000),
+  prompt_template: z.string().trim().min(30).max(4_000),
+  rule_type: z.enum(["scored", "binary"]).default("scored"),
   threshold: z.coerce.number().min(0).max(100),
   weight: z.coerce.number().min(0).max(10),
   enabled: z.coerce.boolean().optional(),
@@ -23,10 +24,12 @@ const Schema = z.object({
 export async function upsertRule(formData: FormData) {
   const profile = await requireProfile()
 
+  const rawType = String(formData.get("rule_type") || "scored")
   const parsed = Schema.safeParse({
     rule_name: formData.get("rule_name") || "",
     description: formData.get("description") ?? "",
     prompt_template: formData.get("prompt_template") || "",
+    rule_type: rawType === "binary" ? "binary" : "scored",
     threshold: formData.get("threshold") || "0",
     weight: formData.get("weight") || "0",
     enabled: formData.get("enabled") === "on" || formData.get("enabled") === "true",
@@ -74,10 +77,11 @@ export async function upsertRule(formData: FormData) {
         rule_name: parsed.data.rule_name,
         description: parsed.data.description || null,
         prompt_template: parsed.data.prompt_template,
+        rule_type: parsed.data.rule_type,
         threshold: parsed.data.threshold,
         weight: parsed.data.weight,
         enabled: !!parsed.data.enabled,
-      })
+      } as any)
       .eq("id", id)
     if (error) return { ok: false, error: error.message }
     await logActivity({
@@ -107,6 +111,7 @@ export async function upsertRule(formData: FormData) {
         rule_name: parsed.data.rule_name,
         description: parsed.data.description || null,
         prompt_template: parsed.data.prompt_template,
+        rule_type: parsed.data.rule_type,
         threshold: parsed.data.threshold,
         weight: parsed.data.weight,
         enabled: !!parsed.data.enabled,

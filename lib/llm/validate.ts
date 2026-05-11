@@ -36,7 +36,41 @@ const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS ?? 45_000)
 
 // Bumped whenever the system prompt or schema changes so we can compare
 // historical runs in `validation_runs.prompt_version`.
-export const PROMPT_VERSION = "v6"
+//   v7: split scored vs binary rule_type prompts; tightened rubric escape;
+//       added safety-filter detection + fallback-model chain.
+export const PROMPT_VERSION = "v7"
+
+// Optional fallback model. When the primary model fails with a transient
+// service error (503 / UNAVAILABLE / RESOURCE_EXHAUSTED) after retries,
+// we swap to this model for a single salvage attempt. Setting an empty
+// string disables the fallback.
+const FALLBACK_VALIDATION_MODEL =
+  process.env.FALLBACK_VALIDATION_MODEL ??
+  process.env.DO_FALLBACK_VALIDATION_MODEL ??
+  "openai/gpt-4o-mini"
+
+/**
+ * Recognise Gemini / OpenAI safety-filter rejections. These are permanent
+ * errors (no point retrying) and should surface to the user with an
+ * explanatory flag, not a generic "rule failed".
+ */
+export function isSafetyFilterError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /\b(SAFETY|BLOCKED|content[_ ]?policy|finish_reason["']?\s*:\s*["']?(safety|blocklist|content_filter)|content filter|recitation)\b/i.test(
+    msg,
+  )
+}
+
+/**
+ * Recognise transient service-availability errors that justify failing over
+ * to the fallback model.
+ */
+function isServiceUnavailable(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /(503|UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded|temporarily.unavailable|service.unavailable)/i.test(
+    msg,
+  )
+}
 
 // ── Schemas ────────────────────────────────────────────────────────────────
 // IMPORTANT: `reasons` uses `.min(0)` at the schema level. We enforce at
@@ -166,49 +200,125 @@ function buildRulePrompt(rule: ValidationRule, text: string, truncated: boolean)
 }
 
 // ── Rule runner ────────────────────────────────────────────────────────────
+
+/** System prompt for substantive 0-100 quality rules. */
+function scoredSystemPrompt(threshold: number): string {
+  return [
+    "You are a professional document quality auditor.",
+    "Return ONLY a raw structured JSON object matching the schema. DO NOT wrap in ```json blocks.",
+    "",
+    "SCORING RUBRIC (0-100):",
+    "90-100: Excellent — fully meets all stated criteria with no issues.",
+    "70-89: Good — meets most criteria with minor gaps or formatting issues.",
+    "40-69: Needs Improvement — partially meets criteria; significant gaps or quality issues.",
+    "0-39: Poor — does not meet the stated criteria or is largely irrelevant.",
+    "",
+    `The pass threshold for this rule is ${threshold}. Set pass=true ONLY if the score >= ${threshold}.`,
+    "",
+    "CRITICAL INSTRUCTIONS:",
+    "1. Evaluate ONLY against the criteria stated in the rule. Do NOT invent requirements.",
+    "2. Be consistent: the same document evaluated against the same rule must always produce a similar score (within ±5 points).",
+    "3. Anchor your score to the rubric above. A mediocre document should score 50-65, not 28 or 100.",
+    "4. In reasons, cite specific evidence from the document. You MUST provide at least one reason.",
+    "5. Do NOT hallucinate content. Only reference text actually present in the document.",
+    "6. If the rule's own instructions explicitly say to skip when not applicable, follow that. Otherwise FAIL with a clear reason — never silently pass over criteria you cannot verify.",
+  ].join("\n")
+}
+
+/** System prompt for binary yes/no checks (e.g. "contains the word X"). */
+function binarySystemPrompt(): string {
+  return [
+    "You are a professional document compliance checker.",
+    "Return ONLY a raw structured JSON object matching the schema. DO NOT wrap in ```json blocks.",
+    "",
+    "This is a BINARY check: the document either satisfies the criterion or it does not.",
+    "There is no middle ground.",
+    "",
+    "OUTPUT RULES:",
+    "1. Set pass=true if and only if the document satisfies the criterion exactly as stated.",
+    "2. Set score=100 when pass=true. Set score=0 when pass=false. NO other values are valid.",
+    "3. In reasons, cite the SPECIFIC evidence from the document that proves your verdict (quote a phrase or describe the location). Provide at least one reason.",
+    "4. Do NOT invent additional requirements. Do NOT relax the criterion because the document is short, long, formal, or informal.",
+    "5. Do NOT hallucinate content. Only reference text actually present in the document.",
+    "6. Do NOT assign partial credit. If the criterion is 'contains the word hello', a document that contains 'hello' passes; a document that does not, fails — regardless of overall quality.",
+  ].join("\n")
+}
+
+/**
+ * Single-attempt rule call against a specific model. Wrapped by `runRule`
+ * so we can swap models on transient failure without duplicating the prompt
+ * construction.
+ */
+async function callRuleModel(
+  text: string,
+  rule: ValidationRule,
+  modelId: string,
+  opts: { truncated?: boolean; abortSignal?: AbortSignal },
+): Promise<{ object: RuleResult }> {
+  const isBinary = rule.rule_type === "binary"
+  const prompt = buildRulePrompt(rule, text, Boolean(opts.truncated))
+
+  return withTimeout(
+    (signal) =>
+      generateObject({
+        model: provider.chat(modelId),
+        temperature: 0,
+        topP: 0.01,
+        schema: RuleResultSchema,
+        system: isBinary ? binarySystemPrompt() : scoredSystemPrompt(rule.threshold),
+        prompt,
+        abortSignal: anySignal(signal, opts.abortSignal),
+      }),
+    LLM_CALL_TIMEOUT_MS,
+    `runRule(${rule.rule_name})`,
+  ).then(({ object }) => ({ object }))
+}
+
 export async function runRule(
   text: string,
   rule: ValidationRule,
   opts: { truncated?: boolean; abortSignal?: AbortSignal } = {},
 ): Promise<RunRuleOutput> {
   const started = Date.now()
-  const prompt = buildRulePrompt(rule, text, Boolean(opts.truncated))
 
-  const { object } = await withRetry(() =>
-    withTimeout(
-      (signal) =>
-        generateObject({
-          model: provider.chat(MODEL),
-          temperature: 0,
-          topP: 0.01,
-          schema: RuleResultSchema,
-          system: [
-            "You are a professional document quality auditor.",
-            "Return ONLY a raw structured JSON object matching the schema. DO NOT wrap in ```json blocks.",
-            "",
-            "SCORING RUBRIC (0-100):",
-            "90-100: Excellent — fully meets all stated criteria with no issues.",
-            "70-89: Good — meets most criteria with minor gaps or formatting issues.",
-            "40-69: Needs Improvement — partially meets criteria; significant gaps or quality issues.",
-            "0-39: Poor — does not meet the stated criteria or is largely irrelevant.",
-            "",
-            `The pass threshold for this rule is ${rule.threshold}. Set pass=true ONLY if the score >= ${rule.threshold}.`,
-            "",
-            "CRITICAL INSTRUCTIONS:",
-            "1. Evaluate ONLY against the criteria stated in the rule. Do NOT invent requirements.",
-            "2. Be consistent: the same document evaluated against the same rule must always produce a similar score (within ±5 points).",
-            "3. Anchor your score to the rubric above. A mediocre document should score 50-65, not 28 or 100.",
-            "4. In reasons, cite specific evidence from the document. You MUST provide at least one reason.",
-            "5. Do NOT hallucinate content. Only reference text actually present in the document.",
-            "6. If the rule criteria are not applicable to this document type, set pass=true and score=100.",
-          ].join("\n"),
-          prompt,
-          abortSignal: anySignal(signal, opts.abortSignal),
-        }),
-      LLM_CALL_TIMEOUT_MS,
-      `runRule(${rule.rule_name})`,
-    ),
-  )
+  let object: RuleResult
+  let modelUsed = MODEL
+  try {
+    const result = await withRetry(() => callRuleModel(text, rule, MODEL, opts))
+    object = result.object
+  } catch (err) {
+    // Safety-filter rejections are permanent — re-throw with a marker the
+    // pipeline can detect and surface to the user as a needs_review reason.
+    if (isSafetyFilterError(err)) {
+      const safetyErr = new Error(
+        `SAFETY_FILTER: AI safety filter blocked rule "${rule.rule_name}". Original: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+      ;(safetyErr as any).code = "SAFETY_FILTER"
+      throw safetyErr
+    }
+
+    // Transient service issues — try the fallback model once.
+    if (FALLBACK_VALIDATION_MODEL && FALLBACK_VALIDATION_MODEL !== MODEL && isServiceUnavailable(err)) {
+      console.warn(
+        `[runRule] primary model ${MODEL} unavailable, retrying on fallback ${FALLBACK_VALIDATION_MODEL}`,
+        err instanceof Error ? err.message : String(err),
+      )
+      const result = await callRuleModel(text, rule, FALLBACK_VALIDATION_MODEL, opts)
+      object = result.object
+      modelUsed = FALLBACK_VALIDATION_MODEL
+    } else {
+      throw err
+    }
+  }
+
+  // Defence in depth: clamp binary outputs to 100/0 even if the LLM
+  // ignored the instruction. This guarantees downstream scoring stays
+  // consistent regardless of model quirks.
+  if (rule.rule_type === "binary") {
+    object = { ...object, score: object.pass ? 100 : 0 }
+  }
 
   // Post-process: guarantee at least one reason so downstream code never
   // has to deal with an empty array. The schema allows 0 to avoid hard
@@ -224,7 +334,7 @@ export async function runRule(
     threshold: rule.threshold,
     weight: rule.weight,
     latency_ms: Date.now() - started,
-    model: MODEL,
+    model: modelUsed,
     raw: object,
     ...object,
     reasons,

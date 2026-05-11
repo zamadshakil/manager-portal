@@ -111,12 +111,44 @@ export interface SubmissionFlag {
   message: string
 }
 
+export type ValidationRuleType = "scored" | "binary"
+
+/**
+ * Outcome of the AI validation independent of submission status (which can be
+ * `late_submitted` or `missed` for orthogonal reasons). Stored under
+ * `submissions.metadata.validation_outcome` so managers can see the AI verdict
+ * even when the headline status reflects timeliness.
+ */
+export type ValidationOutcome = "passed" | "failed" | "needs_review" | null
+
+/**
+ * Reason a submission landed in `needs_review`. Stored under
+ * `submissions.metadata.review_reason` so the UI can show specific copy
+ * instead of the generic "needs review" badge.
+ */
+export type ReviewReason =
+  | "no_text"
+  | "no_rules"
+  | "budget_exhausted"
+  | "llm_quota"
+  | "partial_validation"
+  | "warnings_present"
+  | "low_score"
+  | "ocr_failed"
+  | "safety_filter"
+
 export interface ValidationRule {
   id: string
   team_id: string
   rule_name: string
   description: string | null
   prompt_template: string
+  /**
+   * Determines how the LLM evaluates the rule:
+   *   - 'scored': 0-100 rubric (default, suits substantive quality rules)
+   *   - 'binary': yes/no with evidence; score is 100 on pass, 0 on fail
+   */
+  rule_type: ValidationRuleType
   threshold: number
   weight: number
   enabled: boolean

@@ -196,3 +196,59 @@ export function messageLimiter() {
   }
   return _messageLimiter
 }
+
+// ---------------------------------------------------------------------------
+// Upload dedup mutex (Redis SET NX EX)
+// ---------------------------------------------------------------------------
+//
+// Prevents a user from submitting the exact same file bytes twice within the
+// dedup window by locking on SHA-256(userId + fileHash). Two simultaneous
+// uploads of the same 50 MB PDF (e.g. double-click) no longer waste parse
+// budget or create duplicate DB rows.
+//
+// TTL is 30 seconds — long enough to outlast a concurrent duplicate but
+// short enough not to block retries after a legitimate first attempt fails.
+//
+// acquireUploadLock returns true if the lock was acquired (proceed),
+// false if a lock already existed (reject as duplicate).
+// ---------------------------------------------------------------------------
+
+const UPLOAD_DEDUP_TTL_S = 30
+
+/**
+ * Attempt to acquire an upload dedup lock for `lockKey`.
+ * Returns `true` if the lock was acquired; `false` if it already exists.
+ * Always returns `true` when Redis is unavailable (fail-open so a Redis
+ * outage never blocks legitimate uploads).
+ */
+export async function acquireUploadLock(lockKey: string): Promise<boolean> {
+  const redis = getRedis()
+  if (!redis) return true
+  try {
+    const result = await redis.set(
+      `upload:dedup:${lockKey}`,
+      "1",
+      "EX",
+      UPLOAD_DEDUP_TTL_S,
+      "NX",
+    )
+    return result === "OK"
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Release an upload dedup lock. Call this when the upload has durably
+ * succeeded (row inserted in DB) so the user can immediately retry if
+ * they want to re-upload the same file intentionally.
+ */
+export async function releaseUploadLock(lockKey: string): Promise<void> {
+  const redis = getRedis()
+  if (!redis) return
+  try {
+    await redis.del(`upload:dedup:${lockKey}`)
+  } catch {
+    // Non-fatal — TTL will expire on its own.
+  }
+}

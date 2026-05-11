@@ -65,15 +65,37 @@ async function parsePdf(buf: Buffer): Promise<ParseResult> {
       ocrConfidence = undefined
 
       if (fullText.trim().length < 16) {
-        warning = "Document contains no extractable text even after OCR. It has been uploaded but will not be searchable."
-        throw new Error(warning)
+        warning =
+          "Document contains no extractable text even after OCR. It may be a scanned image with low quality or an unsupported encoding."
+        // Return gracefully — the pipeline's empty-text guard will route
+        // this to needs_review instead of crashing the whole submission.
+        const clamped = clamp("")
+        return {
+          text: clamped.text,
+          pages: pageCount,
+          truncated: false,
+          fromOcr: true,
+          ocrConfidence: undefined,
+          warning,
+        }
       } else if ((pageCount ?? 1) > maxPagesToOcr) {
         warning = `Only the first ${maxPagesToOcr} pages were OCR'd due to performance limits.`
       }
     } catch (err: any) {
       console.warn(`[parsePdf] OCR fallback failed: ${err.message}`)
-      warning = "PDF text extraction failed and OCR fallback encountered an error. Document will not be searchable."
-      throw err
+      warning =
+        "PDF text extraction failed and the OCR fallback encountered an error. The document was uploaded but its contents could not be read."
+      // Return gracefully with empty text — the pipeline handles this as
+      // needs_review rather than a hard failure so the user can retry.
+      const clamped = clamp("")
+      return {
+        text: clamped.text,
+        pages: pageCount,
+        truncated: false,
+        fromOcr: true,
+        ocrConfidence: undefined,
+        warning,
+      }
     }
   }
 
