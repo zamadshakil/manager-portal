@@ -47,6 +47,15 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse
   }
 
+  // Detect whether the request already carries a Supabase auth cookie. If
+  // it does and getUser() still returns null, that means refresh-token
+  // rotation failed (e.g. the proxy consumed the token but the new value
+  // never made it back to the browser). We log that case explicitly so
+  // unexpected sign-outs are traceable in Railway logs.
+  const hadAuthCookie = request.cookies
+    .getAll()
+    .some((c) => /^sb-.*-auth-token(\.|$)/.test(c.name))
+
   const supabase = createServerClient(
     env.url,
     env.anonKey,
@@ -56,10 +65,17 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({
-            request: { headers: requestHeaders },
-          })
+          // Mutate the *incoming* request cookies so downstream RSC/route
+          // handlers in this same request see the freshly rotated session.
+          cookiesToSet.forEach(({ name, value, options }) =>
+            request.cookies.set({ name, value, ...options }),
+          )
+          // Rebuild the outgoing response forwarding the mutated request
+          // (NOT a frozen header snapshot). This is the official
+          // `@supabase/ssr` pattern; using `{ headers: requestHeaders }`
+          // here was the cause of intermittent redirects to /auth/login
+          // during the refresh-token rotation window.
+          supabaseResponse = NextResponse.next({ request })
           supabaseResponse.headers.set("x-trace-id", traceId)
           supabaseResponse.headers.set("x-pathname", request.nextUrl.pathname)
           cookiesToSet.forEach(({ name, value, options }) =>
@@ -78,12 +94,29 @@ export async function updateSession(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p))
 
   if (!user && !isPublic) {
+    if (hadAuthCookie) {
+      // Auth cookie was present but the session no longer resolves —
+      // typically a failed refresh-token rotation or GoTrue rejecting
+      // the JWT. Surface a single, trace-tagged warn so we can correlate
+      // user reports of "I got logged out" with the exact request.
+      console.warn(
+        `[proxy] auth cookie present but getUser() returned null trace=${traceId} path=${pathname}`,
+      )
+    }
     const url = request.nextUrl.clone()
     url.pathname = "/auth/login"
     url.searchParams.set("next", pathname)
     const redirectResponse = NextResponse.redirect(url)
     redirectResponse.headers.set("x-trace-id", traceId)
     redirectResponse.headers.set("x-pathname", request.nextUrl.pathname)
+    // Carry over any cookies Supabase staged during getUser() (e.g. a
+    // partial refresh that succeeded). Without this, freshly rotated
+    // tokens are dropped on the redirect and the user has to log in
+    // again instead of being seamlessly re-authenticated on the next
+    // navigation.
+    for (const cookie of supabaseResponse.cookies.getAll()) {
+      redirectResponse.cookies.set(cookie)
+    }
     return redirectResponse
   }
 
