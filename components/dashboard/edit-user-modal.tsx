@@ -83,6 +83,7 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
       router.refresh()
       if (pendingEmailSent) {
         setSuccess(`Verification email sent to ${pendingEmailSent}. The change will take effect once they confirm.`)
+        window.setTimeout(onClose, 2000)
       } else {
         setSuccess("Profile updated.")
         window.setTimeout(onClose, 1500)
