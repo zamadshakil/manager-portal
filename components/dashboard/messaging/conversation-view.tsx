@@ -239,7 +239,9 @@ export function ConversationView({
       })
       return nextMessages
     })
-    onLastMessageRef.current?.(conversation.id, getLatestVisibleMessage(nextMessages))
+    if (nextMessages.length > 0) {
+      onLastMessageRef.current?.(conversation.id, getLatestVisibleMessage(nextMessages))
+    }
   }, [conversation.id])
 
   const handleReactionChange = useCallback(
