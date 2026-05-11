@@ -23,7 +23,7 @@ interface ConversationViewProps {
   onBack?: () => void
   onConversationUpdate?: (patch: Partial<Pick<Conversation, "name" | "avatar_url">>) => void
   onLastMessage?: (conversationId: string, message: Message | null) => void
-  onConversationHidden?: (conversationId: string) => void
+  onConversationDeleted?: (conversationId: string) => void
 }
 
 function mergeReplyMessage(
@@ -80,7 +80,7 @@ export function ConversationView({
   onBack,
   onConversationUpdate,
   onLastMessage,
-  onConversationHidden,
+  onConversationDeleted,
 }: ConversationViewProps) {
   const isBelowDesktop = useIsBelowDesktop()
   // Stable ref so callbacks never need to re-close over onLastMessage
@@ -467,23 +467,14 @@ export function ConversationView({
     }
   }, [conversation.id])
 
-  const handleHideConversation = useCallback(async () => {
-    const res = await fetch(`/api/messaging/conversations/${conversation.id}/hide`, { method: "POST" })
-    if (res.ok) {
-      onConversationHidden?.(conversation.id)
-    } else {
-      toast.error("Failed to hide conversation")
-    }
-  }, [conversation.id, onConversationHidden])
-
   const handleDeleteConversation = useCallback(async () => {
     const res = await fetch(`/api/messaging/conversations/${conversation.id}`, { method: "DELETE" })
     if (res.ok) {
-      onConversationHidden?.(conversation.id)
+      onConversationDeleted?.(conversation.id)
     } else {
       toast.error("Failed to permanently delete group")
     }
-  }, [conversation.id, onConversationHidden])
+  }, [conversation.id, onConversationDeleted])
 
   // Typing indicator debounce
   const sendTyping = useCallback(() => {
@@ -632,7 +623,6 @@ export function ConversationView({
           onClose={() => setInfoOpen(false)}
           onClearHistory={handleClearHistory}
           onGroupUpdated={onConversationUpdate}
-          onHideConversation={handleHideConversation}
           onDeleteConversation={handleDeleteConversation}
         />
       ) : (
@@ -642,7 +632,6 @@ export function ConversationView({
           currentUserId={currentUserId}
           onClose={() => setInfoOpen(false)}
           onClearHistory={handleClearHistory}
-          onHideConversation={handleHideConversation}
         />
       )}
     </div>

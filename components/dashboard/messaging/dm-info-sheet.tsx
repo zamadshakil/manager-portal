@@ -29,10 +29,9 @@ interface DmInfoSheetProps {
   currentUserId: string
   onClose: () => void
   onClearHistory?: () => void
-  onHideConversation?: () => void
 }
 
-export function DmInfoSheet({ open, conversation, currentUserId, onClose, onClearHistory, onHideConversation }: DmInfoSheetProps) {
+export function DmInfoSheet({ open, conversation, currentUserId, onClose, onClearHistory }: DmInfoSheetProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const other = conversation.members?.find((m) => m.user_id !== currentUserId)
   const isDeleted = !!(other?.profile?.deleted_at || other?.profile?.email?.startsWith("deleted-"))
@@ -117,17 +116,6 @@ export function DmInfoSheet({ open, conversation, currentUserId, onClose, onClea
             <Trash2 className="h-4 w-4" />
             Clear Chat History
           </Button>
-          {onHideConversation && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
-              onClick={() => { onHideConversation(); onClose() }}
-            >
-              <Trash2 className="h-4 w-4" />
-              Hide Conversation
-            </Button>
-          )}
         </div>
       </SheetContent>
 

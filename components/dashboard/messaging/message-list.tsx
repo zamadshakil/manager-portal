@@ -147,19 +147,35 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
         if (heightCache.current.get(id) === height) return
         heightCache.current.set(id, height)
         listRef.current?.resetAfterIndex(index, false)
+        // When an item's measured height differs from the estimate, the virtual
+        // scroll height changes.  If we were pinned to the bottom, re-snap so
+        // the list stays at the true bottom after all items are measured.
+        if (isAtBottomRef.current) {
+          requestAnimationFrame(() => {
+            const outer = outerRef.current
+            if (outer) outer.scrollTop = outer.scrollHeight
+          })
+        }
       },
-      [],
+      [], // isAtBottomRef + outerRef are refs — stable, no dep needed
     )
 
     const scrollToBottom = useCallback((_behavior: ScrollBehavior = "smooth") => {
       const items = listItemsRef.current
       if (items.length === 0) return
+      // Mark as "at bottom" immediately so setItemSize re-snaps while heights settle
+      isAtBottomRef.current = true
       listRef.current?.scrollToItem(items.length - 1, "end")
       // After react-window positions the last item using estimated heights,
       // force a native scroll so any measurement delta doesn't leave us short.
+      // Two rAFs: first waits for react-window commit, second catches any
+      // layout recalculation that happens in the same frame.
       requestAnimationFrame(() => {
         const outer = outerRef.current
         if (outer) outer.scrollTop = outer.scrollHeight
+        requestAnimationFrame(() => {
+          if (outer) outer.scrollTop = outer.scrollHeight
+        })
       })
     }, []) // stable — reads from ref
 

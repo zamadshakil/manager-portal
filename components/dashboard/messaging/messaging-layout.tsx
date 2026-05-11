@@ -369,11 +369,10 @@ export function MessagingLayout({
     [],
   )
 
-  const handleConversationHidden = useCallback((id: string) => {
+  const handleConversationDeleted = useCallback((id: string) => {
     setConversations((prev) => prev.filter((c) => c.id !== id))
     setSelectedId((prev) => {
       if (prev === id) {
-        // Clear the URL param when the active conversation is hidden
         router.replace("/dashboard/messages", { scroll: false })
         return null
       }
@@ -416,7 +415,7 @@ export function MessagingLayout({
           onBack={isBelowDesktop ? () => selectConversation(null) : undefined}
           onConversationUpdate={(patch) => handleConversationUpdate(selectedConversation.id, patch)}
           onLastMessage={handleLastMessage}
-          onConversationHidden={handleConversationHidden}
+          onConversationDeleted={handleConversationDeleted}
         />
       ) : !isBelowDesktop ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
