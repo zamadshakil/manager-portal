@@ -430,9 +430,18 @@ function MessageContent({ message, isOwn }: { message: Message; isOwn: boolean }
   }
 
   if (message.type === "video") {
+    const videoMeta = message.media_metadata as { contentType?: string } | null
+    const videoType = videoMeta?.contentType ?? "video/mp4"
     return (
       <div className="mt-1 max-w-65">
-        <video controls src={message.media_url ?? ""} className="rounded-lg max-h-64 w-auto" />
+        <video
+          controls
+          preload="metadata"
+          playsInline
+          className="rounded-lg max-h-64 w-auto"
+        >
+          <source src={message.media_url ?? ""} type={videoType} />
+        </video>
       </div>
     )
   }

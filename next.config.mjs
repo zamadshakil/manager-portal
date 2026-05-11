@@ -81,6 +81,7 @@ const nextConfig = {
             : "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com",
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "img-src 'self' blob: data: https://*.r2.dev",
+          "media-src 'self' https://*.r2.dev",
           "font-src 'self' https://fonts.gstatic.com https://frontend-cdn.perplexity.ai",
           `connect-src 'self' ${supabaseOrigins.join(" ")} https://*.r2.dev ${r2StorageOrigin} https://cloudflareinsights.com`,
           "frame-src 'none'",
