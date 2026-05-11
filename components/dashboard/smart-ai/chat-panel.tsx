@@ -357,6 +357,7 @@ export function ChatPanel({
   )
 
   const isStreaming = status === "streaming" || status === "submitted"
+  const isUploading = attachments.some((a) => a.status === "uploading")
 
   const { data: creditData } = useSWR<AiCreditStatus>(
     "/api/ai-credits/me",
@@ -461,7 +462,7 @@ export function ChatPanel({
     const trimmed = input.trim()
     const readyAttachments = attachments.filter((a) => a.status === "ready")
 
-    if ((!trimmed && readyAttachments.length === 0) || isStreaming || creditsExhausted) return
+    if ((!trimmed && readyAttachments.length === 0) || isStreaming || isUploading || creditsExhausted) return
 
     const metadata: PortalUIMessageMetadata | undefined =
       readyAttachments.length > 0
@@ -628,7 +629,7 @@ export function ChatPanel({
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault()
-                  handleSubmit(e as unknown as React.FormEvent)
+                  if (!isUploading) handleSubmit(e as unknown as React.FormEvent)
                 }
               }}
               placeholder="Ask about submissions, tasks, validation rules, or team performance…"
@@ -694,6 +695,7 @@ export function ChatPanel({
                   type="submit"
                   disabled={
                     creditsExhausted ||
+                    isUploading ||
                     (!input.trim() &&
                     attachments.filter((a) => a.status === "ready").length === 0)
                   }
