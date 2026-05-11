@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { put, del } from "@/lib/r2"
-import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireProfile } from "@/lib/auth"
 import { AccessDeniedError, assertCapability, CAPABILITIES, hasScopedCapability } from "@/lib/permissions"
@@ -64,7 +63,7 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   }
 
   // ---------- Task linkage + deadline enforcement ----------
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   let taskId: string | null = null
   let taskAssignmentId: string | null = null
   let isLate = false
@@ -142,7 +141,7 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   })
 
   // ---------- Insert submission row ----------
-  const adminClient = createAdminClient()
+  const adminClient = supabase
   const { data, error } = await adminClient
     .from("submissions")
     .insert({
