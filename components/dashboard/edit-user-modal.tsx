@@ -227,9 +227,15 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={isPending}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                 autoComplete="off"
               />
+              <p className="text-[11px] text-muted-foreground">
+                We verify the address format and whether the email domain can receive mail before sending a verification link.
+              </p>
               {isEmailChange && (
                 <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
                   <MailWarning className="h-3.5 w-3.5 shrink-0 mt-px" />

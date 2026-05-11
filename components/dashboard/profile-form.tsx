@@ -260,9 +260,15 @@ export function ProfileForm({ profile }: { profile: Profile }) {
                   onChange={(e) => setNewEmail(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onEmailChangeSubmit(e) } }}
                   disabled={emailPending}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   autoComplete="off"
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  We verify the address format and whether the email domain can receive mail before sending the verification email.
+                </p>
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"

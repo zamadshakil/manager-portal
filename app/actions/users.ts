@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { requireRole } from "@/lib/auth"
 import { logActivity } from "@/lib/activity"
 import { sendWelcomeEmail, sendEmailChangeVerification, sendEmailChangeAlert } from "@/lib/email"
+import { normalizeEmailInput, validateDeliverableEmailAddress } from "@/lib/email-address-validation"
 import { getCanonicalSiteUrl } from "@/lib/site-url"
 
 // ---------------------------------------------------------------------------
@@ -40,7 +41,7 @@ function buildVerifyLink(siteUrl: string, userId: string, rawToken: string): str
 type AdminClient = ReturnType<typeof createAdminClient>
 
 function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase()
+  return normalizeEmailInput(email)
 }
 
 function isEmailAlreadyRegisteredError(message?: string): boolean {
@@ -169,6 +170,10 @@ export async function provisionUser(formData: FormData) {
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
 
+  const emailValidation = await validateDeliverableEmailAddress(parsed.data.email)
+  if (!emailValidation.ok) return { ok: false, error: emailValidation.error }
+  const email = emailValidation.email
+
   const admin = createAdminClient()
 
   // M-23: A manager can only own one team. Reject up-front if the chosen
@@ -189,7 +194,7 @@ export async function provisionUser(formData: FormData) {
   }
 
   const createUserInput = {
-    email: parsed.data.email,
+    email,
     password: parsed.data.password,
     email_confirm: true,
     user_metadata: {
@@ -205,7 +210,7 @@ export async function provisionUser(formData: FormData) {
   // If Supabase Auth says the email is taken, check whether it belongs to a
   // soft-deleted user and automatically release the reservation before retrying.
   if (error && isEmailAlreadyRegisteredError(error.message)) {
-    const recovered = await releaseDeletedEmailReservation(admin, parsed.data.email)
+    const recovered = await releaseDeletedEmailReservation(admin, email)
     if (!recovered.ok) {
       return { ok: false, error: recovered.error ?? error.message ?? "Could not create user." }
     }
@@ -258,13 +263,13 @@ export async function provisionUser(formData: FormData) {
     action: "user.provisioned",
     entityType: "profile",
     entityId: data.user.id,
-    metadata: { email: parsed.data.email, role: parsed.data.role },
+    metadata: { email, role: parsed.data.role },
   })
 
   // Send the welcome email with their credentials.
   // We await this to ensure Next.js does not abort the background fetch.
   await sendWelcomeEmail({
-    email: parsed.data.email,
+    email,
     fullName: parsed.data.full_name,
     role: parsed.data.role || "member",
   }).catch((err) => {
@@ -388,10 +393,7 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
 const UpdateProfileSchema = z.object({
   userId: z.string().uuid(),
   full_name: z.string().trim().min(1, "Full name is required").max(200),
-  email: z
-    .string()
-    .email("Invalid email address")
-    .transform((s) => s.trim().toLowerCase()),
+  email: z.string().trim().min(1, "Email is required").max(320, "Email address is too long"),
 })
 
 /**
@@ -438,10 +440,15 @@ export async function updateUserProfile(
   }
 
   const currentEmail = (targetProfile.email ?? "").trim().toLowerCase()
-  const requestedEmail = parsed.data.email.trim().toLowerCase()
+  const requestedEmail = normalizeEmailInput(parsed.data.email)
   const currentName = (targetProfile.full_name ?? "").trim()
   const requestedName = parsed.data.full_name.trim()
   const emailChanged = requestedEmail !== currentEmail
+
+  if (emailChanged) {
+    const emailValidation = await validateDeliverableEmailAddress(requestedEmail)
+    if (!emailValidation.ok) return { ok: false, error: emailValidation.error }
+  }
 
   // ---------------------------------------------------------------------
   // 1. Always sync the full name immediately if it changed.
@@ -489,7 +496,7 @@ export async function updateUserProfile(
   const { data: collidingProfile } = await admin
     .from("profiles")
     .select("id")
-    .ilike("email", parsed.data.email)
+    .ilike("email", requestedEmail)
     .is("deleted_at", null)
     .neq("id", parsed.data.userId)
     .maybeSingle()
@@ -501,7 +508,7 @@ export async function updateUserProfile(
   const { data: collidingPending } = await admin
     .from("profiles")
     .select("id")
-    .ilike("pending_email", parsed.data.email)
+    .ilike("pending_email", requestedEmail)
     .is("deleted_at", null)
     .neq("id", parsed.data.userId)
     .maybeSingle()
@@ -520,7 +527,7 @@ export async function updateUserProfile(
   const { error: pendingErr } = await admin
     .from("profiles")
     .update({
-      pending_email: parsed.data.email,
+      pending_email: requestedEmail,
       email_change_token_hash: hash,
       email_change_token_expires_at: expiresAt,
       email_change_requested_at: new Date().toISOString(),
@@ -536,9 +543,9 @@ export async function updateUserProfile(
   // 3e. Send the verification email to the NEW address.
   const verifyLink = buildVerifyLink(siteUrl, parsed.data.userId, raw)
   const sent = await sendEmailChangeVerification({
-    newEmail: parsed.data.email,
+    newEmail: requestedEmail,
     oldEmail: targetProfile.email ?? "",
-    fullName: requestedName || targetProfile.full_name || parsed.data.email,
+    fullName: requestedName || targetProfile.full_name || requestedEmail,
     verifyLink,
     expiresAt,
   }).catch((err) => {
@@ -565,8 +572,8 @@ export async function updateUserProfile(
   //     knows their email is being changed before it takes effect.
   sendEmailChangeAlert({
     oldEmail: targetProfile.email ?? "",
-    newEmail: parsed.data.email,
-    fullName: requestedName || targetProfile.full_name || parsed.data.email,
+    newEmail: requestedEmail,
+    fullName: requestedName || targetProfile.full_name || requestedEmail,
     expiresAt,
   }).catch((err) => {
     console.warn("[updateUserProfile] sendEmailChangeAlert to old address threw:", err)
@@ -580,13 +587,13 @@ export async function updateUserProfile(
     entityId: parsed.data.userId,
     metadata: {
       old_email: targetProfile.email ?? null,
-      new_email: parsed.data.email,
+      new_email: requestedEmail,
     },
   })
 
   revalidatePath("/dashboard/team")
   revalidatePath("/dashboard/admin/users")
-  return { ok: true, pendingEmail: parsed.data.email }
+  return { ok: true, pendingEmail: requestedEmail }
 }
 
 // ---------------------------------------------------------------------------

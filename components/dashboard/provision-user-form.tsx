@@ -117,8 +117,14 @@ export function ProvisionUserForm({ teams }: { teams: Team[] }) {
               name="email"
               type="email"
               required
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
             />
+            <span className="mt-1 block text-[11px] text-muted-foreground">
+              We verify the email format and whether the domain can receive mail before creating the account.
+            </span>
           </label>
           <label className="block">
             <span className="text-[12px] font-semibold text-muted-foreground">Role</span>
