@@ -155,7 +155,7 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-in zoom-in-95 duration-200"
+        className="w-full max-w-md flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-in zoom-in-95 duration-200 max-h-[calc(100vh-2rem)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="edit-user-heading"
@@ -177,8 +177,8 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
           </div>
         </header>
 
-        <form onSubmit={handleSubmit}>
-          <div className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+          <div className="p-6 space-y-4 overflow-y-auto flex-1">
             {/* Current account info */}
             <div className="rounded-xl border border-border bg-muted/20 px-4 py-3 flex items-center gap-3">
               <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-[12px] font-semibold select-none">
