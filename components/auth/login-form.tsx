@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { AlertCircle, Eye, EyeOff, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,6 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { createClient } from "@/lib/supabase/client"
 
 export default function LoginForm() {
-  const router = useRouter()
   const params = useSearchParams()
   const rawNext = params.get("next") || ""
   // C-4: Only allow relative paths — reject absolute URLs, protocol-relative
@@ -48,10 +47,12 @@ export default function LoginForm() {
         setLoading(false)
         return
       }
-      router.replace(next)
-      router.refresh()
-      // Keep the loading state while we navigate to /dashboard so the
-      // button stays in its loading state instead of flashing back.
+      // Full page navigation bypasses the client RSC cache entirely and
+      // lets the browser follow any server-side redirect (e.g. must_reset →
+      // /dashboard/settings?reset=1) as a clean HTTP redirect chain.
+      // Using router.replace + router.refresh caused a race between two
+      // concurrent RSC fetches that left the page blank on first login.
+      window.location.href = next
     } catch {
       setError("Sign-in failed. Please try again.")
       setLoading(false)
