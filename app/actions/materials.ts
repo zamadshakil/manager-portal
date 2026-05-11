@@ -213,3 +213,67 @@ export async function deleteMaterial(formData: FormData): Promise<{ ok: boolean;
   revalidatePath("/dashboard/materials")
   return { ok: true }
 }
+
+export async function bulkDeleteMaterials(
+  ids: string[],
+): Promise<{ ok: boolean; deleted: number; errors: string[] }> {
+  if (!ids.length) return { ok: true, deleted: 0, errors: [] }
+  const profile = await requireProfile()
+  const supabase = await createClient()
+  const admin = createAdminClient()
+
+  const { data: rows } = await supabase
+    .from("materials")
+    .select("id, team_id, blob_url")
+    .in("id", ids)
+
+  if (!rows?.length) return { ok: false, deleted: 0, errors: ["No materials found"] }
+
+  const errors: string[] = []
+  let deleted = 0
+
+  for (const row of rows) {
+    if (row.team_id === null && profile.role !== "main_admin") {
+      errors.push(`Global material requires Main Admin`)
+      continue
+    }
+    try {
+      await assertCapability(profile, CAPABILITIES.MATERIALS_DELETE, {
+        team_id: row.team_id,
+        is_global: row.team_id === null,
+      })
+    } catch (err) {
+      if (err instanceof AccessDeniedError) {
+        errors.push(`Permission denied for one or more materials`)
+        continue
+      }
+      throw err
+    }
+
+    const { error } = await admin.from("materials").delete().eq("id", row.id)
+    if (error) {
+      errors.push(error.message)
+      continue
+    }
+
+    try {
+      if (row.blob_url) await del(row.blob_url)
+    } catch (err) {
+      console.error("[materials] blob delete failed", err)
+    }
+
+    await logActivity({
+      actorId: profile.id,
+      teamId: row.team_id,
+      action: "material.deleted",
+      entityType: "material",
+      entityId: row.id,
+    })
+
+    void deleteIndexed({ source_type: "material", source_id: row.id })
+    deleted++
+  }
+
+  revalidatePath("/dashboard/materials")
+  return { ok: errors.length === 0 || deleted > 0, deleted, errors }
+}
