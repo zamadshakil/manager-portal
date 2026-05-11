@@ -269,7 +269,19 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
                       const checked = selectedRuleIds.has(rule.id)
                       return (
                         <li key={rule.id}>
-                          <label className="flex items-start gap-3 px-3.5 py-2.5 hover:bg-muted/40 cursor-pointer transition-colors">
+                          <div
+                            role="checkbox"
+                            aria-checked={checked}
+                            tabIndex={0}
+                            onClick={() => toggleRule(rule.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === " " || e.key === "Enter") {
+                                e.preventDefault()
+                                toggleRule(rule.id)
+                              }
+                            }}
+                            className="flex items-start gap-3 px-3.5 py-2.5 hover:bg-muted/40 cursor-pointer transition-colors select-none"
+                          >
                             <span className="mt-0.5 shrink-0">
                               {checked ? (
                                 <CheckSquare className="h-4 w-4 text-primary" aria-hidden="true" />
@@ -277,12 +289,6 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
                                 <Square className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                               )}
                             </span>
-                            <input
-                              type="checkbox"
-                              className="sr-only"
-                              checked={checked}
-                              onChange={() => toggleRule(rule.id)}
-                            />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span
@@ -328,7 +334,7 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
                                 threshold {Number(rule.threshold).toFixed(1)} · weight {Number(rule.weight).toFixed(2)}
                               </p>
                             </div>
-                          </label>
+                          </div>
                         </li>
                       )
                     })}
