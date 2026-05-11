@@ -573,17 +573,19 @@ export interface MyTask extends TaskAssignment {
  * surface at the top.
  */
 export async function listMyTasks(profile: Profile): Promise<MyTask[]> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data } = await supabase
     .from("task_assignments")
     .select("*, task:tasks(*)")
     .eq("assignee_id", profile.id)
     .order("created_at", { ascending: false })
   if (!data) return []
-  return (data as unknown as Array<TaskAssignment & { task: Task }>).map((row) => ({
-    ...row,
-    task: row.task,
-  }))
+  return (data as unknown as Array<TaskAssignment & { task: Task | null }>)
+    .filter((row) => row.task != null)
+    .map((row) => ({
+      ...row,
+      task: row.task as Task,
+    }))
 }
 
 export async function getTaskById(profile: Profile, id: string): Promise<TaskWithStats | null> {
@@ -633,7 +635,7 @@ export async function listAssignmentsForTask(taskId: string): Promise<
     }
   >
 > {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("task_assignments")
     .select(

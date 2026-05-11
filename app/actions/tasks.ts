@@ -131,6 +131,7 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
       .from("profiles")
       .select("id")
       .eq("team_id", parsed.data.team_id)
+      .is("deleted_at", null)
     const rows =
       members?.map((m) => ({ task_id: task.id, assignee_id: (m as { id: string }).id })) ?? []
     if (rows.length > 0) {
@@ -153,6 +154,7 @@ export async function createTask(formData: FormData): Promise<TaskActionResult> 
       .from("profiles")
       .select("id")
       .eq("team_id", parsed.data.team_id)
+      .is("deleted_at", null)
       .in("id", ids)
     const validIds = new Set((validMembers ?? []).map((m) => (m as { id: string }).id))
     const rows = ids
