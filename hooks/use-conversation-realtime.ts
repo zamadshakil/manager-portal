@@ -148,7 +148,6 @@ export function useConversationRealtime({
     let fullSyncTimer: ReturnType<typeof setInterval> | null = null
 
     function startFallbackPolling() {
-      if (realtimeActive) return
       if (!msgTimer)      msgTimer      = setInterval(fetchNewMessages, MSG_POLL_MS)
       if (!modTimer)      modTimer      = setInterval(fetchModified,    MOD_POLL_MS)
       if (!reactTimer)    reactTimer    = setInterval(fetchReactions,   REACT_POLL_MS)
@@ -247,7 +246,6 @@ export function useConversationRealtime({
         if (!active) return
         if (status === "SUBSCRIBED") {
           realtimeActive = true
-          stopFallbackPolling()
           void fetchNewMessages()
           void fetchModified()
           void fetchReactions()
