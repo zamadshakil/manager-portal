@@ -1,0 +1,7 @@
+-- The canonical schema is maintained as individual migration files in:
+--   supabase/migrations/
+--
+-- Migrations are applied automatically on Railway cold-start when
+-- RUN_MIGRATIONS_ON_BOOT=true is set (see instrumentation.ts).
+-- To apply locally, run each migration file against your Postgres instance
+-- in chronological order (files are prefixed with a timestamp).

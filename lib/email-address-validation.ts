@@ -188,12 +188,9 @@ export async function validateDeliverableEmailAddress(
     }
   }
 
-  if (domainStatus === "unknown") {
-    return {
-      ok: false,
-      error: "We could not verify that email domain right now. Please try again in a moment.",
-    }
-  }
+  // 'unknown' means DNS was inconclusive (timeout, network blip, etc.).
+  // Allow the change — only hard-reject when DNS definitively confirms
+  // the domain has no mail routing ('invalid' = ENOTFOUND/ENODATA).
 
   return { ok: true, email: normalized }
 }
