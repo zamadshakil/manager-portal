@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState, useTransition } from "react"
-import { CloudUpload, FileType2, Loader2, AlertTriangle, CheckCircle2, XCircle, Clock } from "lucide-react"
+import { CloudUpload, FileType2, Loader2, AlertTriangle, CheckCircle2, XCircle, Clock, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
@@ -73,6 +73,7 @@ export function TaskSubmissionForm({
   function pickFile(f: File | null) {
     setFile(f)
     setError(null)
+    if (!f && inputRef.current) inputRef.current.value = ""
   }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -147,48 +148,63 @@ export function TaskSubmissionForm({
         </div>
       ) : null}
 
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragOver(true)
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault()
-          setDragOver(false)
-          const f = e.dataTransfer.files?.[0]
-          if (f) pickFile(f)
-        }}
-        disabled={blocked}
-        className={cn(
-          "w-full rounded-xl border border-dashed p-5 text-left transition-colors",
-          blocked
-            ? "border-border bg-muted/40 cursor-not-allowed opacity-60"
-            : dragOver
-              ? "border-primary bg-[#f2f9ff]"
-              : "border-border bg-warm-white hover:bg-muted",
-        )}
-      >
-        <div className="flex items-start gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-background border border-border">
-            {file ? (
-              <FileType2 className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
-            ) : (
-              <CloudUpload className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
-            )}
-          </span>
-          <div className="flex-1 min-w-0">
-            <p className="text-[13.5px] font-semibold truncate">
-              {file ? file.name : "Drop file or click to browse"}
-            </p>
-            <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-              Up to 25 MB · PDF, DOC, DOCX, TXT, PPT, PNG, JPG, XLSX, MD
-            </p>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setDragOver(true)
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDragOver(false)
+            const f = e.dataTransfer.files?.[0]
+            if (f) pickFile(f)
+          }}
+          disabled={blocked}
+          className={cn(
+            "w-full rounded-xl border border-dashed p-5 text-left transition-colors",
+            blocked
+              ? "border-border bg-muted/40 cursor-not-allowed opacity-60"
+              : dragOver
+                ? "border-primary bg-[#f2f9ff]"
+                : "border-border bg-warm-white hover:bg-muted",
+          )}
+        >
+          <div className="flex items-start gap-3">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-background border border-border">
+              {file ? (
+                <FileType2 className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+              ) : (
+                <CloudUpload className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+              )}
+            </span>
+            <div className="flex-1 min-w-0 pr-6">
+              <p className="text-[13.5px] font-semibold truncate">
+                {file ? file.name : "Drop file or click to browse"}
+              </p>
+              <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                Up to 25 MB · PDF, DOC, DOCX, TXT, PPT, PNG, JPG, XLSX, MD
+              </p>
+            </div>
           </div>
-        </div>
-      </button>
+        </button>
+        {file && !blocked && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              pickFile(null)
+            }}
+            aria-label="Remove selected file"
+            className="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        )}
+      </div>
 
       <input
         ref={inputRef}
