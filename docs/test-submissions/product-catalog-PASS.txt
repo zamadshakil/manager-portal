@@ -1,0 +1,66 @@
+WEEKLY PRODUCT CATALOG UPDATE
+Submitted by: Catalog Team
+Date: 2025-05-12
+
+==================================================
+PRODUCT 1
+==================================================
+Product Title: Women's Canvas Tote Bag — Large
+SKU: BAGS-1042
+Price: $24.99
+Category: Bags & Accessories
+Description:
+This spacious large canvas tote bag is crafted from 100% organic cotton canvas,
+making it both eco-friendly and highly durable. Ideal for everyday shopping,
+beach trips, or as a reusable grocery bag, it features reinforced double handles
+and an interior zip pocket for secure storage. Available in 6 colors.
+Dimensions: 18" W x 14" H x 5" D. Weight capacity: up to 30 lbs.
+
+==================================================
+PRODUCT 2
+==================================================
+Product Title: Wireless Noise-Cancelling Headphones — Over-Ear
+SKU: ELEC-3301
+Price: $79.95
+Category: Electronics / Audio
+Description:
+Experience immersive sound with our over-ear wireless headphones featuring
+active noise cancellation (ANC) technology. The 40mm driver delivers rich bass
+and crisp highs while the cushioned ear cups provide all-day comfort.
+Up to 30 hours of battery life with quick-charge support (10 min = 3 hrs playback).
+Compatible with Bluetooth 5.0, iOS, and Android. Includes a carrying case and
+3.5mm audio cable for wired mode. Weight: 280g.
+
+==================================================
+PRODUCT 3
+==================================================
+Product Title: Stainless Steel Water Bottle 750ml
+SKU: KITC-0887
+Price: $18.50
+Category: Kitchen & Dining / Drinkware
+Description:
+Keep beverages hot for up to 12 hours or cold for 24 hours with this double-wall
+vacuum-insulated stainless steel water bottle. The leak-proof screw cap ensures
+no spills in your bag, and the powder-coated exterior provides a non-slip grip.
+BPA-free, dishwasher-safe lid, and compatible with most cup holders.
+Capacity: 750ml. Available in Matte Black, Ocean Blue, Forest Green, and Rose Gold.
+
+==================================================
+PRODUCT 4
+==================================================
+Product Title: Adjustable Laptop Stand — Aluminum
+SKU: DESK-2210
+Price: $34.99
+Category: Office & Workspace
+Description:
+Elevate your ergonomics with this ultra-slim aluminum laptop stand, adjustable
+from 15° to 45° in six preset angles. Fits all laptops and tablets from 10" to 17".
+The non-slip silicone pads protect your device surface while the foldable design
+makes it easy to pack for remote work or travel. Weight: 420g. Load capacity: up to 10kg.
+Compatible with MacBook, Dell, HP, Lenovo, and all major brands.
+
+==================================================
+END OF CATALOG SUBMISSION
+Total products submitted: 4
+Submitted for approval by: Sarah Mitchell, Catalog Lead
+==================================================

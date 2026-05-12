@@ -1,0 +1,99 @@
+RETURN & REFUND PROCESSING LOG
+Period: Week 18 (May 6–12, 2025)
+Prepared by: Customer Service Team
+Report Date: 2025-05-12
+Total Returns Processed: 6
+
+All returns and refunds are handled in accordance with our 30-day return policy.
+Customers are eligible for a full refund or exchange within 30 days of delivery.
+Please refer to company.com/returns for full terms.
+
+==================================================
+REFUND / RETURN LOG
+==================================================
+
+Entry 1
+-------
+Order ID:          ORD-88120
+Customer:          Sophie Laurent (CUST-4421)
+Item Returned:     Wireless Noise-Cancelling Headphones (SKU: ELEC-3301)
+Reason for Return: Product not as described — ear cushions thinner than shown in photos
+Refund Amount:     $79.95
+Resolution Status: Refunded
+Refund Method:     Original payment method (credit card)
+Date Processed:    2025-05-08
+Notes:             Customer satisfied with resolution. Product photos flagged to catalog team.
+
+Entry 2
+-------
+Order ID:          ORD-88093
+Customer:          Daniel Owusu (CUST-5810)
+Item Returned:     Running Shoes — Men's Size 10 (SKU: SHOE-4521)
+Reason for Return: Wrong size — ordered US 10 but received US 9.5
+Refund Amount:     $0.00
+Resolution Status: Exchanged
+Refund Method:     N/A — size exchange processed
+Date Processed:    2025-05-09
+Notes:             Correct size dispatched same day. Customer happy.
+
+Entry 3
+-------
+Order ID:          ORD-88150
+Customer:          Fatima Al-Rashid (CUST-2293)
+Item Returned:     Women's Canvas Tote Bag — Large (SKU: BAGS-1042)
+Reason for Return: Arrived damaged — strap seam split on first use
+Refund Amount:     $24.99
+Resolution Status: Refunded
+Refund Method:     Original payment method (PayPal)
+Date Processed:    2025-05-10
+Notes:             Quality issue escalated to supplier. Second complaint on BAGS-1042 this week.
+
+Entry 4
+-------
+Order ID:          ORD-87991
+Customer:          Tom Bradley (CUST-6604)
+Item Returned:     Stainless Steel Water Bottle 750ml (SKU: KITC-0887)
+Reason for Return: Changed mind / no longer needed
+Refund Amount:     $18.50
+Resolution Status: Refunded
+Refund Method:     Store credit applied to account
+Date Processed:    2025-05-11
+Notes:             Item received in original condition, restocked.
+
+Entry 5
+-------
+Order ID:          ORD-88200
+Customer:          Maria Gonzalez (CUST-7712)
+Item Returned:     Adjustable Laptop Stand — Aluminum (SKU: DESK-2210)
+Reason for Return: Incompatible with customer's laptop model (older thick frame)
+Refund Amount:     $34.99
+Resolution Status: Refunded
+Refund Method:     Original payment method (debit card)
+Date Processed:    2025-05-12
+Notes:             Suggested adding laptop compatibility info to product page.
+
+Entry 6
+-------
+Order ID:          ORD-88311
+Customer:          Kevin Wu (CUST-3390)
+Item Returned:     Merino Wool Crew-Neck Sweater (SKU: WEAR-0033)
+Reason for Return: Allergic reaction to wool
+Refund Amount:     $0.00
+Resolution Status: Rejected
+Refund Method:     N/A
+Date Processed:    2025-05-12
+Notes:             Return window expired (order placed 38 days ago). Customer informed
+                   politely; beyond 30-day return policy window. Goodwill 10% discount
+                   offered on next purchase.
+
+==================================================
+WEEKLY TOTALS
+==================================================
+Total Refunds Issued:     $158.43
+Total Exchanges:          1
+Total Rejections:         1
+Return Rate (this week):  ~2.1% of shipped orders
+
+==================================================
+END OF REPORT
+==================================================

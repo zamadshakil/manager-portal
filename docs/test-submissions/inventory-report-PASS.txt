@@ -1,0 +1,42 @@
+INVENTORY DISCREPANCY REPORT
+Period: Week 18 (May 6–12, 2025)
+Prepared by: Warehouse Team — Stock Control
+Report Date: 2025-05-12
+
+SUMMARY
+-------
+Total SKUs audited: 7
+SKUs with discrepancies: 4
+SKUs matching system count: 3
+Estimated stock loss value: $312.45
+
+DISCREPANCY LOG
+---------------
+
+SKU         | Product Name                        | Expected Qty | Actual Qty | Discrepancy | Est. Value Impact
+------------|-------------------------------------|--------------|------------|-------------|-------------------
+BAGS-1042   | Women's Canvas Tote Bag — Large     |     200      |    197     |     -3      | -$74.97
+ELEC-3301   | Wireless Noise-Cancelling Headphones|      50      |     47     |     -3      | -$239.85
+KITC-0887   | Stainless Steel Water Bottle 750ml  |     300      |    302     |     +2      | +$37.00
+DESK-2210   | Adjustable Laptop Stand — Aluminum  |      75      |     75     |      0      | $0.00
+SHOE-4521   | Running Shoes — Men's Size 10       |      30      |     25     |     -5      | -$349.75
+HOME-1100   | Bamboo Cutting Board Set            |     120      |    121     |     +1      | +$22.99
+WEAR-0033   | Merino Wool Crew-Neck Sweater       |      80      |     80     |      0      | $0.00
+
+NOTES ON DISCREPANCIES
+----------------------
+- BAGS-1042: 3 units missing; may be linked to unlogged returns from May 8. Under investigation.
+- ELEC-3301: 3 units short; warehouse team noted 2 units were sent to quality control on May 9 and not logged.
+- KITC-0887: 2 extra units; likely a supplier overshipment from PO-2245 received May 6.
+- SHOE-4521: 5 units below count; system shows 2 recent POS transactions not synced to the WMS.
+  Root cause: POS sync failure on May 10 between 14:00–17:00 UTC.
+
+ACTION ITEMS
+------------
+1. Log QC transfer for ELEC-3301 (2 units) against QC ticket QC-2025-183.
+2. Raise credit claim with supplier for KITC-0887 overshipment against PO-2245.
+3. IT to investigate POS sync failure window (May 10, 14:00–17:00 UTC) for SHOE-4521.
+4. Returns processing team to audit May 8 returns queue for BAGS-1042.
+
+Verified by: Mark Chen, Warehouse Manager
+Approved for submission: Yes

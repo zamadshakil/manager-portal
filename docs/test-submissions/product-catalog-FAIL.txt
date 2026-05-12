@@ -1,0 +1,20 @@
+product catalog update
+
+item 1
+name: tote bag
+its a bag that people carry stuff in
+color: beige
+
+item 2
+wireless headphones
+these are good headphones with noise cancelling
+very comfortable to wear
+
+item 3
+water bottle
+holds water
+stainless steel
+
+note: prices to be added later
+categories not assigned yet
+skus pending from warehouse team

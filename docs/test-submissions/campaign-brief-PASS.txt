@@ -1,0 +1,82 @@
+PROMOTIONAL CAMPAIGN PERFORMANCE BRIEF
+Campaign Name: Spring Sale 2025 — "Fresh Starts"
+Campaign ID: CAMP-2025-04
+Date Range: April 1–30, 2025
+Prepared by: Digital Marketing Team
+Report Date: May 5, 2025
+
+==================================================
+1. CAMPAIGN OVERVIEW
+==================================================
+Channel Mix: Meta (Facebook + Instagram), Google Shopping, Email Newsletter
+Primary Goal: Drive revenue during the spring seasonal peak
+Target Audience: Women 25–44 interested in home, fashion, and wellness
+
+==================================================
+2. REACH & IMPRESSIONS
+==================================================
+Total Impressions:        1,842,300
+Unique Reach:               742,100
+Frequency (avg):              2.48x
+Top Channel by Reach:     Instagram Reels (44% of total impressions)
+
+==================================================
+3. ENGAGEMENT METRICS
+==================================================
+Total Clicks:               38,470
+Click-Through Rate (CTR):     2.09%
+Top Performing Ad:         "Tote Bag — 20% Off" carousel (CTR: 3.41%)
+Worst Performing Ad:       Google Shopping text ad — ELEC-3301 (CTR: 0.78%)
+Email Open Rate:              31.4%
+Email Click Rate:              6.8%
+
+==================================================
+4. CONVERSIONS & REVENUE
+==================================================
+Total Conversions (purchases):   1,204
+Conversion Rate (from clicks):   3.13%
+Average Order Value (AOV):       $58.40
+Total Campaign Revenue:          $70,273.60
+Assisted Revenue (view-through): $12,400.00
+Total Attributed Revenue:        $82,673.60
+
+==================================================
+5. BUDGET & ROI
+==================================================
+Total Media Spend:        $14,800.00
+Creative Production Cost:  $1,200.00
+Total Campaign Cost:      $16,000.00
+
+Return on Ad Spend (ROAS):  5.17x
+Return on Investment (ROI): 416.7%
+Cost Per Acquisition (CPA): $13.29
+
+==================================================
+6. INSIGHTS
+==================================================
+- Instagram Reels drove the highest volume of traffic and the best engagement.
+  The short-form video format significantly outperformed static images (+2.1x CTR).
+- Google Shopping performed below expectations for ELEC-3301, likely due to
+  competitive bidding from larger retailers in the electronics category.
+- Email newsletter had the highest conversion rate of all channels (8.2%),
+  suggesting our subscriber list is highly purchase-intent.
+
+==================================================
+7. RECOMMENDATIONS FOR NEXT CAMPAIGN
+==================================================
+1. Increase Instagram Reels budget by 25% for the summer campaign (CAMP-2025-06).
+   Based on this campaign, each $1,000 in Reels spend generated $5,900 in revenue.
+2. Pause Google Shopping for ELEC-3301 and redirect that budget to KITC-0887
+   and BAGS-1042 which have lower competition and higher organic search intent.
+3. Segment the email list by past purchase category for the next campaign to
+   improve relevance and target an email conversion rate of 10%+.
+
+==================================================
+DISCLAIMER
+==================================================
+All metrics are sourced from Meta Ads Manager, Google Ads, and our email platform
+as of May 5, 2025. Revenue figures are inclusive of VAT where applicable.
+Prices and offers referenced in this report were valid during the campaign period
+and are subject to change. Terms and conditions apply. See company.com/terms for
+full promotional terms. © 2025 Company Name Ltd. All rights reserved.
+==================================================
