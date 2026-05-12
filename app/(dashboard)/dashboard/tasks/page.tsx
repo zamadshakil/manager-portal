@@ -11,7 +11,7 @@ import {
 import { PageHeader } from "@/components/dashboard/page-header"
 import { NewTaskDialog } from "@/components/dashboard/new-task-dialog"
 import { TaskList } from "@/components/dashboard/task-list"
-import { MyTasks } from "@/components/dashboard/my-tasks"
+import { MemberTaskSections } from "@/components/dashboard/member-task-sections"
 
 export default async function TasksPage() {
   const profile = await requireProfile()
@@ -29,44 +29,13 @@ export default async function TasksPage() {
   if (!canManageTasks) {
     const myTasks = await listMyTasks(profile)
 
-    // Determine whether a still-"assigned" task's submission window has fully
-    // closed so it can be demoted to History client-side (no DB write needed —
-    // this is a deterministic UI-only computation; the cron still marks missed).
-    function isWindowClosed(t: (typeof myTasks)[number]): boolean {
-      if (t.status !== "assigned") return false
-      const now = Date.now()
-      const due = t.task.due_at ? new Date(t.task.due_at).getTime() : null
-      if (!due) return false                         // no deadline — never closes
-      if (!t.task.allow_late) return due < now       // strict deadline
-      const late = t.task.late_submission_deadline
-        ? new Date(t.task.late_submission_deadline).getTime()
-        : null
-      return late ? late < now : due < now           // uses late window when set
-    }
-
-    // "open"    → still actionable (submission window is open)
-    // "history" → terminal statuses + expired-but-not-yet-cron-marked tasks
-    const open = myTasks.filter((t) => t.status === "assigned" && !isWindowClosed(t))
-    const history = myTasks.filter((t) => t.status !== "assigned" || isWindowClosed(t))
-
     return (
       <div className="space-y-6 lg:space-y-8">
         <PageHeader
           title="Your tasks"
           description="Submissions assigned to you, ordered by deadline."
         />
-        <section className="space-y-3">
-          <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-            Open ({open.length})
-          </h2>
-          <MyTasks tasks={open} />
-        </section>
-        <section className="space-y-3">
-          <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-            History ({history.length})
-          </h2>
-          <MyTasks tasks={history} />
-        </section>
+        <MemberTaskSections tasks={myTasks} />
       </div>
     )
   }

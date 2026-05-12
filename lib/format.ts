@@ -22,6 +22,24 @@ export function formatRelative(iso: string | Date | null | undefined): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
+export function formatRelativeDeadline(iso: string | Date | null | undefined): string {
+  if (!iso) return "—"
+  const date = typeof iso === "string" ? new Date(iso) : iso
+  const diff = date.getTime() - Date.now()
+  const future = diff >= 0
+  const absDiff = Math.abs(diff)
+  const sec = Math.round(absDiff / 1000)
+  if (sec < 5) return future ? "in moments" : "just now"
+  if (sec < 60) return future ? `in ${sec}s` : `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return future ? `in ${min}m` : `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return future ? `in ${hr}h` : `${hr}h ago`
+  const day = Math.floor(hr / 24)
+  if (day < 7) return future ? `in ${day}d` : `${day}d ago`
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+ }
+
 /**
  * Format a deadline timestamp as "May 15, 2026 · 5:00 PM (in 2 days)" or
  * "May 10, 2026 · 5:00 PM (3h ago)". Combines an absolute date+time with a

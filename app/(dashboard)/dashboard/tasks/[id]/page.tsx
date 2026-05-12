@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, CalendarClock, Users, AlertTriangle, ListChecks, Sparkles } from "lucide-react"
+import { ArrowLeft, ListChecks, Sparkles } from "lucide-react"
 import { requireProfile } from "@/lib/auth"
 import { CAPABILITIES, getAccessContext } from "@/lib/permissions"
 import {
@@ -15,7 +15,7 @@ import { StatusBadge } from "@/components/dashboard/status-badge"
 import { DeleteTaskButton } from "@/components/dashboard/delete-task-button"
 import { TaskEditor } from "@/components/dashboard/task-editor"
 import { AssignmentsRealtimeListener } from "@/components/dashboard/assignments-realtime-listener"
-import { formatDeadline } from "@/lib/format"
+import { TaskMetaStrip } from "@/components/dashboard/task-meta-strip"
 import {
   Table,
   TableBody,
@@ -67,9 +67,6 @@ export default async function TaskDetailPage({
       })
     : []
 
-  const due = task.due_at ? new Date(task.due_at) : null
-  const overdue = due ? due.getTime() < Date.now() : false
-
   return (
     <div className="space-y-6 lg:space-y-8">
       <Link
@@ -88,45 +85,7 @@ export default async function TaskDetailPage({
 
       {canUpdateTask ? <TaskEditor task={task} rules={rules} /> : null}
 
-      {/* Meta strip */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 shadow-card">
-        <span
-          className={`inline-flex items-center gap-1 text-[12px] font-semibold ${
-            overdue ? "text-destructive" : "text-muted-foreground"
-          }`}
-        >
-          <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
-          {due ? (
-            <>
-              <span className="font-semibold">Due</span>{" "}
-              {formatDeadline(task.due_at!)}
-            </>
-          ) : "No deadline"}
-        </span>
-        <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-muted-foreground">
-          <Users className="h-3.5 w-3.5" aria-hidden="true" />
-          {task.submitted_count}/{task.total_assigned} submitted
-        </span>
-        {task.allow_late && task.late_submission_deadline ? (
-          <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-amber-600">
-            <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
-            <span className="font-semibold">Late allowed until</span>{" "}
-            {formatDeadline(task.late_submission_deadline!)}
-          </span>
-        ) : null}
-        {task.late_count > 0 ? (
-          <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-amber-600">
-            <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-            {task.late_count} late
-          </span>
-        ) : null}
-        {task.missed_count > 0 ? (
-          <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-destructive">
-            <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-            {task.missed_count} missed
-          </span>
-        ) : null}
-      </div>
+      <TaskMetaStrip task={task} />
 
       {/* Instructions */}
       {canManageTask && task.instructions ? (

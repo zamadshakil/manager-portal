@@ -14,6 +14,7 @@ import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
 import { verifyMimeAgainstBuffer } from "@/lib/mime-sniff"
 import { verifyFileIntegrity } from "@/lib/file-integrity"
 import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
+import { getTaskDeadlineWindow } from "@/lib/task-deadlines"
 
 
 
@@ -141,24 +142,29 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
       return { ok: false, error: "Submission window has closed for this task." }
     }
 
-    const now = Date.now()
-    const due = task.due_at ? new Date(task.due_at).getTime() : null
-    if (due !== null && now > due) {
-      if (!task.allow_late) {
-        return {
-          ok: false,
-          error: "Submission failed: the deadline has passed and late submissions are not allowed.",
-        }
+    const deadline = getTaskDeadlineWindow({
+      dueAt: task.due_at,
+      allowLate: task.allow_late,
+      lateSubmissionDeadline: task.late_submission_deadline,
+    })
+    if (deadline.isClosed) {
+      await supabase
+        .from("task_assignments")
+        .update({ status: "missed" })
+        .eq("id", assignment.id)
+        .eq("assignee_id", profile.id)
+        .eq("status", "assigned")
+        .is("submission_id", null)
+
+      return {
+        ok: false,
+        error:
+          deadline.closureReason === "late_submission_deadline"
+            ? "Submission failed: the late submission deadline has passed."
+            : "Submission failed: the deadline has passed and late submissions are not allowed.",
       }
-      if (task.allow_late && task.late_submission_deadline) {
-        const lateDeadline = new Date(task.late_submission_deadline).getTime()
-        if (now > lateDeadline) {
-          return {
-            ok: false,
-            error: "Submission failed: the late submission deadline has passed.",
-          }
-        }
-      }
+    }
+    if (deadline.isLateWindowOpen) {
       isLate = true
       const reason = parsed.data.lateReason?.trim() ?? ""
       if (task.require_late_reason && reason.length < 8) {

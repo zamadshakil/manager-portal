@@ -3,9 +3,11 @@ import { CalendarClock, CheckCircle2, AlertTriangle, Circle, Clock } from "lucid
 import { cn } from "@/lib/utils"
 import { formatDeadline } from "@/lib/format"
 import type { MyTask } from "@/lib/data"
+import { getTaskDeadlineWindow } from "@/lib/task-deadlines"
 
 interface MyTasksProps {
   tasks: MyTask[]
+  now?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -14,22 +16,22 @@ interface MyTasksProps {
 
 type UrgencyTier = "normal" | "urgent" | "late_window" | "expired"
 
-function getUrgencyTier(t: MyTask): UrgencyTier {
+function getUrgencyTier(t: MyTask, now: number): UrgencyTier {
   if (t.status !== "assigned") return "normal"
-  const now = Date.now()
-  const due = t.task.due_at ? new Date(t.task.due_at).getTime() : null
-  if (!due) return "normal"
-  // Past due_at — check late window
-  if (due < now) {
-    if (!t.task.allow_late) return "expired"
-    const late = t.task.late_submission_deadline
-      ? new Date(t.task.late_submission_deadline).getTime()
-      : null
-    if (!late) return "expired"
-    return late < now ? "expired" : "late_window"
-  }
-  // Still before due_at — urgent if within 24 h
-  return due - now < 24 * 60 * 60 * 1000 ? "urgent" : "normal"
+  const deadline = getTaskDeadlineWindow(
+    {
+      dueAt: t.task.due_at,
+      allowLate: t.task.allow_late,
+      lateSubmissionDeadline: t.task.late_submission_deadline,
+    },
+    now,
+  )
+
+  if (!deadline.hasDeadline) return "normal"
+  if (deadline.isClosed) return "expired"
+  if (deadline.isLateWindowOpen) return "late_window"
+  if (deadline.dueAtMs !== null && deadline.dueAtMs - now < 24 * 60 * 60 * 1000) return "urgent"
+  return "normal"
 }
 
 function statusIcon(status: MyTask["status"], tier: UrgencyTier) {
@@ -85,7 +87,9 @@ function UrgencyPill({ tier }: { tier: UrgencyTier }) {
 // Component
 // ---------------------------------------------------------------------------
 
-export function MyTasks({ tasks }: MyTasksProps) {
+export function MyTasks({ tasks, now: nowProp }: MyTasksProps) {
+  const now = nowProp ?? Date.now()
+
   if (tasks.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-card p-8 text-center shadow-card">
@@ -100,18 +104,22 @@ export function MyTasks({ tasks }: MyTasksProps) {
   return (
     <ul className="grid gap-3">
       {tasks.map((t) => {
-        const tier = getUrgencyTier(t)
+        const tier = getUrgencyTier(t, now)
         const isExpired = tier === "expired"
         const due = t.task.due_at
         const lateDeadline = t.task.late_submission_deadline
-        const now = Date.now()
+        const deadline = getTaskDeadlineWindow(
+          {
+            dueAt: due,
+            allowLate: t.task.allow_late,
+            lateSubmissionDeadline: lateDeadline,
+          },
+          now,
+        )
         const inLateWindow =
           tier === "late_window" ||
           (t.status !== "assigned" &&
-            due &&
-            new Date(due).getTime() < now &&
-            t.task.allow_late &&
-            lateDeadline)
+            deadline.isLateWindowOpen)
 
         // Colour of the due-date line
         const dueColour =

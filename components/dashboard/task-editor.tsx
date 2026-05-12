@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { updateTask } from "@/app/actions/tasks"
 import type { ValidationRule } from "@/lib/types"
 import type { TaskWithStats } from "@/lib/data"
+import { toIsoDateTimeLocal } from "@/lib/task-deadlines"
 import { cn } from "@/lib/utils"
 
 interface TaskEditorProps {
@@ -77,9 +78,23 @@ export function TaskEditor({ task, rules }: TaskEditorProps) {
     setSuccess(null)
     const fd = new FormData(e.currentTarget)
     const dueRaw = fd.get("due_at") as string
-    if (dueRaw) fd.set("due_at", new Date(dueRaw).toISOString())
+    if (dueRaw) {
+      const dueIso = toIsoDateTimeLocal(dueRaw)
+      if (!dueIso) {
+        setError("Please choose a valid deadline date and time.")
+        return
+      }
+      fd.set("due_at", dueIso)
+    }
     const lateRaw = fd.get("late_submission_deadline") as string
-    if (lateRaw) fd.set("late_submission_deadline", new Date(lateRaw).toISOString())
+    if (lateRaw) {
+      const lateIso = toIsoDateTimeLocal(lateRaw)
+      if (!lateIso) {
+        setError("Please choose a valid late submission deadline date and time.")
+        return
+      }
+      fd.set("late_submission_deadline", lateIso)
+    }
     fd.set("rules_section_shown", "1")
     fd.delete("rule_ids")
     for (const id of selectedRuleIds) fd.append("rule_ids", id)

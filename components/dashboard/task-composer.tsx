@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { createTask } from "@/app/actions/tasks"
 import type { Profile, Team, ValidationRule } from "@/lib/types"
+import { toIsoDateTimeLocal } from "@/lib/task-deadlines"
 import { cn } from "@/lib/utils"
 
 interface TaskComposerProps {
@@ -85,11 +86,21 @@ export function TaskComposer({ teams, defaultTeamId, members, rules, onSuccess }
     const fd = new FormData(e.currentTarget)
     const dueRaw = fd.get("due_at") as string
     if (dueRaw) {
-      fd.set("due_at", new Date(dueRaw).toISOString())
+      const dueIso = toIsoDateTimeLocal(dueRaw)
+      if (!dueIso) {
+        setError("Please choose a valid deadline date and time.")
+        return
+      }
+      fd.set("due_at", dueIso)
     }
     const lateDeadlineRaw = fd.get("late_submission_deadline") as string
     if (lateDeadlineRaw) {
-      fd.set("late_submission_deadline", new Date(lateDeadlineRaw).toISOString())
+      const lateDeadlineIso = toIsoDateTimeLocal(lateDeadlineRaw)
+      if (!lateDeadlineIso) {
+        setError("Please choose a valid late submission deadline date and time.")
+        return
+      }
+      fd.set("late_submission_deadline", lateDeadlineIso)
     }
     fd.set("team_id", teamId)
     fd.set("assign_mode", mode)

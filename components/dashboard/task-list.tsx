@@ -4,9 +4,11 @@ import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { CalendarClock, Users, AlertTriangle, CheckCircle2, Trash2, Loader2 } from "lucide-react"
-import { formatRelative } from "@/lib/format"
+import { formatRelative, formatRelativeDeadline } from "@/lib/format"
 import { DeleteTaskButton } from "@/components/dashboard/delete-task-button"
 import { bulkDeleteTasks } from "@/app/actions/tasks"
+import { useTaskDeadlineNow } from "@/hooks/use-task-deadline-now"
+import { getTaskDeadlineWindow } from "@/lib/task-deadlines"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,13 +28,28 @@ interface TaskListProps {
   canDelete?: boolean
 }
 
-function dueLabel(dueAt: string | null): { label: string; tone: "default" | "warn" | "danger" } {
+function dueLabel(task: TaskWithStats, now: number): { label: string; tone: "default" | "warn" | "danger" } {
+  const deadline = getTaskDeadlineWindow(
+    {
+      dueAt: task.due_at,
+      allowLate: task.allow_late,
+      lateSubmissionDeadline: task.late_submission_deadline,
+    },
+    now,
+  )
+  const dueAt = task.due_at
   if (!dueAt) return { label: "No deadline", tone: "default" }
-  const ms = new Date(dueAt).getTime() - Date.now()
-  if (ms < 0) return { label: `Overdue · ${formatRelative(dueAt)}`, tone: "danger" }
+  if (deadline.isLateWindowOpen && task.late_submission_deadline) {
+    return {
+      label: `Late window · closes ${formatRelativeDeadline(task.late_submission_deadline)}`,
+      tone: "warn",
+    }
+  }
+  const ms = new Date(dueAt).getTime() - now
+  if (deadline.isClosed) return { label: `Overdue · ${formatRelative(dueAt)}`, tone: "danger" }
   const days = ms / (1000 * 60 * 60 * 24)
-  if (days < 1) return { label: `Due ${formatRelative(dueAt)}`, tone: "warn" }
-  return { label: `Due ${formatRelative(dueAt)}`, tone: "default" }
+  if (days < 1) return { label: `Due ${formatRelativeDeadline(dueAt)}`, tone: "warn" }
+  return { label: `Due ${formatRelativeDeadline(dueAt)}`, tone: "default" }
 }
 
 export function TaskList({ tasks, emptyHint, canDelete = false }: TaskListProps) {
@@ -40,6 +57,14 @@ export function TaskList({ tasks, emptyHint, canDelete = false }: TaskListProps)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [pending, startTransition] = useTransition()
   const [bulkError, setBulkError] = useState<string | null>(null)
+  const now = useTaskDeadlineNow(
+    tasks.map((task) => ({
+      id: task.id,
+      dueAt: task.due_at,
+      allowLate: task.allow_late,
+      lateSubmissionDeadline: task.late_submission_deadline,
+    })),
+  )
 
   const allSelected = tasks.length > 0 && selected.size === tasks.length
   const someSelected = selected.size > 0
@@ -169,7 +194,7 @@ export function TaskList({ tasks, emptyHint, canDelete = false }: TaskListProps)
       {/* ── Task cards ──────────────────────────────────────────────── */}
       <ul className="grid gap-3">
         {tasks.map((t) => {
-          const due = dueLabel(t.due_at)
+          const due = dueLabel(t, now)
           const completion =
             t.total_assigned > 0 ? Math.round((t.submitted_count / t.total_assigned) * 100) : 0
           const isSelected = selected.has(t.id)

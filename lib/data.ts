@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { CAPABILITIES, hasCapability } from "@/lib/permissions"
+import { getTaskDeadlineWindow } from "@/lib/task-deadlines"
 import type {
   ActivityLogEntry,
   Announcement,
@@ -67,6 +68,49 @@ async function purgeExpiredMaterials(nowIso: string) {
   } catch (error) {
     console.error("Failed to unindex expired materials", error)
   }
+}
+
+async function syncClosedTaskAssignments(params: {
+  teamId?: string | null
+  taskId?: string
+}) {
+  const supabase = createAdminClient()
+  let taskQuery = supabase
+    .from("tasks")
+    .select("id, due_at, allow_late, late_submission_deadline")
+    .not("due_at", "is", null)
+
+  if (params.taskId) {
+    taskQuery = taskQuery.eq("id", params.taskId)
+  } else if (params.teamId) {
+    taskQuery = taskQuery.eq("team_id", params.teamId)
+  }
+
+  const { data: tasks } = await taskQuery
+  if (!tasks || tasks.length === 0) return
+
+  const now = Date.now()
+  const closedTaskIds = tasks
+    .filter((task) =>
+      getTaskDeadlineWindow(
+        {
+          dueAt: task.due_at,
+          allowLate: task.allow_late,
+          lateSubmissionDeadline: task.late_submission_deadline,
+        },
+        now,
+      ).isClosed,
+    )
+    .map((task) => task.id)
+
+  if (closedTaskIds.length === 0) return
+
+  await supabase
+    .from("task_assignments")
+    .update({ status: "missed" })
+    .eq("status", "assigned")
+    .is("submission_id", null)
+    .in("task_id", closedTaskIds)
 }
 
 export interface DashboardSummary {
@@ -594,6 +638,11 @@ export async function listTasksForManager(profile: Profile): Promise<TaskWithSta
     await hasCapability(profile, CAPABILITIES.TASKS_ASSIGN) ||
     await hasCapability(profile, CAPABILITIES.TASKS_DELETE)
   if (!canReadTasks) return []
+  if (profile.role === "main_admin") {
+    await syncClosedTaskAssignments({ teamId: null })
+  } else if (profile.team_id) {
+    await syncClosedTaskAssignments({ teamId: profile.team_id })
+  }
   const supabase = createAdminClient()
 
   let q = supabase
@@ -632,6 +681,9 @@ export interface MyTask extends TaskAssignment {
  * surface at the top.
  */
 export async function listMyTasks(profile: Profile): Promise<MyTask[]> {
+  if (profile.team_id) {
+    await syncClosedTaskAssignments({ teamId: profile.team_id })
+  }
   const supabase = createAdminClient()
   const { data } = await supabase
     .from("task_assignments")
@@ -650,6 +702,7 @@ export async function listMyTasks(profile: Profile): Promise<MyTask[]> {
 }
 
 export async function getTaskById(profile: Profile, id: string): Promise<TaskWithStats | null> {
+  await syncClosedTaskAssignments({ taskId: id })
   const supabase = createAdminClient()
   const { data } = await supabase
     .from("tasks")
@@ -696,6 +749,7 @@ export async function listAssignmentsForTask(taskId: string): Promise<
     }
   >
 > {
+  await syncClosedTaskAssignments({ taskId })
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("task_assignments")

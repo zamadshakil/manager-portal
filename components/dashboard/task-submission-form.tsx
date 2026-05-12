@@ -1,7 +1,6 @@
 "use client"
 
 import { useRef, useState, useTransition } from "react"
-import { useRouter } from "next/navigation"
 import { CloudUpload, FileType2, Loader2, AlertTriangle, CheckCircle2, XCircle, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Textarea } from "@/components/ui/textarea"
@@ -10,6 +9,8 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { createSubmission } from "@/app/actions/submissions"
 import { usePipeline } from "@/hooks/use-pipeline"
+import { useTaskDeadlineNow } from "@/hooks/use-task-deadline-now"
+import { getTaskDeadlineWindow } from "@/lib/task-deadlines"
 
 const ACCEPTED_EXT = [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".txt", ".png", ".jpg", ".jpeg", ".xlsx", ".md"]
 
@@ -39,7 +40,6 @@ export function TaskSubmissionForm({
   lateSubmissionDeadline,
   requireLateReason,
 }: TaskSubmissionFormProps) {
-  const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
   const [title, setTitle] = useState(taskTitle)
@@ -50,13 +50,25 @@ export function TaskSubmissionForm({
   const [uploaded, setUploaded] = useState(false)
 
   const pipeline = usePipeline({ refreshOnComplete: true })
-
-  const due = dueAt ? new Date(dueAt) : null
-  const overdue = due ? due.getTime() < Date.now() : false
-  const lateDeadline = lateSubmissionDeadline ? new Date(lateSubmissionDeadline).getTime() : null
-  const pastLateDeadline = lateDeadline ? lateDeadline < Date.now() : false
-  const blocked = (overdue && !allowLate) || pastLateDeadline
-  const reasonRequired = overdue && requireLateReason
+  const now = useTaskDeadlineNow([
+    {
+      id: taskId,
+      dueAt,
+      allowLate,
+      lateSubmissionDeadline,
+    },
+  ])
+  const deadline = getTaskDeadlineWindow(
+    {
+      dueAt,
+      allowLate,
+      lateSubmissionDeadline,
+    },
+    now,
+  )
+  const overdue = deadline.isOverdue
+  const blocked = deadline.isClosed
+  const reasonRequired = deadline.isLateWindowOpen && requireLateReason
 
   function pickFile(f: File | null) {
     setFile(f)
@@ -66,7 +78,11 @@ export function TaskSubmissionForm({
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (blocked) {
-      setError("Submission failed: the deadline has passed and late submissions are not allowed.")
+      setError(
+        deadline.closureReason === "late_submission_deadline"
+          ? "Submission failed: the late submission deadline has passed."
+          : "Submission failed: the deadline has passed and late submissions are not allowed.",
+      )
       return
     }
     if (!file) {
@@ -85,7 +101,7 @@ export function TaskSubmissionForm({
     fd.set("file", file)
     fd.set("title", title.trim())
     fd.set("taskId", taskId)
-    if (overdue) fd.set("lateReason", reason.trim())
+    if (deadline.isLateWindowOpen) fd.set("lateReason", reason.trim())
 
     startTransition(async () => {
       const res = await createSubmission(fd)
@@ -121,8 +137,12 @@ export function TaskSubmissionForm({
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
           <span>
             {blocked
-              ? "The deadline has passed and this task does not allow late submissions."
-              : "The deadline has passed. You can still submit but a reason is required."}
+              ? allowLate
+                ? "The late submission window has closed for this task."
+                : "The deadline has passed and this task does not allow late submissions."
+              : requireLateReason
+                ? "The deadline has passed. You can still submit, but a reason is required."
+                : "The deadline has passed. You can still submit during the late window."}
           </span>
         </div>
       ) : null}
@@ -191,7 +211,7 @@ export function TaskSubmissionForm({
         />
       </div>
 
-      {overdue && allowLate ? (
+      {deadline.isLateWindowOpen ? (
         <div className="grid gap-1.5">
           <Label htmlFor="lateReason">
             Reason for late submission{requireLateReason ? " (required)" : ""}
@@ -220,7 +240,7 @@ export function TaskSubmissionForm({
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
               Uploading…
             </>
-          ) : overdue ? (
+          ) : deadline.isLateWindowOpen ? (
             "Submit late"
           ) : (
             "Submit task"
