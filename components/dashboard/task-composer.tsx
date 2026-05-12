@@ -18,6 +18,8 @@ interface TaskComposerProps {
   members: Profile[]
   /** All validation rules for the team to allow per-task selection. */
   rules: ValidationRule[]
+  /** Called after a task is successfully created (e.g. to close a dialog). */
+  onSuccess?: () => void
 }
 
 /**
@@ -28,7 +30,7 @@ interface TaskComposerProps {
  *  - optional `instructions` that the AI pipeline evaluates per submission
  *  - selecting which validation rules apply to this specific task
  */
-export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskComposerProps) {
+export function TaskComposer({ teams, defaultTeamId, members, rules, onSuccess }: TaskComposerProps) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -113,6 +115,7 @@ export function TaskComposer({ teams, defaultTeamId, members, rules }: TaskCompo
       setSelectedRuleIds(new Set(enabledRules.map((r) => r.id)))
       ;(e.target as HTMLFormElement).reset()
       router.refresh()
+      onSuccess?.()
     })
   }
 

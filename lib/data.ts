@@ -578,14 +578,16 @@ export async function listMyTasks(profile: Profile): Promise<MyTask[]> {
     .from("task_assignments")
     .select("*, task:tasks(*)")
     .eq("assignee_id", profile.id)
-    .order("created_at", { ascending: false })
   if (!data) return []
-  return (data as unknown as Array<TaskAssignment & { task: Task | null }>)
+  const rows = (data as unknown as Array<TaskAssignment & { task: Task | null }>)
     .filter((row) => row.task != null)
-    .map((row) => ({
-      ...row,
-      task: row.task as Task,
-    }))
+    .map((row) => ({ ...row, task: row.task as Task }))
+  // Sort soonest-due first; tasks with no due_at sort last.
+  return rows.sort((a, b) => {
+    const da = a.task.due_at ? new Date(a.task.due_at).getTime() : Infinity
+    const db = b.task.due_at ? new Date(b.task.due_at).getTime() : Infinity
+    return da - db
+  })
 }
 
 export async function getTaskById(profile: Profile, id: string): Promise<TaskWithStats | null> {

@@ -15,7 +15,7 @@ import { StatusBadge } from "@/components/dashboard/status-badge"
 import { DeleteTaskButton } from "@/components/dashboard/delete-task-button"
 import { TaskEditor } from "@/components/dashboard/task-editor"
 import { AssignmentsRealtimeListener } from "@/components/dashboard/assignments-realtime-listener"
-import { formatRelative } from "@/lib/format"
+import { formatDeadline } from "@/lib/format"
 import {
   Table,
   TableBody,
@@ -96,7 +96,12 @@ export default async function TaskDetailPage({
           }`}
         >
           <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
-          {due ? `Due ${formatRelative(task.due_at!)}` : "No deadline"}
+          {due ? (
+            <>
+              <span className="font-semibold">Due</span>{" "}
+              {formatDeadline(task.due_at!)}
+            </>
+          ) : "No deadline"}
         </span>
         <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-muted-foreground">
           <Users className="h-3.5 w-3.5" aria-hidden="true" />
@@ -105,7 +110,8 @@ export default async function TaskDetailPage({
         {task.allow_late && task.late_submission_deadline ? (
           <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-amber-600">
             <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
-            Late allowed up to {formatRelative(task.late_submission_deadline)}
+            <span className="font-semibold">Late allowed until</span>{" "}
+            {formatDeadline(task.late_submission_deadline!)}
           </span>
         ) : null}
         {task.late_count > 0 ? (

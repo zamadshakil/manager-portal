@@ -22,6 +22,38 @@ export function formatRelative(iso: string | Date | null | undefined): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
+/**
+ * Format a deadline timestamp as "May 15, 2026 · 5:00 PM (in 2 days)" or
+ * "May 10, 2026 · 5:00 PM (3h ago)". Combines an absolute date+time with a
+ * human-readable relative offset so members see both precision and urgency.
+ */
+export function formatDeadline(iso: string | Date | null | undefined): string {
+  if (!iso) return "—"
+  const date = typeof iso === "string" ? new Date(iso) : iso
+  const absDate = date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
+  const absTime = date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+  const diff = date.getTime() - Date.now()
+  const future = diff > 0
+  const absDiff = Math.abs(diff)
+  const sec = Math.round(absDiff / 1000)
+  const min = Math.floor(sec / 60)
+  const hr = Math.floor(min / 60)
+  const day = Math.floor(hr / 24)
+  let rel: string
+  if (sec < 60) rel = future ? "in <1m" : "just now"
+  else if (min < 60) rel = future ? `in ${min}m` : `${min}m ago`
+  else if (hr < 24) rel = future ? `in ${hr}h` : `${hr}h ago`
+  else rel = future ? `in ${day}d` : `${day}d ago`
+  return `${absDate} · ${absTime} (${rel})`
+}
+
 export function formatDate(iso: string | Date | null | undefined): string {
   if (!iso) return "—"
   const date = typeof iso === "string" ? new Date(iso) : iso

@@ -414,6 +414,54 @@ export async function assignTask(formData: FormData): Promise<TaskActionResult> 
 }
 
 const DeleteSchema = z.object({ id: z.string().uuid() })
+const BulkDeleteSchema = z.object({ ids: z.array(z.string().uuid()).min(1) })
+
+export async function bulkDeleteTasks(ids: string[]): Promise<TaskActionResult> {
+  const profile = await requireProfile()
+  const parsed = BulkDeleteSchema.safeParse({ ids })
+  if (!parsed.success) return { ok: false, error: "Invalid task IDs" }
+
+  const admin = createAdminClient()
+  const { data: tasks } = await admin
+    .from("tasks")
+    .select("id, team_id")
+    .in("id", parsed.data.ids)
+  if (!tasks || tasks.length === 0) return { ok: false, error: "No tasks found." }
+
+  // Verify permission for each unique team represented
+  const uniqueTeamIds = [...new Set(tasks.map((t) => (t as { id: string; team_id: string }).team_id))]
+  for (const teamId of uniqueTeamIds) {
+    try {
+      await assertCapability(profile, CAPABILITIES.TASKS_DELETE, {
+        team_id: teamId,
+        is_global: false,
+      })
+    } catch (err) {
+      if (err instanceof AccessDeniedError) {
+        return { ok: false, error: "You do not have permission to delete one or more of these tasks." }
+      }
+      throw err
+    }
+  }
+
+  const validIds = tasks.map((t) => (t as { id: string; team_id: string }).id)
+  const { error } = await admin.from("tasks").delete().in("id", validIds)
+  if (error) return { ok: false, error: error.message }
+
+  for (const task of tasks as { id: string; team_id: string }[]) {
+    await logActivity({
+      actorId: profile.id,
+      teamId: task.team_id,
+      action: "task.deleted",
+      entityType: "task",
+      entityId: task.id,
+    })
+    void deleteIndexed({ source_type: "task", source_id: task.id })
+  }
+
+  revalidatePath("/dashboard/tasks")
+  return { ok: true }
+}
 
 export async function deleteTask(formData: FormData): Promise<TaskActionResult> {
   const profile = await requireProfile()
