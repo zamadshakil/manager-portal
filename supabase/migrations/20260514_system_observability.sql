@@ -102,7 +102,7 @@ CREATE POLICY "main_admin_update_error_logs"
 -- 4. Auto-cleanup: retain 90 days of request logs, 180 days of error logs
 --    Requires pg_cron extension. If not available, this is a no-op.
 -- ---------------------------------------------------------------------------
-DO $$
+DO $body$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
     PERFORM cron.schedule(
@@ -117,7 +117,7 @@ BEGIN
     );
   END IF;
 END;
-$$;
+$body$;
 
 -- ---------------------------------------------------------------------------
 -- 5. Helper view: last-24h summary for the overview dashboard
