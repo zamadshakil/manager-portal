@@ -3,6 +3,7 @@ import { withRequestLog } from "@/lib/logger"
 import { requireProfile } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { scopeForProfile, type RagAnalytics } from "@/lib/smart-ai/client"
+import { hasCapability, CAPABILITIES } from "@/lib/permissions"
 import type { Profile } from "@/lib/types"
 
 export const runtime = "nodejs"
@@ -24,6 +25,12 @@ async function getHandler(_req: NextRequest) {
   const profile = await requireProfile()
   const scope = scopeForProfile(profile)
 
+  // A user is a global viewer if they are main_admin OR have been explicitly
+  // granted the smart_ai.analytics_all capability via an Override allow.
+  const isGlobalViewer =
+    profile.role === "main_admin" ||
+    (await hasCapability(profile, CAPABILITIES.SMART_AI_ANALYTICS_ALL))
+
   let admin: ReturnType<typeof createAdminClient>
   try {
     admin = createAdminClient()
@@ -36,11 +43,11 @@ async function getHandler(_req: NextRequest) {
 
   try {
     const [index, queries, timeseries, recent, topics] = await Promise.all([
-      loadIndexStats(admin, profile),
-      loadQueryStats(admin, profile),
-      loadTimeseries(admin, profile),
-      loadRecentQuestions(admin, profile),
-      loadTopTopics(admin, profile),
+      loadIndexStats(admin, profile, isGlobalViewer),
+      loadQueryStats(admin, profile, isGlobalViewer),
+      loadTimeseries(admin, profile, isGlobalViewer),
+      loadRecentQuestions(admin, profile, isGlobalViewer),
+      loadTopTopics(admin, profile, isGlobalViewer),
     ])
 
     const data: RagAnalytics = {
@@ -73,19 +80,20 @@ const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "openai/text-embedding-3-
 type Admin = ReturnType<typeof createAdminClient>
 
 /** Role-based scope filter applied to rag_documents. */
-function ragOwnershipFilter(query: any, profile: Profile) {
-  if (profile.role === "main_admin") return query // sees everything
+function ragOwnershipFilter(query: any, profile: Profile, isGlobal: boolean) {
+  if (isGlobal) return query // global viewer — sees everything
   if (profile.role === "manager" && profile.team_id) {
     return query.or(`team_id.eq.${profile.team_id},owner_id.eq.${profile.id}`)
   }
   return query.eq("owner_id", profile.id)
 }
 
-async function loadIndexStats(admin: Admin, profile: Profile): Promise<RagAnalytics["index"]> {
+async function loadIndexStats(admin: Admin, profile: Profile, isGlobal: boolean): Promise<RagAnalytics["index"]> {
   // Total chunks (the row count) — fast HEAD query.
   const chunksQuery = ragOwnershipFilter(
     admin.from("rag_documents").select("*", { count: "exact", head: true }),
     profile,
+    isGlobal,
   )
   const { count: chunks } = await chunksQuery
 
@@ -93,6 +101,7 @@ async function loadIndexStats(admin: Admin, profile: Profile): Promise<RagAnalyt
   const docsQuery = ragOwnershipFilter(
     admin.from("rag_documents").select("source_id, source_type, created_at"),
     profile,
+    isGlobal,
   ).limit(10_000)
   const { data: docRows } = await docsQuery
   const uniqueDocs = new Set((docRows ?? []).map((r: any) => `${r.source_type}:${r.source_id}`)).size
@@ -109,12 +118,12 @@ async function loadIndexStats(admin: Admin, profile: Profile): Promise<RagAnalyt
   }
 }
 
-async function loadQueryStats(admin: Admin, profile: Profile): Promise<RagAnalytics["queries"]> {
+async function loadQueryStats(admin: Admin, profile: Profile, isGlobal: boolean): Promise<RagAnalytics["queries"]> {
   const now = Date.now()
   const day = new Date(now - 24 * 60 * 60 * 1000).toISOString()
   const week = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString()
 
-  const usageScoped = (q: any) => (profile.role === "main_admin" ? q : q.eq("user_id", profile.id))
+  const usageScoped = (q: any) => (isGlobal ? q : q.eq("user_id", profile.id))
 
   const { count: dayCount } = await usageScoped(
     admin.from("ai_usage_log").select("*", { count: "exact", head: true }).gte("created_at", day),
@@ -131,11 +140,11 @@ async function loadQueryStats(admin: Admin, profile: Profile): Promise<RagAnalyt
   }
 }
 
-async function loadTimeseries(admin: Admin, profile: Profile): Promise<RagAnalytics["timeseries"]> {
+async function loadTimeseries(admin: Admin, profile: Profile, isGlobal: boolean): Promise<RagAnalytics["timeseries"]> {
   const now = Date.now()
   const since = new Date(now - 24 * 60 * 60 * 1000).toISOString()
 
-  const usageScoped = (q: any) => (profile.role === "main_admin" ? q : q.eq("user_id", profile.id))
+  const usageScoped = (q: any) => (isGlobal ? q : q.eq("user_id", profile.id))
 
   const { data: rows } = await usageScoped(
     admin
@@ -168,10 +177,11 @@ async function loadTimeseries(admin: Admin, profile: Profile): Promise<RagAnalyt
 async function loadRecentQuestions(
   admin: Admin,
   profile: Profile,
+  isGlobal: boolean,
 ): Promise<RagAnalytics["recent_queries"]> {
-  // For main_admin we show every team's questions; otherwise only the user's.
+  // For global viewers we show every team's questions; otherwise only the user's.
   let threadIds: string[] | null = null
-  if (profile.role !== "main_admin") {
+  if (!isGlobal) {
     const { data: threads } = await admin
       .from("chat_threads")
       .select("id")
@@ -204,10 +214,11 @@ async function loadRecentQuestions(
   }))
 }
 
-async function loadTopTopics(admin: Admin, profile: Profile): Promise<RagAnalytics["top_topics"]> {
+async function loadTopTopics(admin: Admin, profile: Profile, isGlobal: boolean): Promise<RagAnalytics["top_topics"]> {
   const docsQuery = ragOwnershipFilter(
     admin.from("rag_documents").select("source_type"),
     profile,
+    isGlobal,
   ).limit(5_000)
   const { data } = await docsQuery
   if (!data?.length) return []
