@@ -159,7 +159,7 @@ export default async function TaskDetailPage({
               <h2 className="text-[15px] font-semibold tracking-tight">Your submission</h2>
               <p className="text-[12px] text-muted-foreground">
                 {myAssignment?.status === "assigned"
-                  ? "Upload your work for AI validation."
+                  ? "Upload your work for review."
                   : myAssignment?.status === "submitted"
                     ? "You submitted on time."
                     : myAssignment?.status === "late_submitted"

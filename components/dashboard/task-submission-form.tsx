@@ -103,7 +103,7 @@ export function TaskSubmissionForm({
 
   // Show pipeline progress after upload.
   if (uploaded && pipeline.status !== "idle") {
-    return <PipelineProgress status={pipeline.status} score={pipeline.score} />
+    return <PipelineProgress status={pipeline.status} />
   }
 
   return (
@@ -236,7 +236,7 @@ const STATUS_CONFIG = {
   queued: {
     icon: Clock,
     label: "Queued",
-    detail: "Your file is uploaded. AI validation is starting…",
+    detail: "Your file is uploaded and is being processed…",
     color: "text-muted-foreground",
     bg: "bg-muted/50",
     animate: true,
@@ -251,8 +251,8 @@ const STATUS_CONFIG = {
   },
   validating: {
     icon: Loader2,
-    label: "AI validation in progress",
-    detail: "Running validation rules against your document…",
+    label: "Processing in progress",
+    detail: "Your submission is being reviewed. Check back shortly…",
     color: "text-primary",
     bg: "bg-[#f2f9ff]",
     animate: true,
@@ -260,7 +260,7 @@ const STATUS_CONFIG = {
   passed: {
     icon: CheckCircle2,
     label: "Passed",
-    detail: "Your submission passed all validation rules.",
+    detail: "Your submission passed review.",
     color: "text-green-600",
     bg: "bg-green-50",
     animate: false,
@@ -268,7 +268,7 @@ const STATUS_CONFIG = {
   failed: {
     icon: XCircle,
     label: "Needs attention",
-    detail: "Some validation checks did not pass. Review the details below.",
+    detail: "Your submission needs updates. Review the details below.",
     color: "text-destructive",
     bg: "bg-destructive/5",
     animate: false,
@@ -293,10 +293,8 @@ const STATUS_CONFIG = {
 
 function PipelineProgress({
   status,
-  score,
 }: {
   status: string
-  score: number | null
 }) {
   const config = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.queued
   const Icon = config.icon
@@ -317,11 +315,6 @@ function PipelineProgress({
           <p className="mt-1 text-[12.5px] text-muted-foreground">
             {config.detail}
           </p>
-          {score !== null && (
-            <p className="mt-2 text-[13px] font-semibold">
-              Score: {score}/100
-            </p>
-          )}
           {config.animate && (
             <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-border/50">
               <div className="h-full w-1/3 animate-pulse rounded-full bg-primary/60" />

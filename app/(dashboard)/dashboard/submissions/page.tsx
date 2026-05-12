@@ -16,6 +16,7 @@ export default async function SubmissionsPage() {
   const canReadSubmissions = ctx.has(CAPABILITIES.SUBMISSIONS_READ)
   const canUpdateSubmissions = ctx.has(CAPABILITIES.SUBMISSIONS_UPDATE)
   const canDeleteSubmissions = ctx.has(CAPABILITIES.SUBMISSIONS_DELETE)
+  const canViewAiInsights = profile.role === "main_admin" || profile.role === "manager"
 
   if (!canReadSubmissions && !canUpdateSubmissions && !canDeleteSubmissions) {
     redirect("/dashboard")
@@ -84,6 +85,7 @@ export default async function SubmissionsPage() {
         rows={rows}
         canDelete={canDeleteSubmissions}
         canUpdateOrDelete={canUpdateSubmissions || canDeleteSubmissions}
+        canViewAiInsights={canViewAiInsights}
         taskMap={taskMap}
         userMap={userMap}
       />

@@ -11,6 +11,7 @@ interface SubmissionsClientViewProps {
   rows: Submission[]
   canDelete: boolean
   canUpdateOrDelete: boolean
+  canViewAiInsights: boolean
   taskMap: Record<string, { id: string; title: string }>
   userMap: Record<string, { id: string; full_name: string | null; email: string }>
 }
@@ -19,6 +20,7 @@ export function SubmissionsClientView({
   rows,
   canDelete,
   canUpdateOrDelete,
+  canViewAiInsights,
   taskMap,
   userMap,
 }: SubmissionsClientViewProps) {
@@ -33,7 +35,7 @@ export function SubmissionsClientView({
     filter !== "all"
       ? `No submissions match the "${filter.replace("_", " ")}" filter.`
       : !canUpdateOrDelete
-        ? "Upload your first document to start the validation pipeline."
+        ? "Upload your first document to get started."
         : "Your team hasn't uploaded anything yet."
 
   return (
@@ -44,6 +46,7 @@ export function SubmissionsClientView({
         showFooterLink={false}
         emptyHint={emptyHint}
         canDelete={canDelete}
+        canViewAiInsights={canViewAiInsights}
         fromStatus={filter !== "all" ? filter : undefined}
         grouped
         taskMap={taskMap}

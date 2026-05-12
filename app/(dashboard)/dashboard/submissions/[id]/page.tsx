@@ -38,12 +38,17 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
     .single<Submission>()
   if (!submission) notFound()
 
-  const { data: runs } = await supabase
-    .from("validation_runs")
-    .select("*")
-    .eq("submission_id", id)
-    .order("created_at", { ascending: false })
-  const runRows = (runs ?? []) as unknown as ValidationRun[]
+  const canViewAiInsights = profile.role === "main_admin" || profile.role === "manager"
+
+  let runRows: ValidationRun[] = []
+  if (canViewAiInsights) {
+    const { data: runs } = await supabase
+      .from("validation_runs")
+      .select("*")
+      .eq("submission_id", id)
+      .order("created_at", { ascending: false })
+    runRows = (runs ?? []) as unknown as ValidationRun[]
+  }
 
   // Resolve uploader display name (RLS allows reading profiles in same team / admins).
   const { data: uploader } = await supabase
@@ -60,6 +65,16 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
   const reviewReason = (submission.metadata as any)?.review_reason as string | undefined
   const extractedText = (submission as any).extracted_text as string | undefined
   const textTruncated = (submission.metadata as any)?.truncated as boolean | undefined
+  const validationRunsEmptyMessage =
+    submission.status === "queued" || submission.status === "parsing"
+      ? "No validation runs yet — the pipeline will populate this section shortly."
+      : submission.status === "validating"
+        ? "Validation rules are currently running. Refresh for the latest results."
+        : reviewReason === "no_text"
+          ? "Validation rules did not run because the file did not produce readable extracted text."
+          : reviewReason === "no_rules"
+            ? "No validation rules were configured for this submission."
+            : "No validation results are available for this submission."
   const scope = { team_id: submission.team_id, owner_id: submission.uploader_id }
 
   const canRetry =
@@ -101,7 +116,7 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
               <StatusBadge status={submission.status} />
               {/* For late submissions, show the AI verdict as a secondary badge
                   so managers see both the timeliness AND the quality outcome. */}
-              {submission.status === "late_submitted" && validationOutcome ? (
+              {canViewAiInsights && submission.status === "late_submitted" && validationOutcome ? (
                 <span
                   className={cn(
                     "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none whitespace-nowrap",
@@ -111,7 +126,7 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
                   {OUTCOME_BADGE[validationOutcome]?.label ?? validationOutcome}
                 </span>
               ) : null}
-              {submission.score !== null ? (
+              {canViewAiInsights && submission.score !== null ? (
                 <span className="text-[12px] font-semibold text-muted-foreground">
                   Score {Number(submission.score).toFixed(0)}/100
                 </span>
@@ -124,126 +139,130 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         <div className="lg:col-span-2 space-y-4 lg:space-y-6 min-w-0">
-          <section
-            aria-labelledby="ai-summary"
-            className="rounded-xl border border-border bg-card p-5 shadow-card"
-          >
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f2f9ff] text-[#097fe8]">
-                <Sparkles className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <h2 id="ai-summary" className="text-[15px] font-semibold tracking-tight">
-                AI summary
-              </h2>
-            </div>
-            {submission.summary ? (
-              <p className="mt-3 text-[13.5px] leading-relaxed whitespace-pre-line">
-                {submission.summary}
-              </p>
-            ) : (
-              <p className="mt-3 text-[13px] text-muted-foreground">
-                {submission.status === "queued" || submission.status === "parsing"
-                  ? "The pipeline is parsing this submission. Check back in a moment."
-                  : submission.status === "validating"
-                    ? "Validation rules are running. Refresh for the latest result."
-                    : "No AI summary is available for this submission."}
-              </p>
-            )}
-            {flags.length > 0 ? (
-              <div className="mt-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
-                  Flags
+          {canViewAiInsights ? (
+            <section
+              aria-labelledby="ai-summary"
+              className="rounded-xl border border-border bg-card p-5 shadow-card"
+            >
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f2f9ff] text-[#097fe8]">
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <h2 id="ai-summary" className="text-[15px] font-semibold tracking-tight">
+                  AI summary
+                </h2>
+              </div>
+              {submission.summary ? (
+                <p className="mt-3 text-[13.5px] leading-relaxed whitespace-pre-line">
+                  {submission.summary}
                 </p>
-                <ul className="mt-1.5 space-y-1.5">
-                  {flags.map((f, idx) => (
-                    <li
-                      key={idx}
-                      className={cn(
-                        "rounded-lg border px-3 py-1.5 text-[12px] font-medium leading-snug",
-                        f.severity === "fail" && "border-[#f6cdb1] bg-[#fff1e6] text-[#a4400a]",
-                        f.severity === "warn" && "border-[#f4dfa2] bg-[#fff8e1] text-[#7a5b00]",
-                        f.severity === "info" && "border-border bg-warm-white text-muted-foreground",
-                      )}
-                    >
-                      {f.rule_name ? (
-                        <span className="font-semibold">{f.rule_name}: </span>
-                      ) : null}
-                      {f.message}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </section>
+              ) : (
+                <p className="mt-3 text-[13px] text-muted-foreground">
+                  {submission.status === "queued" || submission.status === "parsing"
+                    ? "The pipeline is parsing this submission. Check back in a moment."
+                    : submission.status === "validating"
+                      ? "Validation rules are running. Refresh for the latest result."
+                      : "No AI summary is available for this submission."}
+                </p>
+              )}
+              {flags.length > 0 ? (
+                <div className="mt-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+                    Flags
+                  </p>
+                  <ul className="mt-1.5 space-y-1.5">
+                    {flags.map((f, idx) => (
+                      <li
+                        key={idx}
+                        className={cn(
+                          "rounded-lg border px-3 py-1.5 text-[12px] font-medium leading-snug",
+                          f.severity === "fail" && "border-[#f6cdb1] bg-[#fff1e6] text-[#a4400a]",
+                          f.severity === "warn" && "border-[#f4dfa2] bg-[#fff8e1] text-[#7a5b00]",
+                          f.severity === "info" && "border-border bg-warm-white text-muted-foreground",
+                        )}
+                      >
+                        {f.rule_name ? (
+                          <span className="font-semibold">{f.rule_name}: </span>
+                        ) : null}
+                        {f.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
-          <section
-            aria-labelledby="rule-results"
-            className="rounded-xl border border-border bg-card shadow-card"
-          >
-            <header className="border-b border-border px-5 py-3.5">
-              <h2 id="rule-results" className="text-[15px] font-semibold tracking-tight">
-                Validation rule results
-              </h2>
-              <p className="text-[12px] text-muted-foreground">
-                AI-powered checks applied to this submission.
-              </p>
-            </header>
-            {runRows.length === 0 ? (
-              <div className="px-5 py-10 text-center text-[13px] text-muted-foreground">
-                No validation runs yet — the pipeline will populate this section.
-              </div>
-            ) : (
-              <ul className="divide-y divide-border">
-                {runRows.map((r) => {
-                  const ruleName =
-                    (r.raw_output as { rule_name?: string } | null)?.rule_name ??
-                    "Validation rule"
-                  return (
-                    <li key={r.id} className="px-5 py-3.5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-[13.5px] font-semibold">{ruleName}</p>
-                          {r.reasons.length > 0 ? (
-                            <ul className="mt-1 space-y-0.5">
-                              {r.reasons.slice(0, 4).map((reason, idx) => (
-                                <li
-                                  key={idx}
-                                  className="text-[12.5px] leading-relaxed text-muted-foreground"
-                                >
-                                  • {reason}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p className="mt-1 text-[12.5px] italic text-muted-foreground">
-                              No specific reasons were provided.
-                            </p>
-                          )}
-                        </div>
-                        <div className="text-right shrink-0">
-                          <span
-                            className={cn(
-                              "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                              r.pass === true && "bg-[#e8f8eb] text-[#157a2a]",
-                              r.pass === false && "bg-[#fff1e6] text-[#a4400a]",
-                              r.pass === null && "bg-muted text-muted-foreground",
+          {canViewAiInsights ? (
+            <section
+              aria-labelledby="rule-results"
+              className="rounded-xl border border-border bg-card shadow-card"
+            >
+              <header className="border-b border-border px-5 py-3.5">
+                <h2 id="rule-results" className="text-[15px] font-semibold tracking-tight">
+                  Validation rule results
+                </h2>
+                <p className="text-[12px] text-muted-foreground">
+                  AI-powered checks applied to this submission.
+                </p>
+              </header>
+              {runRows.length === 0 ? (
+                <div className="px-5 py-10 text-center text-[13px] text-muted-foreground">
+                  No validation runs yet — the pipeline will populate this section.
+                </div>
+              ) : (
+                <ul className="divide-y divide-border">
+                  {runRows.map((r) => {
+                    const ruleName =
+                      (r.raw_output as { rule_name?: string } | null)?.rule_name ??
+                      "Validation rule"
+                    return (
+                      <li key={r.id} className="px-5 py-3.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-[13.5px] font-semibold">{ruleName}</p>
+                            {r.reasons.length > 0 ? (
+                              <ul className="mt-1 space-y-0.5">
+                                {r.reasons.slice(0, 4).map((reason, idx) => (
+                                  <li
+                                    key={idx}
+                                    className="text-[12.5px] leading-relaxed text-muted-foreground"
+                                  >
+                                    • {reason}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="mt-1 text-[12.5px] italic text-muted-foreground">
+                                No specific reasons were provided.
+                              </p>
                             )}
-                          >
-                            {r.pass === true ? "Passed" : r.pass === false ? "Failed" : "—"}
-                          </span>
-                          {r.score !== null ? (
-                            <p className="mt-1 text-[11px] font-mono text-muted-foreground">
-                              {Number(r.score).toFixed(0)}/100
-                            </p>
-                          ) : null}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span
+                              className={cn(
+                                "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                                r.pass === true && "bg-[#e8f8eb] text-[#157a2a]",
+                                r.pass === false && "bg-[#fff1e6] text-[#a4400a]",
+                                r.pass === null && "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              {r.pass === true ? "Passed" : r.pass === false ? "Failed" : "—" }
+                            </span>
+                            {r.score !== null ? (
+                              <p className="mt-1 text-[11px] font-mono text-muted-foreground">
+                                {Number(r.score).toFixed(0)}/100
+                              </p>
+                            ) : null}
+                          </div>
                         </div>
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </section>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </section>
+          ) : null}
         </div>
 
         <aside className="space-y-4 lg:space-y-6 min-w-0">
@@ -274,7 +293,7 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
             </a>
           </section>
 
-          {extractedText ? (
+          {canViewAiInsights && extractedText ? (
             <section className="rounded-xl border border-border bg-card p-5 shadow-card">
               <h2 className="text-[15px] font-semibold tracking-tight">Extracted text</h2>
               <p className="mt-2.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-warm-white px-3 py-2 text-[11.5px] font-mono text-muted-foreground leading-relaxed">

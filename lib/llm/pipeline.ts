@@ -273,6 +273,8 @@ async function runPipeline(submissionId: string) {
     // ── Stage 1: Fetch + Parse ────────────────────────────────────────────
     let text = ""
     let truncated = false
+    let parseWarning: string | undefined
+    const isImage = submission.mime_type.startsWith("image/")
     const parseStart = Date.now()
 
     try {
@@ -295,8 +297,6 @@ async function runPipeline(submissionId: string) {
       console.log("[pipeline] downloaded", buf.length, "bytes")
 
       // Step 3: Extract text from the document.
-      const isImage = submission.mime_type.startsWith("image/")
-
       if (isImage) {
         // Vision-only path. Tesseract.js fallback was removed because its
         // WASM cold-start (5–15s) blows the function budget on Hobby.
@@ -336,25 +336,36 @@ async function runPipeline(submissionId: string) {
         console.log("[pipeline] extractText completed")
         text = parsed.text
         truncated = parsed.truncated
+        parseWarning = parsed.warning
       }
 
       console.log("[pipeline] extracted text length:", text.length, "truncated:", truncated)
 
-      if (!text || text.trim().length < 20) {
+      const normalizedText = text.replace(/\s+/g, " ").trim()
+      const readableCharCount = Array.from(normalizedText.matchAll(/[\p{L}\p{N}]/gu)).length
+
+      if (!normalizedText || readableCharCount === 0) {
         const reviewMeta: { validation_outcome: ValidationOutcome; review_reason: ReviewReason } = {
           validation_outcome: "needs_review",
           review_reason: "no_text",
+        }
+        const reviewFlags: SubmissionFlag[] = [
+          {
+            severity: "warn" as const,
+            message: "Could not extract readable text from the file.",
+          },
+        ]
+        if (parseWarning) {
+          reviewFlags.push({
+            severity: "info",
+            message: parseWarning,
+          })
         }
         await admin
           .from("submissions")
           .update({
             status: "needs_review",
-            flags: [
-              {
-                severity: "warn" as const,
-                message: "Could not extract enough text from the file.",
-              },
-            ] satisfies SubmissionFlag[],
+            flags: reviewFlags as unknown as any,
             metadata: reviewMeta as any,
           })
           .eq("id", submissionId)

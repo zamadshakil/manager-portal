@@ -24,6 +24,7 @@ interface SubmissionsTableProps {
   showFooterLink?: boolean
   emptyHint?: string
   canDelete?: boolean
+  canViewAiInsights?: boolean
   fromStatus?: string
   grouped?: boolean
   taskMap?: Record<string, { id: string; title: string }>
@@ -91,7 +92,7 @@ function computeGroups(
   })
 }
 
-export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDelete = false, fromStatus, grouped = false, taskMap = {}, userMap = {} }: SubmissionsTableProps) {
+export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDelete = false, canViewAiInsights = false, fromStatus, grouped = false, taskMap = {}, userMap = {} }: SubmissionsTableProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [isDeleting, startDeleting] = useTransition()
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
@@ -168,7 +169,7 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
               {grouped ? "Submissions by task" : "Recent submissions"}
             </h2>
             <p className="text-[12px] text-muted-foreground">
-              {grouped ? "Grouped by task and contributor." : "Live LLM validation pipeline output."}
+              {grouped ? "Grouped by task and contributor." : "Recent uploads and processing status."}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -197,7 +198,7 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
             <FileText className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
             <p className="mt-3 text-[14px] font-semibold">No submissions yet</p>
             <p className="text-[12px] text-muted-foreground mt-1">
-              {emptyHint ?? "Upload a document to begin AI validation."}
+              {emptyHint ?? "Upload a document to get started."}
             </p>
           </div>
         ) : taskGroups ? (
@@ -261,7 +262,7 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
                                   </p>
                                   <div className="mt-1.5 flex items-center gap-2">
                                     <StatusBadge status={row.status} />
-                                    {row.score !== null && (
+                                    {canViewAiInsights && row.score !== null && (
                                       <span className="text-[11px] font-semibold text-muted-foreground">{Number(row.score).toFixed(0)}/100</span>
                                     )}
                                   </div>
@@ -293,7 +294,9 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
                     )}
                     <th className="px-2 py-2.5 font-semibold w-full">Submission</th>
                     <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Status</th>
-                    <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Score</th>
+                    {canViewAiInsights ? (
+                      <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Score</th>
+                    ) : null}
                     <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Size</th>
                     <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Uploaded</th>
                     <th className="px-5 py-2.5 font-semibold"><span className="sr-only">Actions</span></th>
@@ -361,9 +364,11 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
                                   </div>
                                 </td>
                                 <td className="px-5 py-3"><StatusBadge status={row.status} /></td>
-                                <td className="px-5 py-3 font-mono text-[12px]">
-                                  {row.score !== null ? `${Number(row.score).toFixed(0)}/100` : "—"}
-                                </td>
+                                {canViewAiInsights ? (
+                                  <td className="px-5 py-3 font-mono text-[12px]">
+                                    {row.score !== null ? `${Number(row.score).toFixed(0)}/100` : "—"}
+                                  </td>
+                                ) : null}
                                 <td className="px-5 py-3 text-muted-foreground">{formatBytes(row.size_bytes)}</td>
                                 <td className="px-5 py-3 text-muted-foreground">{formatRelative(row.created_at)}</td>
                                 <td className="px-5 py-3 text-right">
@@ -425,7 +430,7 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
                       </p>
                       <div className="mt-1.5 flex items-center gap-2">
                         <StatusBadge status={row.status} />
-                        {row.score !== null && (
+                        {canViewAiInsights && row.score !== null && (
                           <span className="text-[11px] font-semibold text-muted-foreground">{Number(row.score).toFixed(0)}/100</span>
                         )}
                       </div>
@@ -451,7 +456,9 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
                     )}
                     <th className="px-2 py-2.5 font-semibold w-full">Submission</th>
                     <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Status</th>
-                    <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Score</th>
+                    {canViewAiInsights ? (
+                      <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Score</th>
+                    ) : null}
                     <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Size</th>
                     <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Uploaded</th>
                     <th className="px-5 py-2.5 font-semibold"><span className="sr-only">Actions</span></th>
@@ -480,9 +487,11 @@ export function SubmissionsTable({ rows, showFooterLink = true, emptyHint, canDe
                         </div>
                       </td>
                       <td className="px-5 py-3"><StatusBadge status={row.status} /></td>
-                      <td className="px-5 py-3 font-mono text-[12px]">
-                        {row.score !== null ? `${Number(row.score).toFixed(0)}/100` : "—"}
-                      </td>
+                      {canViewAiInsights ? (
+                        <td className="px-5 py-3 font-mono text-[12px]">
+                          {row.score !== null ? `${Number(row.score).toFixed(0)}/100` : "—"}
+                        </td>
+                      ) : null}
                       <td className="px-5 py-3 text-muted-foreground">{formatBytes(row.size_bytes)}</td>
                       <td className="px-5 py-3 text-muted-foreground">{formatRelative(row.created_at)}</td>
                       <td className="px-5 py-3 text-right">
