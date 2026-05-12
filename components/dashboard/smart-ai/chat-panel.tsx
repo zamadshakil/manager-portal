@@ -632,7 +632,7 @@ export function ChatPanel({
                   if (!isUploading) handleSubmit(e as unknown as React.FormEvent)
                 }
               }}
-              placeholder="Ask about submissions, tasks, validation rules, or team performance…"
+              placeholder="Ask Anything"
               rows={1}
               disabled={creditsExhausted}
               className={cn(
