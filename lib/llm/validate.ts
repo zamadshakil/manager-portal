@@ -26,7 +26,7 @@ const provider = createOpenAI({
 // Gemini 3.1 Pro Preview is fast, cheap, handles structured output well, and
 // supports vision natively — ideal for all three pipeline stages.
 const MODEL = process.env.DO_VALIDATION_MODEL || process.env.VALIDATION_MODEL || "google/gemini-3.1-pro-preview"
-const SUMMARY_MODEL = process.env.DO_SUMMARY_MODEL || process.env.SUMMARY_MODEL || "anthropic/claude-sonnet-4-5"
+const SUMMARY_MODEL = process.env.DO_SUMMARY_MODEL || process.env.SUMMARY_MODEL || "anthropic/claude-sonnet-4-6"
 const VISION_MODEL = process.env.DO_VISION_MODEL || process.env.VISION_MODEL || "google/gemini-3.1-pro-preview"
 
 // Per-LLM-call hard timeout. On Railway each call runs in the same
@@ -47,7 +47,7 @@ export const PROMPT_VERSION = "v7"
 const FALLBACK_VALIDATION_MODEL =
   process.env.FALLBACK_VALIDATION_MODEL ??
   process.env.DO_FALLBACK_VALIDATION_MODEL ??
-  "anthropic/claude-sonnet-4-5"
+  "anthropic/claude-sonnet-4-6"
 
 /**
  * Recognise Gemini / OpenAI safety-filter rejections. These are permanent

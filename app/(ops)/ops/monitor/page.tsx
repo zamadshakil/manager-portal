@@ -153,7 +153,7 @@ export default function OpsMonitorPage() {
 
   useEffect(() => {
     if (autoRefresh) {
-      timerRef.current = setInterval(loadSummary, 30000)
+      timerRef.current = setInterval(loadSummary, 5000)
     } else if (timerRef.current) {
       clearInterval(timerRef.current)
       timerRef.current = null
@@ -229,12 +229,12 @@ export default function OpsMonitorPage() {
         ))}
       </div>
 
-      {tab === "Overview" && <OverviewTab />}
-      {tab === "Issues" && <IssuesTab />}
-      {tab === "Errors" && <ErrorsTab />}
-      {tab === "Requests" && <RequestsTab />}
-      {tab === "Activity" && <ActivityTab />}
-      {tab === "Users" && <UsersTab />}
+      {tab === "Overview" && <OverviewTab autoRefresh={autoRefresh} />}
+      {tab === "Issues" && <IssuesTab autoRefresh={autoRefresh} />}
+      {tab === "Errors" && <ErrorsTab autoRefresh={autoRefresh} />}
+      {tab === "Requests" && <RequestsTab autoRefresh={autoRefresh} />}
+      {tab === "Activity" && <ActivityTab autoRefresh={autoRefresh} />}
+      {tab === "Users" && <UsersTab autoRefresh={autoRefresh} />}
 
       {httpErrorsOpen && <HttpErrorsModal onClose={() => setHttpErrorsOpen(false)} />}
     </div>
@@ -467,20 +467,20 @@ function DetailField({ label, children }: { label: string; children: React.React
 
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 
-function OverviewTab() {
+function OverviewTab({ autoRefresh }: { autoRefresh: boolean }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <Section title="Top Issues (7d)">
-        <IssuesTable limit={5} />
+        <IssuesTable limit={5} autoRefresh={autoRefresh} />
       </Section>
       <Section title="Recent Client Errors">
-        <ErrorsTable source="client" limit={5} />
+        <ErrorsTable source="client" limit={5} autoRefresh={autoRefresh} />
       </Section>
       <Section title="Recent HTTP Errors">
-        <RequestsTable minStatus={400} limit={8} />
+        <RequestsTable minStatus={400} limit={8} autoRefresh={autoRefresh} />
       </Section>
       <Section title="Recent Activity">
-        <ActivityTable limit={8} />
+        <ActivityTable limit={8} autoRefresh={autoRefresh} />
       </Section>
     </div>
   )
@@ -488,17 +488,17 @@ function OverviewTab() {
 
 // ─── Issues Tab ───────────────────────────────────────────────────────────────
 
-function IssuesTab() {
+function IssuesTab({ autoRefresh }: { autoRefresh: boolean }) {
   return (
     <Section title="All Issues (7d)" action={<span className="text-xs text-zinc-500">Grouped by error fingerprint</span>}>
-      <IssuesTable limit={100} />
+      <IssuesTable limit={100} autoRefresh={autoRefresh} />
     </Section>
   )
 }
 
 // ─── Errors Tab ───────────────────────────────────────────────────────────────
 
-function ErrorsTab() {
+function ErrorsTab({ autoRefresh }: { autoRefresh: boolean }) {
   const [source, setSource] = useState("")
   const [severity, setSeverity] = useState("")
 
@@ -533,14 +533,14 @@ function ErrorsTab() {
         </div>
       }
     >
-      <ErrorsTable source={source} severity={severity} limit={50} />
+      <ErrorsTable source={source} severity={severity} limit={50} autoRefresh={autoRefresh} />
     </Section>
   )
 }
 
 // ─── Requests Tab ─────────────────────────────────────────────────────────────
 
-function RequestsTab() {
+function RequestsTab({ autoRefresh }: { autoRefresh: boolean }) {
   const [method, setMethod] = useState("")
   const [minStatus, setMinStatus] = useState("")
 
@@ -569,24 +569,24 @@ function RequestsTab() {
         </div>
       }
     >
-      <RequestsTable method={method} minStatus={minStatus ? Number(minStatus) : undefined} limit={50} />
+      <RequestsTable method={method} minStatus={minStatus ? Number(minStatus) : undefined} limit={50} autoRefresh={autoRefresh} />
     </Section>
   )
 }
 
 // ─── Activity Tab ─────────────────────────────────────────────────────────────
 
-function ActivityTab() {
+function ActivityTab({ autoRefresh }: { autoRefresh: boolean }) {
   return (
     <Section title="User Page Activity" action={<span className="text-xs text-zinc-500">Captured by browser collector</span>}>
-      <ActivityTable limit={100} />
+      <ActivityTable limit={100} autoRefresh={autoRefresh} />
     </Section>
   )
 }
 
 // ─── Data Tables ──────────────────────────────────────────────────────────────
 
-function IssuesTable({ limit }: { limit: number }) {
+function IssuesTable({ limit, autoRefresh }: { limit: number; autoRefresh?: boolean }) {
   const [groups, setGroups] = useState<ErrorGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [resolving, setResolving] = useState<string | null>(null)
@@ -597,6 +597,17 @@ function IssuesTable({ limit }: { limit: number }) {
       .then((d) => { setGroups(d.groups ?? []); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (!autoRefresh) return
+    const id = setInterval(() => {
+      fetch("/api/ops/monitor/errors?view=groups")
+        .then((r) => r.json())
+        .then((d) => setGroups(d.groups ?? []))
+        .catch(() => {})
+    }, 3000)
+    return () => clearInterval(id)
+  }, [autoRefresh])
 
   async function resolve(fp: string, sampleId: string) {
     setResolving(fp)
@@ -641,7 +652,7 @@ function IssuesTable({ limit }: { limit: number }) {
   )
 }
 
-function ErrorsTable({ source, severity, limit }: { source?: string; severity?: string; limit: number }) {
+function ErrorsTable({ source, severity, limit, autoRefresh }: { source?: string; severity?: string; limit: number; autoRefresh?: boolean }) {
   const [rows, setRows] = useState<ErrorLog[]>([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -656,6 +667,20 @@ function ErrorsTable({ source, severity, limit }: { source?: string; severity?: 
       .then((d) => { setRows(d.rows ?? []); setLoading(false) })
       .catch(() => setLoading(false))
   }, [source, severity, limit])
+
+  useEffect(() => {
+    if (!autoRefresh) return
+    const id = setInterval(() => {
+      const params = new URLSearchParams({ limit: String(limit) })
+      if (source) params.set("source", source)
+      if (severity) params.set("severity", severity)
+      fetch(`/api/ops/monitor/errors?${params}`)
+        .then((r) => r.json())
+        .then((d) => setRows(d.rows ?? []))
+        .catch(() => {})
+    }, 3000)
+    return () => clearInterval(id)
+  }, [autoRefresh, source, severity, limit])
 
   if (loading) return <div className="h-32 animate-pulse bg-zinc-800 rounded-lg" />
   if (rows.length === 0) return <p className="text-sm text-zinc-500 py-4 text-center">No errors found</p>
@@ -694,7 +719,7 @@ function ErrorsTable({ source, severity, limit }: { source?: string; severity?: 
   )
 }
 
-function RequestsTable({ method, minStatus, limit }: { method?: string; minStatus?: number; limit: number }) {
+function RequestsTable({ method, minStatus, limit, autoRefresh }: { method?: string; minStatus?: number; limit: number; autoRefresh?: boolean }) {
   const [rows, setRows] = useState<RequestLog[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -708,6 +733,20 @@ function RequestsTable({ method, minStatus, limit }: { method?: string; minStatu
       .then((d) => { setRows(d.rows ?? []); setLoading(false) })
       .catch(() => setLoading(false))
   }, [method, minStatus, limit])
+
+  useEffect(() => {
+    if (!autoRefresh) return
+    const id = setInterval(() => {
+      const params = new URLSearchParams({ limit: String(limit) })
+      if (method) params.set("method", method)
+      if (minStatus) params.set("min_status", String(minStatus))
+      fetch(`/api/ops/monitor/requests?${params}`)
+        .then((r) => r.json())
+        .then((d) => setRows(d.rows ?? []))
+        .catch(() => {})
+    }, 3000)
+    return () => clearInterval(id)
+  }, [autoRefresh, method, minStatus, limit])
 
   if (loading) return <div className="h-32 animate-pulse bg-zinc-800 rounded-lg" />
   if (rows.length === 0) return <p className="text-sm text-zinc-500 py-4 text-center">No requests found</p>
@@ -740,7 +779,7 @@ function RequestsTable({ method, minStatus, limit }: { method?: string; minStatu
   )
 }
 
-function ActivityTable({ limit }: { limit: number }) {
+function ActivityTable({ limit, autoRefresh }: { limit: number; autoRefresh?: boolean }) {
   const [rows, setRows] = useState<PageView[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -750,6 +789,17 @@ function ActivityTable({ limit }: { limit: number }) {
       .then((d) => { setRows(d.rows ?? []); setLoading(false) })
       .catch(() => setLoading(false))
   }, [limit])
+
+  useEffect(() => {
+    if (!autoRefresh) return
+    const id = setInterval(() => {
+      fetch(`/api/ops/monitor/activity?limit=${limit}`)
+        .then((r) => r.json())
+        .then((d) => setRows(d.rows ?? []))
+        .catch(() => {})
+    }, 3000)
+    return () => clearInterval(id)
+  }, [autoRefresh, limit])
 
   if (loading) return <div className="h-32 animate-pulse bg-zinc-800 rounded-lg" />
   if (rows.length === 0) return <p className="text-sm text-zinc-500 py-4 text-center">No page views recorded yet. Activity is captured from browser sessions.</p>
@@ -812,7 +862,7 @@ const ROLE_BADGE: Record<string, string> = {
   member: "bg-zinc-700 text-zinc-400",
 }
 
-function UsersTab() {
+function UsersTab({ autoRefresh }: { autoRefresh: boolean }) {
   const [users, setUsers] = useState<UserRow[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<string | null>(null)
@@ -825,6 +875,17 @@ function UsersTab() {
       .then((d) => { setUsers(d.users ?? []); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (!autoRefresh) return
+    const id = setInterval(() => {
+      fetch("/api/ops/monitor/users")
+        .then((r) => r.json())
+        .then((d) => setUsers(d.users ?? []))
+        .catch(() => {})
+    }, 3000)
+    return () => clearInterval(id)
+  }, [autoRefresh])
 
   function openDetail(userId: string) {
     setSelected(userId)
