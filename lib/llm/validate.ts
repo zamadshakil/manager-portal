@@ -23,11 +23,11 @@ const provider = createOpenAI({
 });
 
 // Override via env vars for A/B testing or model upgrades.
-// Gemini 2.0 Flash is fast, cheap, handles structured output well, and
+// Gemini 3.1 Pro Preview is fast, cheap, handles structured output well, and
 // supports vision natively — ideal for all three pipeline stages.
-const MODEL = process.env.DO_VALIDATION_MODEL || process.env.VALIDATION_MODEL || "google/gemini-2.0-flash-001"
-const SUMMARY_MODEL = process.env.DO_SUMMARY_MODEL || process.env.SUMMARY_MODEL || "google/gemini-2.0-flash-001"
-const VISION_MODEL = process.env.DO_VISION_MODEL || process.env.VISION_MODEL || "google/gemini-2.0-flash-001"
+const MODEL = process.env.DO_VALIDATION_MODEL || process.env.VALIDATION_MODEL || "google/gemini-3.1-pro-preview"
+const SUMMARY_MODEL = process.env.DO_SUMMARY_MODEL || process.env.SUMMARY_MODEL || "anthropic/claude-sonnet-4-5"
+const VISION_MODEL = process.env.DO_VISION_MODEL || process.env.VISION_MODEL || "google/gemini-3.1-pro-preview"
 
 // Per-LLM-call hard timeout. On Railway each call runs in the same
 // persistent Node process, so we set a generous 45s to fit within the
@@ -47,7 +47,7 @@ export const PROMPT_VERSION = "v7"
 const FALLBACK_VALIDATION_MODEL =
   process.env.FALLBACK_VALIDATION_MODEL ??
   process.env.DO_FALLBACK_VALIDATION_MODEL ??
-  "openai/gpt-4o-mini"
+  "anthropic/claude-sonnet-4-5"
 
 /**
  * Recognise Gemini / OpenAI safety-filter rejections. These are permanent
