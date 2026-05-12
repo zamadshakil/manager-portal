@@ -48,6 +48,17 @@ export function MaterialUploader({
       return
     }
 
+    let expiresAtIso: string | undefined
+    if (expiresAt) {
+      const expiryDate = new Date(expiresAt)
+      if (Number.isNaN(expiryDate.getTime())) {
+        setError("Please choose a valid expiry date and time.")
+        setUploadProgress(null)
+        return
+      }
+      expiresAtIso = expiryDate.toISOString()
+    }
+
     try {
       setUploadStage("presigning")
       const presignRes = await fetch("/api/materials/presign", {
@@ -59,7 +70,7 @@ export function MaterialUploader({
           description: description.trim() || undefined,
           tags: tags.trim() || undefined,
           target: effectiveTarget,
-          expiresAt: expiresAt || undefined,
+          expiresAt: expiresAtIso,
           mimeType,
           sizeBytes: file.size,
         }),

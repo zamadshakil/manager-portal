@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { FolderOpen, Download, Clock, Users, Trash2, Loader2, CheckSquare, Square } from "lucide-react"
@@ -31,17 +31,66 @@ interface MaterialsProps {
 
 export function Materials({ rows, emptyHint, canDelete = false, canDeleteGlobal = false, currentTeamId, showViewAll = false }: MaterialsProps) {
   const router = useRouter()
+  const [now, setNow] = useState(() => Date.now())
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
   const [pending, startTransition] = useTransition()
   const [bulkError, setBulkError] = useState<string | null>(null)
+  const refreshedExpiredKeyRef = useRef<string | null>(null)
 
-  const deletableIds = rows
+  const hasExpiringRows = useMemo(
+    () => rows.some((row) => Boolean(row.expires_at)),
+    [rows],
+  )
+
+  const visibleRows = useMemo(
+    () => rows.filter((row) => !row.expires_at || new Date(row.expires_at).getTime() > now),
+    [now, rows],
+  )
+
+  const visibleRowIds = useMemo(
+    () => new Set(visibleRows.map((row) => row.id)),
+    [visibleRows],
+  )
+
+  const expiredRowsKey = useMemo(
+    () => rows
+      .filter((row) => row.expires_at && new Date(row.expires_at).getTime() <= now)
+      .map((row) => row.id)
+      .join(","),
+    [now, rows],
+  )
+
+  const deletableIds = visibleRows
     .filter((m) => canDelete && (canDeleteGlobal || m.team_id === currentTeamId))
     .map((m) => m.id)
 
   const allSelected = deletableIds.length > 0 && deletableIds.every((id) => selected.has(id))
   const someSelected = selected.size > 0
+
+  useEffect(() => {
+    if (!hasExpiringRows) return
+
+    const interval = window.setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
+    return () => window.clearInterval(interval)
+  }, [hasExpiringRows])
+
+  useEffect(() => {
+    if (!expiredRowsKey || refreshedExpiredKeyRef.current === expiredRowsKey) return
+
+    refreshedExpiredKeyRef.current = expiredRowsKey
+    router.refresh()
+  }, [expiredRowsKey, router])
+
+  useEffect(() => {
+    setSelected((prev) => {
+      const next = new Set(Array.from(prev).filter((id) => visibleRowIds.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [visibleRowIds])
 
   function toggleItem(id: string) {
     setSelected((prev) => {
@@ -125,7 +174,7 @@ export function Materials({ rows, emptyHint, canDelete = false, canDeleteGlobal 
         )}
       </header>
 
-      {rows.length === 0 ? (
+      {visibleRows.length === 0 ? (
         <div className="px-5 py-10 text-center">
           <p className="text-[13px] font-semibold">No materials yet</p>
           <p className="mt-1 text-[12px] text-muted-foreground">
@@ -134,7 +183,7 @@ export function Materials({ rows, emptyHint, canDelete = false, canDeleteGlobal 
         </div>
       ) : (
         <ul className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-4">
-          {rows.map((m) => {
+          {visibleRows.map((m) => {
             const isDeletable = canDelete && (canDeleteGlobal || m.team_id === currentTeamId)
             const isSelected = selected.has(m.id)
             return (

@@ -35,6 +35,40 @@ async function purgeExpiredAnnouncements(nowIso: string) {
   }
 }
 
+async function purgeExpiredMaterials(nowIso: string) {
+  const supabase = createAdminClient()
+  const { data: expiredRows } = await supabase
+    .from("materials")
+    .select("id, blob_url")
+    .lte("expires_at", nowIso)
+
+  const rows = expiredRows ?? []
+  if (rows.length === 0) return
+
+  try {
+    const { del } = await import("@/lib/r2")
+    await Promise.all(
+      rows.map((row) => row.blob_url ? del(row.blob_url).catch((error) => {
+        console.error("Failed to delete expired material blob", row.blob_url, error)
+      }) : Promise.resolve()),
+    )
+  } catch (error) {
+    console.error("Failed to delete expired material blobs", error)
+  }
+
+  const expiredIds = rows.map((row) => row.id)
+  await supabase.from("materials").delete().in("id", expiredIds)
+
+  try {
+    const { deleteIndexed } = await import("@/lib/smart-ai/indexer")
+    await Promise.all(
+      expiredIds.map((id) => deleteIndexed({ source_type: "material", source_id: id })),
+    )
+  } catch (error) {
+    console.error("Failed to unindex expired materials", error)
+  }
+}
+
 export interface DashboardSummary {
   total: number
   passed: number
@@ -185,9 +219,12 @@ export async function listAnnouncements(_profile: Profile, limit = 50): Promise<
 
 export async function listMaterials(profile: Profile, limit = 100): Promise<Material[]> {
   const supabase = await createClient()
+  const nowIso = new Date().toISOString()
+  await purgeExpiredMaterials(nowIso)
   const { data } = await supabase
     .from("materials")
     .select("*, teams(name)")
+    .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
     .order("created_at", { ascending: false })
     .limit(limit)
   return ((data ?? []) as unknown as Material[]).filter((row) => row.archive_status !== "pending")
