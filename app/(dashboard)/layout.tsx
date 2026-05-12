@@ -50,7 +50,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   ]
 
   const primaryAction = profile.role === "main_admin"
-    ? { href: "/dashboard/team?tab=provisioning", label: "Provision user" }
+    ? { href: "/dashboard/team?tab=provisioning", label: "Add user" }
     : ctx.has(CAPABILITIES.TASKS_CREATE)
       ? { href: "/dashboard/tasks", label: "Assign task" }
       : { href: "/dashboard/tasks", label: "Open tasks" }
