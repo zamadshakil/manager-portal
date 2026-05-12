@@ -1,4 +1,8 @@
+"use client"
+
 import Link from "next/link"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Megaphone, Clock, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatRelative, formatDate } from "@/lib/format"
@@ -24,6 +28,45 @@ interface AnnouncementsProps {
 }
 
 export function Announcements({ rows, emptyHint, canDelete = false, canDeleteGlobal = false, currentTeamId, showViewAll = false }: AnnouncementsProps) {
+  const router = useRouter()
+  const [now, setNow] = useState(() => Date.now())
+  const refreshedExpiredKeyRef = useRef<string | null>(null)
+
+  const hasExpiringRows = useMemo(
+    () => rows.some((row) => Boolean(row.expires_at)),
+    [rows],
+  )
+
+  const visibleRows = useMemo(
+    () => rows.filter((row) => !row.expires_at || new Date(row.expires_at).getTime() > now),
+    [now, rows],
+  )
+
+  const expiredRowsKey = useMemo(
+    () => rows
+      .filter((row) => row.expires_at && new Date(row.expires_at).getTime() <= now)
+      .map((row) => row.id)
+      .join(","),
+    [now, rows],
+  )
+
+  useEffect(() => {
+    if (!hasExpiringRows) return
+
+    const interval = window.setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
+    return () => window.clearInterval(interval)
+  }, [hasExpiringRows])
+
+  useEffect(() => {
+    if (!expiredRowsKey || refreshedExpiredKeyRef.current === expiredRowsKey) return
+
+    refreshedExpiredKeyRef.current = expiredRowsKey
+    router.refresh()
+  }, [expiredRowsKey, router])
+
   return (
     <section
       aria-labelledby="announcements-heading"
@@ -49,7 +92,7 @@ export function Announcements({ rows, emptyHint, canDelete = false, canDeleteGlo
         ) : null}
       </header>
 
-      {rows.length === 0 ? (
+      {visibleRows.length === 0 ? (
         <div className="px-5 py-10 text-center">
           <p className="text-[13px] font-semibold">No announcements yet</p>
           <p className="mt-1 text-[12px] text-muted-foreground">
@@ -58,7 +101,7 @@ export function Announcements({ rows, emptyHint, canDelete = false, canDeleteGlo
         </div>
       ) : (
         <ul className="divide-y divide-border">
-          {rows.map((a) => (
+          {visibleRows.map((a) => (
             <li key={a.id} className="px-4 py-4 lg:px-5">
               <div className="flex items-center gap-2 flex-wrap">
                 <span

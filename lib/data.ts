@@ -13,6 +13,28 @@ import type {
   ValidationRule,
 } from "@/lib/types"
 
+async function purgeExpiredAnnouncements(nowIso: string) {
+  const supabase = createAdminClient()
+  const { data: expiredRows } = await supabase
+    .from("announcements")
+    .select("id")
+    .lte("expires_at", nowIso)
+
+  const expiredIds = (expiredRows ?? []).map((row) => row.id)
+  if (expiredIds.length === 0) return
+
+  await supabase.from("announcements").delete().in("id", expiredIds)
+
+  try {
+    const { deleteIndexed } = await import("@/lib/smart-ai/indexer")
+    await Promise.all(
+      expiredIds.map((id) => deleteIndexed({ source_type: "announcement", source_id: id })),
+    )
+  } catch (error) {
+    console.error("Failed to unindex expired announcements", error)
+  }
+}
+
 export interface DashboardSummary {
   total: number
   passed: number
@@ -151,7 +173,7 @@ export async function getSubmissionById(profile: Profile, id: string): Promise<S
 export async function listAnnouncements(_profile: Profile, limit = 50): Promise<Announcement[]> {
   const supabase = await createClient()
   const nowIso = new Date().toISOString()
-  // Hide announcements whose `expires_at` has passed; keep ones with no expiry.
+  await purgeExpiredAnnouncements(nowIso)
   const { data } = await supabase
     .from("announcements")
     .select("*, teams(name)")

@@ -41,7 +41,12 @@ export function AnnouncementComposer({
     
     fd.set("target", !canTargetGlobal && currentTeamId ? currentTeamId : target)
     if (expiresAt) {
-      fd.set("expiresAt", expiresAt)
+      const expiryDate = new Date(expiresAt)
+      if (Number.isNaN(expiryDate.getTime())) {
+        setError("Please choose a valid expiry date and time.")
+        return
+      }
+      fd.set("expiresAt", expiryDate.toISOString())
     }
     
     start(async () => {
