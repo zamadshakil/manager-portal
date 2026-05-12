@@ -431,6 +431,9 @@ export interface AiUsageLogEntry {
   tokens_in: number | null
   tokens_out: number | null
   period_type: AiCreditPeriod | null
+  event_type: string | null
+  status: string | null
+  credits_deducted: number | null
   created_at: string
   // Joined from profiles (populated by getUserUsageHistory)
   user_email?: string

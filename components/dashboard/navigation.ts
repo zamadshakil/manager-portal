@@ -13,6 +13,7 @@ import {
   Sparkles,
   Upload,
   Users,
+  Zap,
   type LucideIcon,
 } from "lucide-react"
 import type { UserRole } from "@/lib/types"
@@ -78,6 +79,12 @@ export const dashboardNavGroups: DashboardNavGroup[] = [
         label: "Smart AI",
         icon: Sparkles,
         href: "/dashboard/smart-ai",
+        roles: ["main_admin", "manager", "member"],
+      },
+      {
+        label: "My AI Credits",
+        icon: Zap,
+        href: "/dashboard/my-credits",
         roles: ["main_admin", "manager", "member"],
       },
       {

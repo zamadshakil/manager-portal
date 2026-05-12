@@ -478,6 +478,33 @@ export async function getUserDailyTrend(
 }
 
 // ---------------------------------------------------------------------------
+// Any authenticated user: get MY usage history (for member credits page)
+// ---------------------------------------------------------------------------
+
+export async function getMyUsageHistory(days = 30): Promise<AiUsageLogEntry[]> {
+  const profile = await requireProfile()
+  const supabase = await createClient()
+
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+
+  const { data, error } = await supabase
+    .from("ai_usage_log")
+    .select("*")
+    .eq("user_id", profile.id)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(200)
+
+  if (error || !data) return []
+
+  return (data as any[]).map((row) => ({
+    ...row,
+    user_email: profile.email,
+    user_full_name: profile.full_name ?? null,
+  })) as AiUsageLogEntry[]
+}
+
+// ---------------------------------------------------------------------------
 // Any authenticated user: get MY credit status (for badge + chat enforcement)
 // ---------------------------------------------------------------------------
 
