@@ -1,7 +1,7 @@
 "use client"
 
 import { useTransition, useState } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { Trash2, Loader2 } from "lucide-react"
 import { deleteTask } from "@/app/actions/tasks"
 import {
@@ -18,12 +18,15 @@ import {
 
 export function DeleteTaskButton({ taskId, iconOnly }: { taskId: string; iconOnly?: boolean }) {
   const router = useRouter()
+  const pathname = usePathname()
   const [pending, start] = useTransition()
   const [open, setOpen] = useState(false)
+  const isDetailPage = pathname === `/dashboard/tasks/${taskId}`
 
   function handleDelete(e: React.MouseEvent) {
     e.preventDefault() // prevent closing dialog instantly if we want to show loading
     e.stopPropagation() // prevent bubbling to <Link>
+    if (pending) return
     
     start(async () => {
       const formData = new FormData()
@@ -32,7 +35,12 @@ export function DeleteTaskButton({ taskId, iconOnly }: { taskId: string; iconOnl
       const res = await deleteTask(formData)
       if (res.ok) {
         setOpen(false)
-        router.push("/dashboard/tasks")
+        if (isDetailPage) {
+          router.replace("/dashboard/tasks")
+          window.location.replace("/dashboard/tasks")
+          return
+        }
+        router.refresh()
       } else {
         alert(res.error || "Failed to delete task")
         setOpen(false)

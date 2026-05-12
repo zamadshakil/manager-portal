@@ -493,6 +493,7 @@ export async function bulkDeleteTasks(ids: string[]): Promise<TaskActionResult> 
       entityId: task.id,
     })
     void deleteIndexed({ source_type: "task", source_id: task.id })
+    revalidatePath(`/dashboard/tasks/${task.id}`)
   }
 
   revalidatePath("/dashboard/tasks")
@@ -539,6 +540,7 @@ export async function deleteTask(formData: FormData): Promise<TaskActionResult> 
 
   void deleteIndexed({ source_type: "task", source_id: task.id })
 
+  revalidatePath(`/dashboard/tasks/${task.id}`)
   revalidatePath("/dashboard/tasks")
   return { ok: true }
 }
