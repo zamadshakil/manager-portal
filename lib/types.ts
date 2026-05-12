@@ -67,6 +67,12 @@ export interface Submission {
   late_reason: string | null
   is_late: boolean
   submitted_at: string | null
+  /**
+   * Number of times the AI pipeline has been invoked for this submission.
+   * Incremented by `processSubmission` on entry; consulted by the cron
+   * safety net to cap auto-retries.
+   */
+  attempts: number
   created_at: string
   updated_at: string
 }

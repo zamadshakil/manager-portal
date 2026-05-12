@@ -170,6 +170,36 @@ async function runPipeline(submissionId: string) {
   const remaining = () => PIPELINE_BUDGET_MS - (Date.now() - pipelineStart)
 
   try {
+    // Bump the attempt counter atomically before reading the row, so the
+    // cron safety net can cap auto-retries no matter how the pipeline was
+    // invoked (server-side `after()`, client POST, manual retry, or cron).
+    // The increment runs even if the rest of the pipeline crashes — that's
+    // intentional, otherwise a row that crashes on every attempt would
+    // never trip the bound.
+    try {
+      // Cast to `any` because the Supabase TS types are generated and lag
+      // behind this migration until codegen is rerun. The RPC is defined in
+      // `supabase/migrations/20260522_submissions_attempts.sql`.
+      await (admin as any).rpc("increment_submission_attempts", { p_submission_id: submissionId })
+    } catch (rpcErr: any) {
+      // Fallback for environments where the RPC hasn't been deployed yet:
+      // best-effort read-modify-write. Concurrent invocations are guarded by
+      // the Redis SETNX lock above, so the race window is small.
+      const { data: row } = await admin
+        .from("submissions")
+        .select("attempts" as any)
+        .eq("id", submissionId)
+        .maybeSingle()
+      const current = (row as any)?.attempts ?? 0
+      await admin
+        .from("submissions")
+        .update({ attempts: current + 1 } as any)
+        .eq("id", submissionId)
+      if (rpcErr?.message && !/function .* does not exist/i.test(rpcErr.message)) {
+        console.warn("[pipeline] increment_submission_attempts RPC failed (used fallback):", rpcErr.message)
+      }
+    }
+
     const { data: subData, error: subError } = await admin
       .from("submissions")
       .select("*")

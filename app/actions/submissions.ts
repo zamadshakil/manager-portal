@@ -12,6 +12,7 @@ import { uploadLimiter, acquireUploadLock, releaseUploadLock } from "@/lib/redis
 import { clearPipelineLock, processSubmission } from "@/lib/llm/pipeline"
 import { ACCEPTED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/types"
 import { verifyMimeAgainstBuffer } from "@/lib/mime-sniff"
+import { verifyFileIntegrity } from "@/lib/file-integrity"
 import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
 
 
@@ -33,9 +34,17 @@ export interface ActionResult {
  * we look up the assignment row, enforce deadline rules, and persist late
  * metadata.
  *
- * The AI validation pipeline is NOT triggered here — it runs in a separate
- * API route (`/api/pipeline/[id]`) with its own 60s timeout budget. The
- * client fires the pipeline POST after receiving the submissionId.
+ * The AI validation pipeline is triggered server-side via `after()` once the
+ * row is durably inserted. The client may also fire `POST /api/pipeline/[id]`
+ * as a redundant fast-start signal — the Redis SETNX lock in
+ * `processSubmission` makes that path idempotent and harmless if the
+ * server-side trigger already won the race.
+ *
+ * Why server-side: a client-only trigger leaves the submission stuck in
+ * `queued` whenever the browser closes, navigates, hits a rate limit, or
+ * loses network between the action returning and the POST landing. The
+ * `after()` invocation runs inside this request's Railway process and
+ * survives the response being sent.
  */
 export async function createSubmission(formData: FormData): Promise<ActionResult> {
   const profile = await requireProfile()
@@ -56,6 +65,15 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   const mimeCheck = verifyMimeAgainstBuffer(fileBuffer, file.type)
   if (!mimeCheck.ok) {
     return { ok: false, error: mimeCheck.reason }
+  }
+
+  // Structural integrity: catch legitimately-typed but corrupted/truncated
+  // files (e.g. a DOCX missing its central directory, a PDF without %%EOF)
+  // before they enter the pipeline. The pipeline would surface a confusing
+  // parse error 30-60s later; failing fast here lets the user fix it now.
+  const integrityCheck = verifyFileIntegrity(fileBuffer, file.type)
+  if (!integrityCheck.ok) {
+    return { ok: false, error: integrityCheck.reason }
   }
 
   // Dedup mutex: reject a duplicate in-flight upload for the exact same bytes
@@ -274,8 +292,23 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
     },
   })
 
-  // Return the submissionId so the client can trigger the pipeline via
-  // POST /api/pipeline/[id] and poll for status updates.
+  // ---------- Trigger the AI pipeline server-side ----------
+  // Mirrors the pattern used by `retrySubmission`: scheduling via `after()`
+  // guarantees the pipeline runs even if the client never POSTs to
+  // `/api/pipeline/[id]`. The route's POST handler is still useful as a
+  // fast-start signal for power-user UIs, but it's no longer load-bearing.
+  //
+  // Idempotency is handled by `processSubmission`'s Redis SETNX lock
+  // (`pipeline:lock:<id>`, 10 min TTL) — a redundant trigger from the client
+  // will see the lock held and exit without re-running.
+  after(() => {
+    processSubmission(data.id).catch((err) => {
+      console.error("[createSubmission] background pipeline crash for", data.id, err)
+    })
+  })
+
+  // Return the submissionId so the client can poll GET /api/pipeline/[id]
+  // for status updates.
   return { ok: true, submissionId: data.id }
 }
 

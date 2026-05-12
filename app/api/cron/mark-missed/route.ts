@@ -1,9 +1,19 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getRedis } from "@/lib/redis";
+import { processSubmission } from "@/lib/llm/pipeline";
+import { logActivity } from "@/lib/activity";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+/**
+ * Max times the cron will auto-retry a `queued`-stuck submission before
+ * giving up and marking it failed. Combined with `submissions.attempts`
+ * (incremented in `runPipeline`), this caps AI-credit blast radius for a
+ * row that genuinely can't be processed.
+ */
+const MAX_AUTO_RETRY_ATTEMPTS = 3;
 
 /**
  * GET /api/cron/mark-missed
@@ -55,34 +65,46 @@ export async function GET(request: Request) {
       }
     }
 
-    // 2. Auto-fail stuck submissions (pipeline crash recovery).
+    // 2. Recover stuck submissions (pipeline crash / missed-trigger recovery).
     //
     // Two-phase to avoid racing a still-running pipeline:
-    //   a) Select rows that have been in queued/parsing/validating for > 5 min
-    //      (a healthy run completes in ~30-60s).
-    //   b) Skip any row whose Redis lock `pipeline:lock:<id>` is still held —
-    //      that lock is set with a 10-minute TTL by `processSubmission()` and
-    //      is the authoritative "a worker is currently running" signal.
+    //   a) Select rows in queued/parsing/validating older than 5 min (a
+    //      healthy run completes in ~30-60s).
+    //   b) Skip any row whose Redis lock `pipeline:lock:<id>` is still held
+    //      — that lock is the authoritative "a worker is currently running"
+    //      signal, with a 10-min TTL set by `processSubmission()`.
     //
-    // Rows whose lock has expired or never existed (Redis unavailable, server
-    // restart, etc.) are the genuine zombies and get marked failed.
+    // For rows whose lock has expired or never existed (Redis unavailable,
+    // server restart, missed client trigger, etc.) we partition by status:
+    //
+    //   - `queued` + attempts < MAX → auto-retry (likely a missed trigger;
+    //      no AI work has happened yet, so a re-invoke is cheap and safe).
+    //   - `queued` + attempts >= MAX → fail (probably a permanent issue).
+    //   - `parsing` / `validating` → fail (AI work has started — retrying
+    //      risks double-billing credits; the user can manually re-run).
+    //
+    // The retry runs inside `after()` so this cron response returns
+    // quickly even if many rows need recovery.
     const stuckCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const { data: stuckCandidates } = await admin
       .from("submissions")
-      .select("id")
+      .select("id, status, attempts, team_id, uploader_id" as any)
       .in("status", ["queued", "parsing", "validating"])
       .lt("updated_at", stuckCutoff);
 
     let stuckRecoveredIds: string[] = [];
+    let autoRetriedIds: string[] = [];
     const candidateRows = (stuckCandidates as any[]) || [];
     if (candidateRows.length > 0) {
       const redis = getRedis();
       const idsToFail: string[] = [];
+      const idsToFailExhausted: string[] = [];
+      const idsToRetry: { id: string; attempts: number; team_id: string; uploader_id: string }[] = [];
 
       for (const row of candidateRows) {
         // If Redis is unavailable, fall back to the old behaviour: assume
-        // the pipeline is gone and mark the row failed. Better to surface
-        // a stuck submission than leave it pending indefinitely.
+        // the pipeline is gone and recover the row. Better to surface a
+        // stuck submission than leave it pending indefinitely.
         let lockHeld = false;
         if (redis) {
           try {
@@ -92,9 +114,57 @@ export async function GET(request: Request) {
             lockHeld = false;
           }
         }
-        if (!lockHeld) idsToFail.push(row.id);
+        if (lockHeld) continue;
+
+        const attempts = Number(row.attempts ?? 0);
+        if (row.status === "queued") {
+          if (attempts < MAX_AUTO_RETRY_ATTEMPTS) {
+            idsToRetry.push({
+              id: row.id,
+              attempts,
+              team_id: row.team_id,
+              uploader_id: row.uploader_id,
+            });
+          } else {
+            idsToFailExhausted.push(row.id);
+          }
+        } else {
+          // parsing / validating — AI work likely started, don't double-bill.
+          idsToFail.push(row.id);
+        }
       }
 
+      // Auto-retry queued-stuck rows. Bump updated_at so the next cron pass
+      // won't immediately re-select the same rows if the retry hasn't yet
+      // updated status itself.
+      if (idsToRetry.length > 0) {
+        const retryIds = idsToRetry.map((r) => r.id);
+        await admin
+          .from("submissions")
+          .update({ updated_at: new Date().toISOString() } as any)
+          .in("id", retryIds);
+
+        for (const row of idsToRetry) {
+          after(() => {
+            processSubmission(row.id).catch((err) => {
+              console.error("[cron] auto-retry pipeline crash for", row.id, err);
+            });
+          });
+          // Best-effort audit log. Failures are non-fatal.
+          void logActivity({
+            actorId: null,
+            teamId: row.team_id,
+            action: "submission.auto_retried",
+            entityType: "submission",
+            entityId: row.id,
+            metadata: { attempts: row.attempts, source: "cron" },
+          });
+        }
+        autoRetriedIds = retryIds;
+      }
+
+      // Fail rows that are mid-pipeline (parsing/validating) or have
+      // exhausted retries. Use distinct messages so admins can diagnose.
       if (idsToFail.length > 0) {
         await admin
           .from("submissions")
@@ -103,13 +173,28 @@ export async function GET(request: Request) {
             flags: [
               {
                 severity: "fail",
-                message: "Validation pipeline timed out. Please retry.",
+                message:
+                  "Validation pipeline stalled mid-run. Please retry from the submission detail page.",
               },
             ],
           } as any)
           .in("id", idsToFail);
-        stuckRecoveredIds = idsToFail;
       }
+      if (idsToFailExhausted.length > 0) {
+        await admin
+          .from("submissions")
+          .update({
+            status: "failed",
+            flags: [
+              {
+                severity: "fail",
+                message: `Validation pipeline did not start after ${MAX_AUTO_RETRY_ATTEMPTS} attempts. Please retry manually or contact support.`,
+              },
+            ],
+          } as any)
+          .in("id", idsToFailExhausted);
+      }
+      stuckRecoveredIds = [...idsToFail, ...idsToFailExhausted];
     }
     const stuck = stuckRecoveredIds.map((id) => ({ id }));
 
@@ -173,6 +258,7 @@ export async function GET(request: Request) {
       ok: true,
       missedCount,
       stuckRecovered: stuck?.length ?? 0,
+      autoRetried: autoRetriedIds.length,
       expiredAnnouncementsDeleted: expiredAnnRows.length,
       expiredMaterialsDeleted: expiredMatRows.length,
     };
