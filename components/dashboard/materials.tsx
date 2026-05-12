@@ -190,17 +190,18 @@ export function Materials({ rows, emptyHint, canDelete = false, canDeleteGlobal 
               <li key={m.id}>
                 <div
                   className={cn(
-                    "rounded-xl border border-border bg-background p-3.5 transition-shadow hover:shadow-card",
+                    "rounded-xl border border-border bg-background p-3 transition-shadow hover:shadow-card",
                     isSelected && "ring-2 ring-primary border-primary",
                   )}
                 >
-                  <div className="flex items-start gap-3">
+                  {/* Top row: checkbox + icon + badges + actions */}
+                  <div className="flex items-center gap-2">
                     {isDeletable && (
                       <button
                         type="button"
                         onClick={() => toggleItem(m.id)}
                         aria-label={isSelected ? `Deselect ${m.title}` : `Select ${m.title}`}
-                        className="mt-0.5 shrink-0 text-muted-foreground hover:text-primary transition-colors"
+                        className="shrink-0 text-muted-foreground hover:text-primary transition-colors"
                       >
                         {isSelected ? (
                           <CheckSquare className="h-4 w-4 text-primary" aria-hidden="true" />
@@ -209,48 +210,34 @@ export function Materials({ rows, emptyHint, canDelete = false, canDeleteGlobal 
                         )}
                       </button>
                     )}
-                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-warm-white text-[10.5px] font-semibold tracking-wide">
+                    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warm-white text-[10px] font-semibold tracking-wide">
                       {fileIconLabel(m.file_type)}
                     </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {m.tags.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {m.tags.slice(0, 2).map((t) => (
-                              <span
-                                key={t}
-                                className="inline-flex items-center rounded-full bg-warm-white px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground"
-                              >
-                                {t}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] font-semibold text-slate-600">
-                          <Users className="h-3 w-3" />
-                          {m.teams?.name ?? "Global"}
+                    {/* badges — flex-wrap, take remaining space */}
+                    <div className="flex flex-wrap items-center gap-1 flex-1 min-w-0">
+                      {m.tags.slice(0, 2).map((t) => (
+                        <span
+                          key={t}
+                          className="inline-flex items-center rounded-full bg-warm-white px-2 py-0.5 text-[10px] font-semibold text-muted-foreground"
+                        >
+                          {t}
                         </span>
-                      </div>
-                      <h3 className="mt-1.5 text-[13.5px] font-semibold leading-snug truncate">{m.title}</h3>
-                      <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                        {formatBytes(m.size_bytes)} · {formatRelative(m.created_at)}
-                      </p>
-                      {m.expires_at ? (
-                        <div className="mt-1.5 flex items-center gap-1 text-[10.5px] font-medium text-destructive/85">
-                          <Clock className="h-3 w-3" />
-                          <span>Expires {formatDate(m.expires_at)}</span>
-                        </div>
-                      ) : null}
+                      ))}
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 shrink-0">
+                        <Users className="h-2.5 w-2.5" />
+                        {m.teams?.name ?? "Global"}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-1">
+                    {/* actions pinned to the right */}
+                    <div className="flex items-center gap-0.5 shrink-0">
                       <a
                         href={`/api/download/${m.id}?type=material`}
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label={`Download ${m.title}`}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                       >
-                        <Download className="h-4 w-4" aria-hidden="true" />
+                        <Download className="h-3.5 w-3.5" aria-hidden="true" />
                       </a>
                       {isDeletable ? (
                         <DeleteIconButton
@@ -261,6 +248,20 @@ export function Materials({ rows, emptyHint, canDelete = false, canDeleteGlobal 
                         />
                       ) : null}
                     </div>
+                  </div>
+
+                  {/* Body: title + meta */}
+                  <div className="mt-2 min-w-0">
+                    <h3 className="text-[13px] font-semibold leading-snug truncate">{m.title}</h3>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {formatBytes(m.size_bytes)} · {formatRelative(m.created_at)}
+                    </p>
+                    {m.expires_at ? (
+                      <div className="mt-1 flex items-center gap-1 text-[10.5px] font-medium text-destructive/85">
+                        <Clock className="h-3 w-3 shrink-0" />
+                        <span className="truncate">Expires {formatDate(m.expires_at)}</span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </li>
