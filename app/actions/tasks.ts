@@ -8,6 +8,7 @@ import { requireProfile } from "@/lib/auth"
 import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permissions"
 import { logActivity } from "@/lib/activity"
 import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
+import { del } from "@/lib/r2"
 
 export interface TaskActionResult {
   ok: boolean
@@ -416,6 +417,38 @@ export async function assignTask(formData: FormData): Promise<TaskActionResult> 
 const DeleteSchema = z.object({ id: z.string().uuid() })
 const BulkDeleteSchema = z.object({ ids: z.array(z.string().uuid()).min(1) })
 
+async function deleteSubmissionsForTasks(
+  admin: ReturnType<typeof createAdminClient>,
+  taskIds: string[],
+): Promise<void> {
+  if (taskIds.length === 0) return
+
+  const { data: subs } = await admin
+    .from("submissions")
+    .select("id, blob_url, team_id")
+    .in("task_id", taskIds)
+
+  if (!subs || subs.length === 0) return
+
+  const subIds = subs.map((s) => s.id)
+
+  await admin.from("submissions").delete().in("id", subIds)
+
+  await Promise.allSettled(
+    subs.map((s) =>
+      (s as { id: string; blob_url: string | null; team_id: string }).blob_url
+        ? del((s as { id: string; blob_url: string; team_id: string }).blob_url).catch((err) =>
+            console.error("[tasks] submission blob delete failed", err),
+          )
+        : Promise.resolve(),
+    ),
+  )
+
+  void Promise.all(
+    subIds.map((id) => deleteIndexed({ source_type: "submission", source_id: id })),
+  )
+}
+
 export async function bulkDeleteTasks(ids: string[]): Promise<TaskActionResult> {
   const profile = await requireProfile()
   const parsed = BulkDeleteSchema.safeParse({ ids })
@@ -445,6 +478,9 @@ export async function bulkDeleteTasks(ids: string[]): Promise<TaskActionResult> 
   }
 
   const validIds = tasks.map((t) => (t as { id: string; team_id: string }).id)
+
+  await deleteSubmissionsForTasks(admin, validIds)
+
   const { error } = await admin.from("tasks").delete().in("id", validIds)
   if (error) return { ok: false, error: error.message }
 
@@ -487,6 +523,8 @@ export async function deleteTask(formData: FormData): Promise<TaskActionResult> 
     }
     throw err
   }
+
+  await deleteSubmissionsForTasks(admin, [task.id])
 
   const { error } = await admin.from("tasks").delete().eq("id", task.id)
   if (error) return { ok: false, error: error.message }
