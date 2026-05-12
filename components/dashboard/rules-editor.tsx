@@ -32,6 +32,7 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
   const [editing, setEditing] = useState<ValidationRule | null>(null)
   const [creating, setCreating] = useState(false)
   const [pending, start] = useTransition()
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [ruleType, setRuleType] = useState<ValidationRuleType>("scored")
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
@@ -87,9 +88,11 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
   function onDelete(id: string) {
     const fd = new FormData()
     fd.set("id", id)
+    setDeletingId(id)
     start(async () => {
       const res = await deleteRule(fd)
       if (!res.ok) setError(res.error ?? "Could not delete.")
+      setDeletingId(null)
       router.refresh()
     })
   }
@@ -364,9 +367,12 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
                       <button
                         type="button"
                         aria-label={`Delete rule ${rule.rule_name}`}
-                        className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted text-destructive transition-colors"
+                        disabled={deletingId === rule.id}
+                        className="rounded-lg border border-border bg-background h-8 w-8 inline-flex items-center justify-center hover:bg-muted text-destructive transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                       >
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        {deletingId === rule.id
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                          : <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
                       </button>
                     </AlertDialogTrigger>
                     <AlertDialogContent>
@@ -378,12 +384,17 @@ export function RulesEditor({ rules, teams, profile, canCreate = false, canUpdat
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogCancel disabled={deletingId === rule.id}>Cancel</AlertDialogCancel>
                         <AlertDialogAction
                           onClick={() => onDelete(rule.id)}
-                          className="bg-destructive text-white hover:bg-destructive/90"
+                          disabled={deletingId === rule.id}
+                          className="inline-flex items-center gap-1.5 bg-destructive text-white hover:bg-destructive/90 disabled:opacity-60"
                         >
-                          Delete rule
+                          {deletingId === rule.id ? (
+                            <><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Deleting…</>
+                          ) : (
+                            "Delete rule"
+                          )}
                         </AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>
