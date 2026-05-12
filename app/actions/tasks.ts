@@ -9,6 +9,7 @@ import { AccessDeniedError, assertCapability, CAPABILITIES } from "@/lib/permiss
 import { logActivity } from "@/lib/activity"
 import { indexDocument, deleteIndexed, joinContent } from "@/lib/smart-ai/indexer"
 import { del } from "@/lib/r2"
+import { getTaskDeadlineWindow } from "@/lib/task-deadlines"
 
 export interface TaskActionResult {
   ok: boolean
@@ -296,6 +297,22 @@ export async function updateTask(formData: FormData): Promise<TaskActionResult> 
     })
     .eq("id", task.id)
   if (updateErr) return { ok: false, error: updateErr.message }
+
+  // If the new deadline re-opens the submission window, restore any missed
+  // assignments (no submission yet) back to assigned so members can submit.
+  const newWindow = getTaskDeadlineWindow({
+    dueAt: parsed.data.due_at,
+    allowLate: parsed.data.allow_late,
+    lateSubmissionDeadline: parsed.data.late_submission_deadline,
+  })
+  if (newWindow.acceptsSubmissions) {
+    await admin
+      .from("task_assignments")
+      .update({ status: "assigned" })
+      .eq("task_id", task.id)
+      .eq("status", "missed")
+      .is("submission_id", null)
+  }
 
   await logActivity({
     actorId: profile.id,
