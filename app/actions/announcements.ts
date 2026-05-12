@@ -95,6 +95,77 @@ export async function createAnnouncement(formData: FormData): Promise<ActionResu
   return { ok: true }
 }
 
+export async function updateAnnouncement(formData: FormData): Promise<ActionResult> {
+  const profile = await requireProfile()
+  const id = String(formData.get("id") || "")
+  if (!id) return { ok: false, error: "Missing announcement id." }
+
+  const parsed = Schema.safeParse({
+    title: formData.get("title") || "",
+    body: formData.get("body") || "",
+    priority: formData.get("priority") || undefined,
+    target: "global",
+    expiresAt: formData.get("expiresAt") || undefined,
+  })
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
+
+  const supabase = await createClient()
+  const admin = createAdminClient()
+
+  const { data: row } = await supabase.from("announcements").select("id, team_id").eq("id", id).single()
+  if (!row) return { ok: false, error: "Announcement not found." }
+
+  if (row.team_id === null && profile.role !== "main_admin") {
+    return { ok: false, error: "Only Main Admin can edit global announcements." }
+  }
+
+  try {
+    await assertCapability(profile, CAPABILITIES.ANNOUNCEMENTS_CREATE, {
+      team_id: row.team_id,
+      is_global: row.team_id === null,
+    })
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return { ok: false, error: "You do not have permission to edit this announcement." }
+    }
+    throw err
+  }
+
+  const { error } = await admin
+    .from("announcements")
+    .update({
+      title: parsed.data.title,
+      body: parsed.data.body,
+      priority: parsed.data.priority,
+      expires_at: parsed.data.expiresAt ? new Date(parsed.data.expiresAt).toISOString() : null,
+    })
+    .eq("id", id)
+  if (error) return { ok: false, error: error.message }
+
+  await logActivity({
+    actorId: profile.id,
+    teamId: row.team_id,
+    action: "announcement.updated",
+    entityType: "announcement",
+    entityId: id,
+    metadata: { priority: parsed.data.priority },
+  })
+
+  void indexDocument({
+    source_type: "announcement",
+    source_id: id,
+    team_id: row.team_id,
+    owner_id: profile.id,
+    title: parsed.data.title,
+    content: joinContent([parsed.data.title, parsed.data.body]),
+    metadata: { priority: parsed.data.priority },
+  })
+
+  revalidatePath("/dashboard")
+  revalidatePath("/dashboard/announcements")
+  return { ok: true }
+}
+
 export async function deleteAnnouncement(formData: FormData): Promise<ActionResult> {
   const profile = await requireProfile()
   const id = String(formData.get("id") || "")

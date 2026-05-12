@@ -36,6 +36,8 @@ export default async function AnnouncementsPage() {
           rows={announcements}
           canDelete={canDeleteAnnouncements}
           canDeleteGlobal={profile.role === "main_admin"}
+          canEdit={canCreateAnnouncements}
+          canEditGlobal={profile.role === "main_admin"}
           currentTeamId={profile.team_id}
           showAll
         />
