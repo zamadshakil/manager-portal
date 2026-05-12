@@ -12,6 +12,9 @@ import {
   CAPABILITIES,
   aiAllowedRagSourceTypes,
   hasCapability,
+  getEffectivePermissions,
+  hasCapabilityFor,
+  type CapabilityKey,
 } from "@/lib/permissions"
 import { applySlidingWindow, type SimpleMessage } from "@/lib/smart-ai/sliding-window"
 import { chatLimiter } from "@/lib/redis"
@@ -238,6 +241,7 @@ async function postHandler(req: Request) {
   // chunks never enter the LLM context window, even if they would have
   // matched the embedding/BM25 query.
   const allowedSourceTypes = await aiAllowedRagSourceTypes(profile)
+  const effectivePerms = await getEffectivePermissions(profile)
 
   // ---------------------------------------------------------------------
   // Flatten UIMessage[] → simple {role, content}
@@ -561,7 +565,23 @@ async function postHandler(req: Request) {
       description: "Documents uploaded inside Smart AI chat threads.",
     },
   }
-  const ALLOWED_TABLES = Object.keys(TABLE_SCHEMAS)
+  const TABLE_CAPABILITY_MAP: Partial<Record<string, CapabilityKey>> = {
+    submissions:       CAPABILITIES.SUBMISSIONS_READ,
+    tasks:             CAPABILITIES.TASKS_READ,
+    task_assignments:  CAPABILITIES.TASKS_READ,
+    validation_rules:  CAPABILITIES.VALIDATION_RULES_READ,
+    validation_runs:   CAPABILITIES.VALIDATION_RULES_READ,
+    announcements:     CAPABILITIES.ANNOUNCEMENTS_READ,
+    materials:         CAPABILITIES.MATERIALS_READ,
+  }
+
+  const userAllowedTables = Object.keys(TABLE_SCHEMAS).filter(table => {
+    const cap = TABLE_CAPABILITY_MAP[table]
+    if (!cap) return true
+    return hasCapabilityFor(effectivePerms, cap)
+  })
+
+  const ALLOWED_TABLES = userAllowedTables
 
   // PostgREST does not support SQL aggregate functions in `select`. Detect
   // them so we can quietly rewrite the query instead of failing.
@@ -628,6 +648,16 @@ async function postHandler(req: Request) {
         limit: z.number().int().min(1).max(100).default(20),
       }),
       execute: async ({ table, select, filters, eq, order, limit }) => {
+        // Capability gate — must come before the schema lookup so the
+        // error message is identical to "table does not exist" and gives
+        // no information about whether the table exists at all.
+        if (!userAllowedTables.includes(table)) {
+          return {
+            error: `Table "${table}" is not queryable. Permitted: ${ALLOWED_TABLES.join(", ")}.`,
+            retryable: false,
+          }
+        }
+
         // 1) Table existence check with fuzzy suggestion.
         const schema = TABLE_SCHEMAS[table]
         if (!schema) {
@@ -1161,6 +1191,7 @@ async function postHandler(req: Request) {
   const endOfLastMonthIso = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999).toISOString()
 
   const schemaSection = Object.entries(TABLE_SCHEMAS)
+    .filter(([name]) => userAllowedTables.includes(name))
     .map(
       ([name, s]) =>
         `### ${name}\n  columns: ${s.columns.join(", ")}\n  ${s.description}`,
@@ -1176,6 +1207,21 @@ async function postHandler(req: Request) {
     `- name: ${profile.full_name ?? profile.email}`,
     `- role: ${profile.role}`,
     `- team_id: ${profile.team_id ?? "(not assigned to a team)"}`,
+    "",
+    "## ACCESS CONTROL — CRITICAL, read before every response",
+    "You may ONLY discuss and query the topics/modules listed below.",
+    "For any topic not listed here, treat it as if it does not exist.",
+    "Do NOT acknowledge, hint, explain, or confirm restricted topics — even if the user asks directly.",
+    "If asked about something outside your access list, respond naturally: \"I don't have any information on that.\"",
+    "",
+    `Accessible modules for this user: ${[
+      userAllowedTables.includes("tasks") && "tasks & task assignments",
+      userAllowedTables.includes("submissions") && "submissions",
+      userAllowedTables.includes("validation_rules") && "validation rules & validation runs",
+      userAllowedTables.includes("announcements") && "announcements",
+      userAllowedTables.includes("materials") && "materials",
+      "teams, profiles, activity log, AI credits, uploaded documents"
+    ].filter(Boolean).join(", ")}.`,
     "",
     "## CURRENT DATE (ISO 8601, UTC) — use these directly in gte/lte filters",
     `- now: ${todayIso}`,
@@ -1208,10 +1254,16 @@ async function postHandler(req: Request) {
     "   - If you query `activity_log` and find events for entities that no longer exist in their live table, do NOT mention those deleted entities unless the user specifically asked for historical/deleted data.",
     "",
     "6. Common multi-step recipes:",
-    "   - **Failure rate per rule (last 30 days)**: 1) query `validation_runs` with `created_at >= last30`, select `rule_id, pass`, limit 100. 2) query `validation_rules` for `rule_name`. 3) Group by rule_id in your head, count pass=false / total per rule.",
-    "   - **Team performance recap (this month)**: 1) query `submissions` filtered by `team_id` AND `created_at >= startOfMonth`, fetch `score, status, is_late, created_at`. 2) Optionally repeat for last month range. 3) Compute averages, pass rate, late count, and trend in your reasoning. Render as one tight paragraph.",
-    "   - **Late submissions**: filter `submissions` with `{column: 'is_late', op: 'eq', value: true}`.",
-    `   - **Active announcements**: run TWO separate queries and merge — (1) \`{column:'expires_at', op:'is', value:'null'}\` for permanent ones, (2) \`{column:'expires_at', op:'gt', value:'${todayIso}'}\` for non-expired ones. NEVER include announcements where expires_at is in the past unless the user explicitly asks for expired or historical announcements.`,
+    ...(userAllowedTables.includes("validation_rules") ? [
+      "   - **Failure rate per rule (last 30 days)**: 1) query `validation_runs` with `created_at >= last30`, select `rule_id, pass`, limit 100. 2) query `validation_rules` for `rule_name`. 3) Group by rule_id in your head, count pass=false / total per rule.",
+    ] : []),
+    ...(userAllowedTables.includes("submissions") ? [
+      "   - **Team performance recap (this month)**: 1) query `submissions` filtered by `team_id` AND `created_at >= startOfMonth`, fetch `score, status, is_late, created_at`. 2) Optionally repeat for last month range. 3) Compute averages, pass rate, late count, and trend in your reasoning. Render as one tight paragraph.",
+      "   - **Late submissions**: filter `submissions` with `{column: 'is_late', op: 'eq', value: true}`.",
+    ] : []),
+    ...(userAllowedTables.includes("announcements") ? [
+      `   - **Active announcements**: run TWO separate queries and merge — (1) \`{column:'expires_at', op:'is', value:'null'}\` for permanent ones, (2) \`{column:'expires_at', op:'gt', value:'${todayIso}'}\` for non-expired ones. NEVER include announcements where expires_at is in the past unless the user explicitly asks for expired or historical announcements.`,
+    ] : []),
     "   - **Top consumers / contributors**: fetch raw rows, group + sort + slice in reasoning.",
     "7. If a user asks about another team or user by NAME, query `teams` or `profiles` first to resolve the name → id, then use that id in subsequent filters.",
     "",
