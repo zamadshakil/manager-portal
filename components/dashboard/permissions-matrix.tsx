@@ -339,13 +339,18 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
 
   // ── Override dialog opener ──
   function openOverrideDialog(userIds: string[], capKey: string) {
-    const existing = userIds.length === 1
-      ? overrideMap.get(`${userIds[0]}::${capKey}`)?.effect ?? null
+    const existingRow = userIds.length === 1
+      ? overrideMap.get(`${userIds[0]}::${capKey}`) ?? null
       : null
-    setOverrideTarget({ userIds, capKey, currentEffect: existing })
-    setOverrideEffect(existing ?? "allow")
-    setOverrideReason("")
-    setOverrideExpiry("")
+    const existingEffect = existingRow?.effect ?? null
+    setOverrideTarget({ userIds, capKey, currentEffect: existingEffect })
+    setOverrideEffect(existingEffect ?? "allow")
+    // Prefill reason / expiry from the existing override so admins can see and
+    // edit them rather than starting from a blank form every time.
+    setOverrideReason(existingRow?.reason ?? "")
+    setOverrideExpiry(
+      existingRow?.expires_at ? existingRow.expires_at.slice(0, 10) : "",
+    )
     setOverrideError(null)
   }
 
