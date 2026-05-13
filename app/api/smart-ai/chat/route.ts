@@ -95,7 +95,7 @@ async function withRetry<T>(
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
 const OPENROUTER_BASE_URL =
   process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1"
-const SMART_AI_MODEL = process.env.SMART_AI_MODEL ?? "anthropic/claude-sonnet-4-6"
+const SMART_AI_MODEL = process.env.SMART_AI_MODEL ?? "anthropic/claude-sonnet-4.6"
 
 function resolveModel() {
   if (OPENROUTER_API_KEY) {
