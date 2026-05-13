@@ -1354,6 +1354,14 @@ async function postHandler(req: Request) {
       system: systemPrompt,
       messages: await convertToModelMessages(trimmedUIMessages as any),
       tools,
+      // Cap output tokens so we never request the model's full 64k/128k
+      // ceiling. Without this, the AI SDK forwards `max_tokens` equal to
+      // the model's maximum, which OpenRouter rejects with HTTP 402
+      // ("requires more credits, or fewer max_tokens") whenever the
+      // account balance can't pre-authorize the full ceiling. 8k is
+      // ample for chat answers (≈6k words) and keeps per-call cost
+      // predictable. Override via SMART_AI_MAX_OUTPUT_TOKENS if needed.
+      maxOutputTokens: Number(process.env.SMART_AI_MAX_OUTPUT_TOKENS ?? 8000),
       // Bumped from 5 → 10. Complex multi-table queries (e.g. "compare
       // pass rates across teams + show top failing rules") plan 6–8 tool
       // calls before synthesizing the answer; the previous cap silently
@@ -1486,6 +1494,24 @@ async function postHandler(req: Request) {
               ? error
               : ""
         console.error("[smart-ai] stream emit error:", rawMsg || error)
+
+        // Surface a few well-known, non-sensitive failure modes with a
+        // more actionable message so admins don't have to dig through
+        // server logs every time. Anything else falls through to the
+        // generic message.
+        const statusCode = (error as any)?.statusCode
+        const lower = rawMsg.toLowerCase()
+        if (
+          statusCode === 402 ||
+          lower.includes("requires more credits") ||
+          lower.includes("insufficient_quota") ||
+          lower.includes("insufficient credit")
+        ) {
+          return "Smart AI is temporarily unavailable: the AI provider account is out of credits. Please contact your administrator to top up the OpenRouter balance."
+        }
+        if (statusCode === 429 || lower.includes("rate limit")) {
+          return "The AI provider is rate-limiting requests right now. Please wait a moment and try again."
+        }
         return "An unexpected error occurred while generating a response. Please try again."
       },
     })
