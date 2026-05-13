@@ -86,9 +86,16 @@ export async function updateSession(request: NextRequest) {
     },
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] = null
+  try {
+    const { data } = await supabase.auth.getUser()
+    user = data.user
+  } catch (err) {
+    console.error(
+      `[proxy] getUser() threw — treating as unauthenticated trace=${traceId} path=${request.nextUrl.pathname}`,
+      err,
+    )
+  }
 
   const { pathname } = request.nextUrl
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p))
@@ -100,6 +107,18 @@ export async function updateSession(request: NextRequest) {
       )
     }
     const url = request.nextUrl.clone()
+    // In Railway/Docker the internal bind address (0.0.0.0) can leak into
+    // request.nextUrl. Prefer the x-forwarded-host header when available so
+    // the redirect always targets the correct public hostname.
+    const forwardedHost = request.headers.get("x-forwarded-host")
+    const forwardedProto = request.headers.get("x-forwarded-proto")
+    if (forwardedHost) {
+      url.hostname = forwardedHost.split(",")[0].trim()
+      url.port = ""
+      if (forwardedProto) {
+        url.protocol = forwardedProto.split(",")[0].trim() + ":"
+      }
+    }
     url.pathname = hadAuthCookie ? "/auth/session-recovery" : "/auth/login"
     url.searchParams.set("next", pathname)
     const redirectResponse = NextResponse.redirect(url)
