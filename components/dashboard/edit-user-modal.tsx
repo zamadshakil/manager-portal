@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation"
 import { Pencil, Loader2, XCircle, MailCheck, MailWarning, Send, Ban, KeyRound, Copy, Check, RefreshCw } from "lucide-react"
 import {
   updateUserProfile,
-  updateUserTeam,
   resetUserPassword,
   cancelPendingEmailChange,
   resendEmailChangeVerification,
@@ -19,11 +18,14 @@ interface Props {
   onClose: () => void
 }
 
-export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
+export function EditUserModal({ user, isOpen, onClose }: Props) {
+  // `teams` is no longer used — team assignment is managed exclusively from
+  // the Departments screen. The prop is intentionally dropped from the
+  // destructure so we don't render a stale select that would silently
+  // accept changes.
   const router = useRouter()
   const [fullName, setFullName] = useState(user.full_name ?? "")
   const [email, setEmail] = useState(user.email ?? "")
-  const [teamId, setTeamId] = useState<string | null>(user.team_id ?? null)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -36,19 +38,10 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
   const pendingEmail = user.pending_email ?? null
   const expiresAt = user.email_change_token_expires_at ?? null
 
-  // Team picker options: teams that are unowned, or owned by this user.
-  // For non-managers we show every team (plus "unassigned") since the
-  // uniqueness rule only applies to managers.
-  const selectableTeams =
-    user.role === "manager"
-      ? teams.filter((t) => !t.manager_id || t.manager_id === user.id)
-      : teams
-
   const nameChanged = fullName.trim() !== (user.full_name ?? "").trim()
   const emailChanged =
     email.trim().toLowerCase() !== (user.email ?? "").trim().toLowerCase()
-  const teamChanged = (teamId ?? null) !== (user.team_id ?? null)
-  const isDirty = nameChanged || emailChanged || teamChanged
+  const isDirty = nameChanged || emailChanged
 
   const isEmailChange = emailChanged && email.trim().length > 0
 
@@ -58,7 +51,8 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
     setError(null)
     setSuccess(null)
     startTransition(async () => {
-      // 1. Apply name/email change first (this is the riskier flow).
+      // Apply name/email change. Team assignment is no longer editable
+      // from this modal — it's managed exclusively on the Departments screen.
       let pendingEmailSent: string | undefined
       if (nameChanged || emailChanged) {
         const result = await updateUserProfile(user.id, fullName.trim(), email.trim().toLowerCase())
@@ -67,17 +61,6 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
           return
         }
         pendingEmailSent = result.pendingEmail
-      }
-
-      // 2. Apply team change independently so a failure here surfaces its own
-      //    error without rolling back the name/email update.
-      if (teamChanged) {
-        const teamResult = await updateUserTeam(user.id, teamId)
-        if (!teamResult.ok) {
-          setError(teamResult.error ?? "Could not update team assignment.")
-          router.refresh()
-          return
-        }
       }
 
       router.refresh()
@@ -244,35 +227,6 @@ export function EditUserModal({ user, teams, isOpen, onClose }: Props) {
                     The change only takes effect after the user confirms it — until then,
                     they keep signing in with the current email.
                   </span>
-                </p>
-              )}
-            </div>
-
-            {/* Team field */}
-            <div className="space-y-1.5">
-              <label htmlFor="edit-team" className="text-[12px] font-semibold text-muted-foreground">
-                Team
-              </label>
-              <select
-                id="edit-team"
-                value={teamId ?? ""}
-                onChange={(e) => setTeamId(e.target.value || null)}
-                disabled={isPending}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-              >
-                <option value="">
-                  {user.role === "manager" ? "— Select a team —" : "— Unassigned —"}
-                </option>
-                {selectableTeams.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-              {user.role === "manager" && (
-                <p className="text-[11px] text-muted-foreground">
-                  Managers must own exactly one team. Only teams without another
-                  manager are listed.
                 </p>
               )}
             </div>
