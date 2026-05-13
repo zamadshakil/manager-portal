@@ -1,5 +1,5 @@
-import { requireProfile } from "@/lib/auth"
 import { listSubmissions } from "@/lib/data"
+import { CAPABILITIES, requireCapability } from "@/lib/permissions"
 import { SmartAiShell } from "@/components/dashboard/smart-ai/smart-ai-shell"
 
 export const metadata = {
@@ -23,7 +23,7 @@ export default async function SmartAiPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
-  const profile = await requireProfile()
+  const { profile } = await requireCapability(CAPABILITIES.SMART_AI_CHAT)
   const resolvedParams = await searchParams
 
   // Extract thread ID from URL — supports ?thread=<uuid>

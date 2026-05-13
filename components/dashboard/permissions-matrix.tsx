@@ -59,6 +59,43 @@ interface Props {
 type Effect = "allow" | "deny"
 type CellState = "inherited_allow" | "inherited_deny" | "override_allow" | "override_deny"
 
+// ─── UI-only capability display tweaks ────────────────────────────────────────
+//
+// Some capabilities are kept in the DB / RLS layer but should not be exposed in
+// the admin matrix because either (a) the feature is not wired through the app
+// today, or (b) the display label doesn't match the runtime effect. These maps
+// keep the cosmetic adjustments next to the component instead of forcing a DB
+// migration just for relabelling.
+
+const HIDDEN_CAPABILITY_KEYS = new Set<string>([
+  // create / delete on submissions are not surfaced anywhere in the product UI
+  // yet (no "delete submission" button, submissions are created via the task
+  // upload flow which is gated separately). Hide them to avoid confusing admins.
+  "submissions.create",
+  "submissions.delete",
+])
+
+const CAPABILITY_DISPLAY_OVERRIDES: Record<string, { action?: string; description?: string }> = {
+  // `submissions.update` actually controls whether a user can see the full
+  // team's submissions (vs. only their own). The legacy "Update submission
+  // status / metadata" label is misleading — rename to match real behaviour.
+  "submissions.update": {
+    action: "Show all submissions",
+    description:
+      "View every submission from the user's team. When denied/inherited deny, the user only sees their own submissions.",
+  },
+}
+
+function displayCap(cap: PermissionDefinitionRow): PermissionDefinitionRow {
+  const o = CAPABILITY_DISPLAY_OVERRIDES[cap.key]
+  if (!o) return cap
+  return {
+    ...cap,
+    action: o.action ?? cap.action,
+    description: o.description ?? cap.description,
+  }
+}
+
 interface OverrideDialogTarget {
   userIds: string[]
   capKey: string
@@ -204,9 +241,16 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
   const [pending, start] = useTransition()
 
   // ── Derived data ──
+  // Hide capabilities that aren't surfaced in the product UI yet, and rewrite
+  // the display label/description for capabilities whose legacy name doesn't
+  // match what they actually control at runtime.
+  const visibleDefinitions = useMemo(
+    () => definitions.filter((d) => !HIDDEN_CAPABILITY_KEYS.has(d.key)).map(displayCap),
+    [definitions],
+  )
   const defaultsByRole = useMemo(() => buildDefaultsByRole(roleDefaults), [roleDefaults])
   const overrideMap = useMemo(() => buildOverrideMap(overrides), [overrides])
-  const grouped = useMemo(() => groupByModule(definitions), [definitions])
+  const grouped = useMemo(() => groupByModule(visibleDefinitions), [visibleDefinitions])
   const modules = useMemo(() => grouped.map(([m]) => m), [grouped])
 
   // ── Filter state ──
@@ -353,7 +397,7 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
 
   // ── CSV export ──
   function handleExport() {
-    exportCSV(users, definitions, defaultsByRole, overrideMap)
+    exportCSV(users, visibleDefinitions, defaultsByRole, overrideMap)
   }
 
   if (users.length === 0) {

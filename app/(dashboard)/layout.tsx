@@ -31,7 +31,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     "/dashboard",
     "/dashboard/submissions",
     "/dashboard/messages",
-    "/dashboard/smart-ai",
+    ...(ctx.has(CAPABILITIES.SMART_AI_CHAT) ? ["/dashboard/smart-ai"] : []),
     "/dashboard/settings",
     ...(ctx.has(CAPABILITIES.TASKS_READ) || ctx.has(CAPABILITIES.TASKS_CREATE) || ctx.has(CAPABILITIES.TASKS_ASSIGN) || ctx.has(CAPABILITIES.TASKS_DELETE)
       ? ["/dashboard/tasks"]

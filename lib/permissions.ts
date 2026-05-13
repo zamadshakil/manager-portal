@@ -73,7 +73,6 @@ export const CAPABILITIES = {
 
   // smart ai
   SMART_AI_CHAT: "smart_ai.chat",
-  SMART_AI_ANALYTICS_SELF: "smart_ai.analytics_self",
   SMART_AI_ANALYTICS_ALL: "smart_ai.analytics_all",
 
   // team / user management
