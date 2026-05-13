@@ -127,6 +127,16 @@ export async function updateSession(request: NextRequest) {
     for (const cookie of supabaseResponse.cookies.getAll()) {
       redirectResponse.cookies.set(cookie)
     }
+    // If the session was broken (auth cookie present but getUser() failed),
+    // delete the stale sb-*-auth-token cookies so the browser doesn't keep
+    // them and re-trigger the same failure on the very next request.
+    if (hadAuthCookie) {
+      for (const c of request.cookies.getAll()) {
+        if (/^sb-.*-auth-token(\.|$)/.test(c.name)) {
+          redirectResponse.cookies.delete(c.name)
+        }
+      }
+    }
     return redirectResponse
   }
 

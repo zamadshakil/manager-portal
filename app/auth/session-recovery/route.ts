@@ -10,9 +10,13 @@ function sanitizeNext(raw: string | null): string {
 export async function GET(request: Request) {
   const next = sanitizeNext(new URL(request.url).searchParams.get("next"))
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  let user = null
+  try {
+    const { data } = await supabase.auth.getUser()
+    user = data.user
+  } catch (err) {
+    console.error("[session-recovery] getUser() threw — redirecting to login", err)
+  }
 
   return NextResponse.redirect(new URL(user ? next : `/auth/login?next=${encodeURIComponent(next)}`, request.url))
 }

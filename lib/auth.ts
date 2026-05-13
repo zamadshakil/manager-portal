@@ -22,9 +22,13 @@ const getCurrentUserAndProfile = cache(async (): Promise<{
   profile: Profile | null
 }> => {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] = null
+  try {
+    const { data } = await supabase.auth.getUser()
+    user = data.user
+  } catch (err) {
+    console.error("[auth] getUser() threw — treating as unauthenticated", err)
+  }
   if (!user) return { user: null, profile: null }
 
   const { data } = await supabase
