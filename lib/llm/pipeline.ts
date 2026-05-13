@@ -333,7 +333,12 @@ async function runPipeline(submissionId: string) {
         // If vision fails, we mark needs_review instead of guessing.
         console.log("[pipeline] image detected — using vision model")
         try {
-          const vision = await describeImage(buf, submission.mime_type, { abortSignal })
+          // Do NOT pass the pipeline abortSignal here. describeImage has its
+          // own per-call timeout (LLM_CALL_TIMEOUT_MS + 10s). Including the
+          // pipeline deadline in anySignal() means a cold-start that spent
+          // >75s on preflight will abort the vision call before it even
+          // makes a network request, producing "This operation was aborted".
+          const vision = await describeImage(buf, submission.mime_type)
           text = vision.text || ""
           truncated = false
           console.log("[pipeline] vision extraction completed, length:", text.length)

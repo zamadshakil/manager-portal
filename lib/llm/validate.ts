@@ -264,6 +264,8 @@ async function callRuleModel(
         model: provider.chat(modelId),
         temperature: 0,
         topP: 0.01,
+        // @ts-ignore maxTokens is a valid call setting at runtime (type lags @ai-sdk/openai@3.x)
+        maxTokens: 1024,
         schema: RuleResultSchema,
         system: isBinary ? binarySystemPrompt() : scoredSystemPrompt(rule.threshold),
         prompt,
@@ -363,6 +365,8 @@ export async function summarize(
           model: provider.chat(SUMMARY_MODEL),
           temperature: 0,
           topP: 0.01,
+          // @ts-ignore maxTokens is a valid call setting at runtime (type lags @ai-sdk/openai@3.x)
+          maxTokens: 512,
           schema: SummarySchema,
           system: [
             "You generate concise, professional executive summaries of documents.",
@@ -403,6 +407,8 @@ export async function describeImage(
           model: provider.chat(VISION_MODEL),
           temperature: 0,
           topP: 0.01,
+          // @ts-ignore maxTokens is a valid call setting at runtime (type lags @ai-sdk/openai@3.x)
+          maxTokens: 2048,
           system:
             "You are a vision OCR assistant. Transcribe ALL readable text from the image exactly as it appears. Preserve line breaks and formatting. If there are diagrams, tables, or signatures, describe them briefly after the transcribed text. Output plain text only, no JSON wrapping.",
           messages: [
