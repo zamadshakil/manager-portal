@@ -3,22 +3,18 @@
 import { useState, useEffect } from "react"
 import { createPortal } from "react-dom"
 import {
-  Sparkles,
   MessageSquare,
   FileText,
-  BarChart3,
   CheckCircle2,
   AlertCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { roleLabel } from "@/lib/auth-shared"
 import { ChatPanel } from "@/components/dashboard/smart-ai/chat-panel"
 import { SubmissionsReviewPanel } from "@/components/dashboard/smart-ai/submissions-review-panel"
-import { AnalyticsPanel } from "@/components/dashboard/smart-ai/analytics-panel"
 import { CreditsBadge } from "@/components/dashboard/ai-usage/credits-badge"
 import type { Profile, Submission } from "@/lib/types"
 
-type TabId = "chat" | "submissions" | "analytics"
+type TabId = "chat" | "submissions"
 
 type ProfileLite = Pick<Profile, "id" | "email" | "full_name" | "role" | "team_id">
 
@@ -46,12 +42,6 @@ const TABS: {
     label: "Submissions Review",
     icon: FileText,
     description: "Browse PDFs and images with one-click AI summaries grounded in retrieved context.",
-  },
-  {
-    id: "analytics",
-    label: "Insights & Logs",
-    icon: BarChart3,
-    description: "Retrieval analytics, query volume, latency, and an audit trail of recent questions.",
   },
 ]
 
@@ -150,11 +140,6 @@ export function SmartAiShell({ profile, submissions, services, initialThreadId }
                 )
               }
             />
-          </div>
-        ) : null}
-        {active === "analytics" ? (
-          <div className="flex-1 min-h-0 overflow-auto px-4 lg:px-8 py-4 lg:py-6">
-            <AnalyticsPanel />
           </div>
         ) : null}
       </div>
