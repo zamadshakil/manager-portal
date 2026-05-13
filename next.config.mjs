@@ -1,17 +1,40 @@
 /** @type {import('next').NextConfig} */
+//
+// Build the list of origins that may invoke Server Actions on this deployment.
+// Next.js compares the request's `Origin` to its `Host` and rejects mismatches
+// with 403 ("Invalid Server Actions request") as a CSRF guard. Behind the
+// Railway reverse proxy the Node process sees an internal hostname in `Host`
+// while the browser sends `Origin: https://<public-domain>`, so the guard
+// fires on every Server Action POST (notably file uploads) unless we
+// explicitly allow the public origin here.
+//
+// We seed the list from NEXT_PUBLIC_SITE_URL (the canonical public domain)
+// and also allow `*.railway.app` so Railway preview deployments work without
+// per-environment config.
+const allowedServerActionOrigins = (() => {
+  const origins = new Set(["*.railway.app"])
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
+  if (siteUrl) {
+    try {
+      origins.add(new URL(siteUrl).host)
+    } catch {
+      // Ignore malformed env values — production startup will catch this.
+    }
+  }
+  return [...origins]
+})()
+
 const nextConfig = {
   output: "standalone",
-  // Trust X-Forwarded-Host / X-Forwarded-Proto headers from Railway's reverse
-  // proxy. Without this, Next.js uses the internal bind address (0.0.0.0:PORT)
-  // when constructing URLs in middleware, causing auth redirects to point at
-  // https://0.0.0.0:8080/auth/login instead of the real public domain.
-  trustHost: true,
   // Server Actions in Next.js cap request bodies at 1 MB by default. Our UI
   // advertises 25 MB document uploads, so we raise the limit. Long-term we
   // intend to move to a client-token flow that streams browser→
   // Blob without traversing the server, but until then this prevents 413s.
   experimental: {
-    serverActions: { bodySizeLimit: "110mb" },
+    serverActions: {
+      bodySizeLimit: "110mb",
+      allowedOrigins: allowedServerActionOrigins,
+    },
     // ------------------------------------------------------------------
     // Client-side Router Cache TTLs.
     //
