@@ -784,7 +784,7 @@ export type Database = {
           id: string
           user_id: string
           capability_key: string
-          effect: "allow" | "deny"
+          effect: "allow"
           granted_by: string | null
           reason: string | null
           created_at: string
@@ -794,14 +794,14 @@ export type Database = {
           id?: string
           user_id: string
           capability_key: string
-          effect: "allow" | "deny"
+          effect: "allow"
           granted_by?: string | null
           reason?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
-          effect?: "allow" | "deny"
+          effect?: "allow"
           granted_by?: string | null
           reason?: string | null
           updated_at?: string

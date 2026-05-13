@@ -16,10 +16,9 @@ import type { Profile, UserRole } from "@/lib/types"
 //
 // Decision rule:
 //   1. main_admin → always allow.
-//   2. user_permission_overrides 'deny' → false.
-//   3. user_permission_overrides 'allow' → true.
-//   4. role_permission_defaults match → true.
-//   5. otherwise → false.
+//   2. user_permission_overrides 'allow' → true.
+//   3. role_permission_defaults match → true.
+//   4. otherwise → false.
 //
 // Resource scope (team / owner / global) is layered on top via
 // `hasScopedCapability` and mirrors `public.has_scoped_capability`.
@@ -105,7 +104,7 @@ export interface RoleDefaultRow {
 export interface UserOverrideRow {
   user_id: string
   capability_key: string
-  effect: "allow" | "deny"
+  effect: "allow"
   granted_by: string | null
   granted_by_name: string | null
   reason: string | null
@@ -148,8 +147,6 @@ interface ResolvedPermissions {
   role: UserRole
   /** Set of capability keys effectively granted to this user. */
   capabilities: Set<string>
-  /** Capabilities explicitly denied via override. Useful for diagnostics. */
-  denies: Set<string>
 }
 
 /**
@@ -162,12 +159,11 @@ const loadPermissions = cache(async (
   role: UserRole,
 ): Promise<ResolvedPermissions> => {
   // Fast path: main admin gets everything. We never even read the override
-  // table for them so an accidental deny override cannot lock them out.
+  // table for them so a stray override cannot affect them.
   if (role === "main_admin") {
     return {
       role,
       capabilities: new Set<string>(),  // empty set → has() short-circuits to true
-      denies: new Set<string>(),
     }
   }
 
@@ -195,22 +191,16 @@ const loadPermissions = cache(async (
     console.error("[permissions] failed to load user overrides:", overridesRes.error.message)
   }
 
-  const denies = new Set<string>()
-  const allows = new Set<string>()
-  for (const row of overridesRes.data ?? []) {
-    if (row.effect === "deny") denies.add(row.capability_key)
-    else if (row.effect === "allow") allows.add(row.capability_key)
-  }
-
+  // Overrides can only grant additional capabilities now; deny was removed.
   const capabilities = new Set<string>()
   for (const row of defaultsRes.data ?? []) {
-    if (!denies.has(row.capability_key)) capabilities.add(row.capability_key)
+    capabilities.add(row.capability_key)
   }
-  for (const cap of allows) {
-    if (!denies.has(cap)) capabilities.add(cap)
+  for (const row of overridesRes.data ?? []) {
+    if (row.effect === "allow") capabilities.add(row.capability_key)
   }
 
-  return { role, capabilities, denies }
+  return { role, capabilities }
 })
 
 // -----------------------------------------------------------------------------
@@ -231,7 +221,6 @@ export function hasCapabilityFor(
   capability: CapabilityKey,
 ): boolean {
   if (perms.role === "main_admin") return true
-  if (perms.denies.has(capability)) return false
   return perms.capabilities.has(capability)
 }
 

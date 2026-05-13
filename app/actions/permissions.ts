@@ -27,7 +27,7 @@ import { logActivity } from "@/lib/activity"
 const SetOverrideSchema = z.object({
   user_id: z.string().uuid(),
   capability_key: z.string().min(1),
-  effect: z.enum(["allow", "deny", "clear"]),
+  effect: z.enum(["allow", "clear"]),
   reason: z.string().max(500).optional().or(z.literal("")),
   expires_at: z.string().datetime().optional().nullable(),
 })
@@ -124,10 +124,11 @@ export async function setUserPermissionOverride(input: z.infer<typeof SetOverrid
       },
     })
   } else {
+    // effect === 'allow' — the only non-clear case after deny was removed.
     const upsertPayload: Record<string, unknown> = {
       user_id: parsed.data.user_id,
       capability_key: parsed.data.capability_key,
-      effect: parsed.data.effect,
+      effect: "allow",
       granted_by: profile.id,
       reason: parsed.data.reason || null,
       expires_at: parsed.data.expires_at ?? null,
@@ -142,8 +143,8 @@ export async function setUserPermissionOverride(input: z.infer<typeof SetOverrid
       .insert({
         user_id: parsed.data.user_id,
         capability: parsed.data.capability_key,
-        action: parsed.data.effect === "allow" ? "set_allow" : "set_deny",
-        allow: parsed.data.effect === "allow",
+        action: "set_allow",
+        allow: true,
         expires_at: parsed.data.expires_at ?? null,
         granted_by: profile.id,
       })
@@ -151,9 +152,7 @@ export async function setUserPermissionOverride(input: z.infer<typeof SetOverrid
     await logActivity({
       actorId: profile.id,
       teamId: null,
-      action: parsed.data.effect === "allow"
-        ? "permission.override.granted"
-        : "permission.override.denied",
+      action: "permission.override.granted",
       entityType: "user_permission_override",
       entityId: parsed.data.user_id,
       metadata: {
@@ -315,7 +314,7 @@ export async function loadPermissionHistory(userId: string): Promise<{
 const BulkOverrideSchema = z.object({
   user_ids: z.array(z.string().uuid()).min(1).max(200),
   capability_keys: z.array(z.string().min(1)).min(1).max(50),
-  effect: z.enum(["allow", "deny", "clear"]),
+  effect: z.enum(["allow", "clear"]),
   reason: z.string().max(500).optional().or(z.literal("")),
   expires_at: z.string().datetime().optional().nullable(),
 })
@@ -393,11 +392,12 @@ export async function bulkSetUserPermissionOverrides(
       }
     }
   } else {
+    // effect === 'allow' — the only non-clear case after deny was removed.
     const rows = parsed.data.user_ids.flatMap((uid) =>
       parsed.data.capability_keys.map((cap) => ({
         user_id: uid,
         capability_key: cap,
-        effect: parsed.data.effect,
+        effect: "allow",
         granted_by: profile.id,
         reason: parsed.data.reason || null,
         expires_at: parsed.data.expires_at ?? null,
@@ -412,8 +412,8 @@ export async function bulkSetUserPermissionOverrides(
       parsed.data.capability_keys.map((cap) => ({
         user_id: uid,
         capability: cap,
-        action: parsed.data.effect === "allow" ? "set_allow" : "set_deny",
-        allow: parsed.data.effect === "allow",
+        action: "set_allow",
+        allow: true,
         expires_at: parsed.data.expires_at ?? null,
         granted_by: profile.id,
       })),

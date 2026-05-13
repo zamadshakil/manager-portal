@@ -56,8 +56,8 @@ interface Props {
   overrides: UserOverrideRow[]
 }
 
-type Effect = "allow" | "deny"
-type CellState = "inherited_allow" | "inherited_deny" | "override_allow" | "override_deny"
+type Effect = "allow"
+type CellState = "inherited_allow" | "inherited_deny" | "override_allow"
 
 // ─── UI-only capability display tweaks ────────────────────────────────────────
 //
@@ -125,7 +125,6 @@ function computeCellState(
   override: Effect | undefined,
 ): CellState {
   if (override === "allow") return "override_allow"
-  if (override === "deny") return "override_deny"
   return (defaultsByRole.get(role) ?? new Set()).has(capabilityKey)
     ? "inherited_allow"
     : "inherited_deny"
@@ -167,7 +166,7 @@ function exportCSV(
   const rows = users.map((u) => {
     const cells = definitions.map((d) => {
       const ov = overrideMap.get(`${u.id}::${d.key}`)
-      if (ov) return ov.effect === "allow" ? "override_allow" : "override_deny"
+      if (ov) return "override_allow"
       return (defaultsByRole.get(u.role) ?? new Set()).has(d.key) ? "inherited_allow" : "inherited_deny"
     })
     return [u.full_name ?? "", u.email, u.role, ...cells]
@@ -188,8 +187,6 @@ function StateBadge({ state }: { state: CellState }) {
   switch (state) {
     case "override_allow":
       return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300">Override allow</Badge>
-    case "override_deny":
-      return <Badge className="bg-red-100 text-red-800 hover:bg-red-100 dark:bg-red-900/40 dark:text-red-300">Override deny</Badge>
     case "inherited_allow":
       return <Badge variant="outline" className="border-emerald-300 text-emerald-700 dark:text-emerald-400">Inherited allow</Badge>
     case "inherited_deny":
@@ -206,9 +203,6 @@ function ExplainPopover({
 }) {
   const steps: { label: string; active: boolean }[] = [
     { label: "main_admin always allowed (not applicable)", active: false },
-    override?.effect === "deny"
-      ? { label: `Explicit deny override by ${override.granted_by_name ?? "admin"}`, active: true }
-      : { label: "No deny override", active: false },
     override?.effect === "allow"
       ? { label: `Explicit allow override by ${override.granted_by_name ?? "admin"}`, active: true }
       : { label: "No allow override", active: false },
@@ -567,7 +561,7 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
               </h2>
               {selectedUser && !(someSelected && selectedUserIds.size > 1) && (
                 <p className="text-[12px] text-muted-foreground">
-                  Role: <strong>{roleLabel(selectedUser.role)}</strong> · deny &gt; allow &gt; role default
+                  Role: <strong>{roleLabel(selectedUser.role)}</strong> · override allow &gt; role default
                 </p>
               )}
               {someSelected && selectedUserIds.size > 1 && (
@@ -619,6 +613,7 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
                             ? "inherited_deny"
                             : computeCellState(selectedUser!.role, cap.key, defaultsByRole, override?.effect)
 
+                          const isInheritedAllow = !isBulk && state === "inherited_allow"
                           return (
                             <tr key={cap.key} className="border-t border-border first:border-t-0">
                               <td className="px-3 py-2.5">
@@ -661,18 +656,22 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
                                     type="button"
                                     size="sm"
                                     variant={!isBulk && state === "override_allow" ? "default" : "outline"}
-                                    disabled={pending || cap.is_admin_only}
+                                    disabled={pending || cap.is_admin_only || isInheritedAllow}
                                     onClick={() => isBulk
                                       ? openBulkDialog(cap.key)
                                       : openOverrideDialog([selectedUser!.id], cap.key)
                                     }
                                     className="h-7 px-2 text-[12px]"
-                                    title="Set override"
+                                    title={
+                                      isInheritedAllow
+                                        ? "Already granted via role default"
+                                        : "Set override"
+                                    }
                                   >
                                     <Shield className="h-3 w-3" />
                                     {isBulk ? "Override" : "Edit"}
                                   </Button>
-                                  {!isBulk && (state === "override_allow" || state === "override_deny") && (
+                                  {!isBulk && state === "override_allow" && (
                                     <Button
                                       type="button"
                                       size="sm"
@@ -732,7 +731,7 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
             <div className="space-y-1.5">
               <Label className="text-[13px]">Effect</Label>
               <div className="flex gap-2">
-                {(["allow", "deny", "clear"] as const).map((e) => (
+                {(["allow", "clear"] as const).map((e) => (
                   <button
                     key={e}
                     type="button"
@@ -740,8 +739,8 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
                     className={cn(
                       "flex-1 rounded-md border px-3 py-1.5 text-[13px] font-medium capitalize transition-colors",
                       overrideEffect === e
-                        ? e === "allow" ? "border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300"
-                          : e === "deny" ? "border-red-500 bg-red-50 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+                        ? e === "allow"
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300"
                           : "border-primary bg-primary/10 text-primary"
                         : "border-border text-muted-foreground hover:border-foreground/30",
                     )}
@@ -810,7 +809,6 @@ export function PermissionsMatrix({ users, definitions, roleDefaults, overrides 
               type="button"
               onClick={handleSaveOverride}
               disabled={overrideSaving}
-              variant={overrideEffect === "deny" ? "destructive" : "default"}
             >
               {overrideSaving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
               Save

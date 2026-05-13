@@ -125,7 +125,7 @@ Applies the same override effect to up to **200 users × 50 capabilities** in a 
 
 - Guards: no `main_admin` targets; no `is_admin_only` capabilities when granting.
 - On `clear`: deletes existing rows one user at a time (required for `.in()` scoping).
-- On `allow`/`deny`: single batch upsert + single batch history insert.
+- On `allow`: single batch upsert + single batch history insert. (Deny was removed in `20260524_remove_override_deny.sql`; overrides can no longer subtract capabilities.)
 - Activity log records aggregate counts (`user_count`, `capability_count`).
 - Returns `{ ok: true, failed?: string[] }` for partial-failure reporting.
 
@@ -150,23 +150,24 @@ Applies the same override effect to up to **200 users × 50 capabilities** in a 
 When two or more users are checked, the matrix header switches to **bulk edit mode**. Every "Override" button in the matrix opens the override dialog targeting all selected users, calling `bulkSetUserPermissionOverrides` on save.
 
 ### 5d. Override Dialog
-Replaces the old single-click allow/deny/clear buttons with a modal that provides full control:
+Replaces the old single-click buttons with a modal that provides full control:
 
 | Field | Details |
 |---|---|
-| **Effect** | Three-button toggle: Allow / Deny / Clear (use default) |
+| **Effect** | Two-button toggle: Allow / Clear (use default). Deny was removed; overrides can only grant capabilities. |
 | **Reason** | Optional free-text textarea (max 500 chars) |
 | **Expires on** | Optional date picker; shows amber preview when set |
+
+The **Edit** button on capability rows is disabled when the state is `inherited_allow` (already granted via role default), since there is no useful action left to take.
 
 The dialog title adapts for bulk mode ("Bulk override — N users").
 
 ### 5e. Explain Popover (ⓘ)
-Every capability row now has an info button that opens a popover showing the **4-step decision chain**:
+Every capability row now has an info button that opens a popover showing the **3-step decision chain**:
 
 1. `main_admin` always allowed (not applicable)
-2. Explicit deny override — highlights the granting admin if present
-3. Explicit allow override — highlights the granting admin if present
-4. Role default — shows whether the user's role grants or denies
+2. Explicit allow override — highlights the granting admin if present
+3. Role default — shows whether the user's role grants or denies
 
 The active step is bolded; the final result is shown with colour coding (green = allow, red = deny). If the active override has an expiry date it is shown inline.
 
@@ -178,7 +179,7 @@ The **Export CSV** button downloads a `permissions-export-YYYY-MM-DD.csv` file c
 
 - Columns: `User`, `Email`, `Role`, then one column per capability key.
 - Rows: one per non-admin user.
-- Cell values: `override_allow`, `override_deny`, `inherited_allow`, or `inherited_deny`.
+- Cell values: `override_allow`, `inherited_allow`, or `inherited_deny`.
 
 The export reflects the current in-memory data (no extra server round-trip).
 
@@ -196,11 +197,12 @@ Clicking the history icon on any user row, or the **History** button in the matr
 
 ```
 1. main_admin          → always allow (cannot be overridden)
-2. deny override       → false  (explicit block)
-3. allow override      → true   (explicit grant)
-4. role_default match  → true   (inherited)
-5. no match            → false
+2. allow override      → true   (explicit grant)
+3. role_default match  → true   (inherited)
+4. no match            → false
 ```
+
+> **Deny override was removed in `20260524_remove_override_deny.sql`.** Overrides can only grant additional capabilities; role defaults are now the single source of denial. The `permission_override_history.action` enum still accepts `set_deny` so legacy audit rows remain readable.
 
 Expired overrides are skipped at both the Postgres (`has_capability`) and application (`loadPermissions`) layers, so precedence is always evaluated against live, non-expired data.
 
