@@ -38,6 +38,14 @@ export default async function TaskDetailPage({
   const task = await getTaskById(profile, id)
   if (!task) notFound()
 
+  // Single server-side timestamp threaded into every Client Component on
+  // this page that computes deadline state. Using one value here and reusing
+  // it as each hook's `initialNow` keeps the first client render byte-
+  // identical to the SSR pass and avoids React hydration error #418 when
+  // `router.refresh()` re-reconciles the tree (e.g. after the submission
+  // pipeline reaches a terminal status).
+  const initialNow = Date.now()
+
   const myAssignment = await getMyAssignmentForTask(profile, id)
   const scope = { team_id: task.team_id, is_global: false }
   const canReadTask = ctx.hasScoped(CAPABILITIES.TASKS_READ, scope)
@@ -85,7 +93,7 @@ export default async function TaskDetailPage({
 
       {canUpdateTask ? <TaskEditor task={task} rules={rules} /> : null}
 
-      <TaskMetaStrip task={task} />
+      <TaskMetaStrip task={task} initialNow={initialNow} />
 
       {/* Instructions */}
       {canManageTask && task.instructions ? (
@@ -138,6 +146,7 @@ export default async function TaskDetailPage({
                 allowLate={task.allow_late}
                 lateSubmissionDeadline={task.late_submission_deadline}
                 requireLateReason={task.require_late_reason}
+                initialNow={initialNow}
               />
             ) : (
               <div className="space-y-2">

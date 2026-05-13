@@ -8,9 +8,28 @@ interface TaskDeadlineWatchItem extends TaskDeadlineInput {
   id: string
 }
 
-export function useTaskDeadlineNow(items: TaskDeadlineWatchItem[]): number {
+/**
+ * Returns the current millisecond timestamp, updating every second so
+ * deadline-phase UI stays live. Also triggers `router.refresh()` the first
+ * time a task crosses a deadline boundary so the server-rendered state
+ * catches up.
+ *
+ * IMPORTANT: `initialNow` must be provided by Server Components that host
+ * this hook inside an SSR'd Client Component. If the hook is allowed to
+ * default to its own `Date.now()` on both passes, the server and client
+ * will see different values → `getTaskDeadlineWindow(...)` can return
+ * different phases → conditional subtrees mismatch → React throws
+ * hydration error #418. Passing a single `Date.now()` computed in the
+ * server render and serialized through the RSC payload makes the first
+ * render deterministic; the `setInterval` below then ticks the real time
+ * forward after mount.
+ */
+export function useTaskDeadlineNow(
+  items: TaskDeadlineWatchItem[],
+  initialNow?: number,
+): number {
   const router = useRouter()
-  const [now, setNow] = useState(() => Date.now())
+  const [now, setNow] = useState(() => initialNow ?? Date.now())
   const handledTransitionKeysRef = useRef<Set<string> | null>(null)
 
   const transitionKeys = useMemo(() => {

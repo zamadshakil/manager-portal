@@ -44,20 +44,33 @@ export function formatRelativeDeadline(iso: string | Date | null | undefined): s
  * Format a deadline timestamp as "May 15, 2026 · 5:00 PM (in 2 days)" or
  * "May 10, 2026 · 5:00 PM (3h ago)". Combines an absolute date+time with a
  * human-readable relative offset so members see both precision and urgency.
+ *
+ * Locale is pinned to `en-US` so the string is byte-identical between the
+ * Node SSR render (Railway container locale) and the browser hydration pass
+ * (the viewer's navigator locale) — otherwise React throws hydration error
+ * #418 on any non-English viewer.
+ *
+ * `now` defaults to `Date.now()` for legacy callers, but Client Components
+ * that render this text inside an SSR'd tree MUST pass a stable `initialNow`
+ * that was computed once on the server and threaded down — otherwise the
+ * `(in 2h)` suffix will drift between the two passes and trip hydration.
  */
-export function formatDeadline(iso: string | Date | null | undefined): string {
+export function formatDeadline(
+  iso: string | Date | null | undefined,
+  now: number = Date.now(),
+): string {
   if (!iso) return "—"
   const date = typeof iso === "string" ? new Date(iso) : iso
-  const absDate = date.toLocaleDateString(undefined, {
+  const absDate = date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
   })
-  const absTime = date.toLocaleTimeString(undefined, {
+  const absTime = date.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
   })
-  const diff = date.getTime() - Date.now()
+  const diff = date.getTime() - now
   const future = diff > 0
   const absDiff = Math.abs(diff)
   const sec = Math.round(absDiff / 1000)

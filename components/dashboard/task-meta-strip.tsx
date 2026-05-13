@@ -9,17 +9,24 @@ import { cn } from "@/lib/utils"
 
 interface TaskMetaStripProps {
   task: TaskWithStats
+  /** Server-rendered `Date.now()` timestamp used as the initial `now` so the
+   *  first SSR pass and the client hydration pass agree on deadline phase
+   *  and relative-time text. See `useTaskDeadlineNow` docs. */
+  initialNow: number
 }
 
-export function TaskMetaStrip({ task }: TaskMetaStripProps) {
-  const now = useTaskDeadlineNow([
-    {
-      id: task.id,
-      dueAt: task.due_at,
-      allowLate: task.allow_late,
-      lateSubmissionDeadline: task.late_submission_deadline,
-    },
-  ])
+export function TaskMetaStrip({ task, initialNow }: TaskMetaStripProps) {
+  const now = useTaskDeadlineNow(
+    [
+      {
+        id: task.id,
+        dueAt: task.due_at,
+        allowLate: task.allow_late,
+        lateSubmissionDeadline: task.late_submission_deadline,
+      },
+    ],
+    initialNow,
+  )
   const deadline = getTaskDeadlineWindow(
     {
       dueAt: task.due_at,
@@ -42,7 +49,7 @@ export function TaskMetaStrip({ task }: TaskMetaStripProps) {
         {task.due_at ? (
           <>
             <span className="font-semibold">Due</span>{" "}
-            {formatDeadline(task.due_at)}
+            {formatDeadline(task.due_at, now)}
           </>
         ) : "No deadline"}
       </span>
@@ -57,7 +64,7 @@ export function TaskMetaStrip({ task }: TaskMetaStripProps) {
         )}>
           <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
           <span className="font-semibold">Late allowed until</span>{" "}
-          {formatDeadline(task.late_submission_deadline)}
+          {formatDeadline(task.late_submission_deadline, now)}
         </span>
       ) : null}
       {task.late_count > 0 ? (

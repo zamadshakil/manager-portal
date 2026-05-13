@@ -21,6 +21,12 @@ interface TaskSubmissionFormProps {
   allowLate: boolean
   lateSubmissionDeadline: string | null
   requireLateReason: boolean
+  /** Server-rendered `Date.now()` timestamp used as the initial `now`, so
+   *  the deadline phase computed during SSR matches the one computed during
+   *  the first client hydration pass. Without this, the overdue alert and
+   *  the late-reason input can exist on one side and not the other,
+   *  triggering React hydration error #418. */
+  initialNow: number
 }
 
 /**
@@ -39,6 +45,7 @@ export function TaskSubmissionForm({
   allowLate,
   lateSubmissionDeadline,
   requireLateReason,
+  initialNow,
 }: TaskSubmissionFormProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
@@ -50,14 +57,17 @@ export function TaskSubmissionForm({
   const [uploaded, setUploaded] = useState(false)
 
   const pipeline = usePipeline({ refreshOnComplete: true })
-  const now = useTaskDeadlineNow([
-    {
-      id: taskId,
-      dueAt,
-      allowLate,
-      lateSubmissionDeadline,
-    },
-  ])
+  const now = useTaskDeadlineNow(
+    [
+      {
+        id: taskId,
+        dueAt,
+        allowLate,
+        lateSubmissionDeadline,
+      },
+    ],
+    initialNow,
+  )
   const deadline = getTaskDeadlineWindow(
     {
       dueAt,
