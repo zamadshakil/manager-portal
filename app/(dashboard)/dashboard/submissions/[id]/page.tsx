@@ -66,10 +66,6 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
         .maybeSingle()
     : { data: null }
 
-  const isSystemFailure =
-    (submission.status === "failed" || submission.status === "needs_review") &&
-    !((submission.metadata as any)?.rules_evaluated > 0)
-
   const validationOutcome = (submission.metadata as any)?.validation_outcome as ValidationOutcome | undefined
   const reviewReason = (submission.metadata as any)?.review_reason as string | undefined
   const extractedText = (submission as any).extracted_text as string | undefined
@@ -86,9 +82,9 @@ export default async function SubmissionDetail({ params, searchParams }: PagePro
             : "No validation results are available for this submission."
   const scope = { team_id: submission.team_id, owner_id: submission.uploader_id }
 
-  const canRetry =
-    ctx.hasScoped(CAPABILITIES.SUBMISSIONS_UPDATE, scope) ||
-    (profile.id === submission.uploader_id && isSystemFailure)
+  // Re-running validation is a manager/admin-only action. Team members never
+  // see this option, even on system failures — they must ask their manager.
+  const canRetry = ctx.hasScoped(CAPABILITIES.SUBMISSIONS_UPDATE, scope)
   const canDelete = ctx.hasScoped(CAPABILITIES.SUBMISSIONS_DELETE, scope)
 
   const flags = submission.flags ?? []

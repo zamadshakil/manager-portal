@@ -618,18 +618,13 @@ export async function retrySubmission(formData: FormData): Promise<ActionResult>
     }
   }
 
-  // Only managers, admins, or the original uploader (on system failure) may retry.
-  // A system failure is when it failed but the AI didn't successfully evaluate any rules.
-  const isSystemFailure =
-    (data.status === "failed" || data.status === "needs_review") &&
-    !((data.metadata as any)?.rules_evaluated > 0)
-
-  const canRetry =
-    await hasScopedCapability(profile, CAPABILITIES.SUBMISSIONS_UPDATE, {
-      team_id: data.team_id,
-      owner_id: data.uploader_id,
-    }) ||
-    (profile.id === data.uploader_id && isSystemFailure)
+  // Re-running validation is restricted to managers and admins. Team members
+  // (including the original uploader) cannot retry their own submissions —
+  // they must escalate to a manager.
+  const canRetry = await hasScopedCapability(profile, CAPABILITIES.SUBMISSIONS_UPDATE, {
+    team_id: data.team_id,
+    owner_id: data.uploader_id,
+  })
   if (!canRetry) return { ok: false, error: "Not authorized." }
 
   // Clear validation_runs from the previous attempt so the UI never shows
