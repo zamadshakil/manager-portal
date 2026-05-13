@@ -57,7 +57,7 @@ const nextConfig = {
     // ------------------------------------------------------------------
     optimizePackageImports: ["lucide-react", "date-fns", "recharts"],
   },
-  serverExternalPackages: ["unpdf", "mammoth", "officeparser", "@napi-rs/canvas"],
+  serverExternalPackages: ["unpdf", "mammoth", "officeparser", "exceljs", "@napi-rs/canvas"],
 
   async headers() {
     const isDev = process.env.NODE_ENV === "development"

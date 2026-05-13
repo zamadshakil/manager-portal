@@ -140,6 +140,110 @@ async function parseOfficeFile(buf: Buffer): Promise<ParseResult> {
   return { text: clamped.text, truncated: clamped.truncated }
 }
 
+/**
+ * Stringify an ExcelJS cell value into plain text. Handles every variant
+ * (rich text, formulas, hyperlinks, dates, errors, shared formulas) so that
+ * NOTHING gets silently dropped.
+ */
+function stringifyCellValue(value: unknown): string {
+  if (value === null || value === undefined) return ""
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  if (value instanceof Date) return value.toISOString()
+  if (Array.isArray(value)) return value.map(stringifyCellValue).join(" ")
+
+  if (typeof value === "object") {
+    const v = value as Record<string, any>
+    // Rich text: { richText: [{ text }, ...] }
+    if (Array.isArray(v.richText)) {
+      return v.richText.map((r: any) => r?.text ?? "").join("")
+    }
+    // Hyperlink: { text, hyperlink }
+    if (typeof v.text !== "undefined" || typeof v.hyperlink !== "undefined") {
+      const t = stringifyCellValue(v.text)
+      const link = v.hyperlink ? ` (${v.hyperlink})` : ""
+      return `${t}${link}`
+    }
+    // Formula: { formula, result } — prefer the computed result, else show formula.
+    if (typeof v.formula !== "undefined" || typeof v.sharedFormula !== "undefined") {
+      if (typeof v.result !== "undefined" && v.result !== null) {
+        return stringifyCellValue(v.result)
+      }
+      return `=${v.formula ?? v.sharedFormula ?? ""}`
+    }
+    // Error cell: { error: "#REF!" }
+    if (typeof v.error !== "undefined") return String(v.error)
+    // Fallback: stringify object safely.
+    try {
+      return JSON.stringify(v)
+    } catch {
+      return ""
+    }
+  }
+  return String(value)
+}
+
+async function parseExcel(buf: Buffer): Promise<ParseResult> {
+  try {
+    const ExcelJS = (await import("exceljs")).default
+    const workbook = new ExcelJS.Workbook()
+    // exceljs accepts a Node Buffer via the Uint8Array contract.
+    await workbook.xlsx.load(buf as unknown as ArrayBuffer)
+
+    const parts: string[] = []
+    let totalCells = 0
+    const sheetCount = workbook.worksheets.length
+
+    for (const sheet of workbook.worksheets) {
+      if (!sheet) continue
+      const sheetName = sheet.name || `Sheet${sheet.id}`
+      parts.push(`=== Sheet: ${sheetName} ===`)
+
+      // eachRow with includeEmpty:false skips fully empty rows; iterate every
+      // non-empty cell (including ones not in the contiguous "used range").
+      sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        const rowCells: string[] = []
+        row.eachCell({ includeEmpty: false }, (cell) => {
+          const text = stringifyCellValue(cell.value).trim()
+          if (text.length > 0) {
+            rowCells.push(text)
+            totalCells++
+          }
+        })
+        if (rowCells.length > 0) {
+          parts.push(`Row ${rowNumber}: ${rowCells.join(" | ")}`)
+        }
+      })
+
+      // Capture merged-cell ranges metadata (helps the LLM understand layout).
+      const mergeCount = (sheet as any)._merges
+        ? Object.keys((sheet as any)._merges).length
+        : 0
+      if (mergeCount > 0) {
+        parts.push(`(merged ranges: ${mergeCount})`)
+      }
+      parts.push("")
+    }
+
+    const text = parts.join("\n").trim()
+    console.log(
+      `[parseExcel] bytes=${buf.length}, sheets=${sheetCount}, cells=${totalCells}, chars=${text.length}`,
+    )
+
+    if (totalCells === 0) {
+      // Workbook had no readable cells via exceljs — fall back to officeparser
+      // (handles some edge formats exceljs misses, e.g. strict OOXML).
+      return parseOfficeFile(buf)
+    }
+
+    const clamped = clamp(text)
+    return { text: clamped.text, truncated: clamped.truncated }
+  } catch (err: any) {
+    console.warn(`[parseExcel] exceljs failed, falling back to officeparser: ${err?.message}`)
+    return parseOfficeFile(buf)
+  }
+}
+
 async function parseImage(buf: Buffer, mimeType: string): Promise<ParseResult> {
   try {
     const result = await describeImage(new Uint8Array(buf), mimeType)
@@ -177,8 +281,12 @@ export async function extractText(buf: Buffer, mimeType: string): Promise<ParseR
       return parseOfficeFile(buf)
     case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
     case "application/vnd.ms-powerpoint":
+      return parseOfficeFile(buf)
     case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+      // Modern .xlsx — exhaustive sheet/cell walk via exceljs.
+      return parseExcel(buf)
     case "application/vnd.ms-excel":
+      // Legacy binary .xls — exceljs can't read these, keep officeparser.
       return parseOfficeFile(buf)
     case "image/png":
     case "image/jpeg":
