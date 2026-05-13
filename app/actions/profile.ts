@@ -53,14 +53,39 @@ export async function updatePassword(formData: FormData) {
   })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
 
-  const supabase = await createClient()
-  const { error } = await supabase.auth.updateUser({ password: parsed.data.new_password })
+  // Use the service-role admin client to update the password by user id.
+  // Going through the SSR session client can silently no-op against the
+  // self-hosted GoTrue when the session cookie can't be refreshed inside a
+  // server action, which leaves the *old* password still valid at sign-in.
+  // Updating by id guarantees the change is persisted in auth.users.
+  const admin = createAdminClient()
+  const { error } = await admin.auth.admin.updateUserById(profile.id, {
+    password: parsed.data.new_password,
+  })
   if (error) return { ok: false, error: error.message }
+
+  // Revoke all existing refresh tokens for this user so any other devices
+  // / stale sessions can no longer mint new access tokens with the old
+  // credentials. The current browser will be signed out as well and must
+  // re-authenticate with the new password.
+  try {
+    await admin.auth.admin.signOut(profile.id)
+  } catch (e) {
+    console.warn("[updatePassword] failed to revoke sessions:", e)
+  }
 
   // Clear must_reset flag.
   if (profile.must_reset) {
-    const admin = createAdminClient()
     await admin.from("profiles").update({ must_reset: false }).eq("id", profile.id)
+  }
+
+  // Also clear the local Supabase auth cookies so this tab is signed out
+  // immediately and the user is forced to log in again with the new password.
+  try {
+    const supabase = await createClient()
+    await supabase.auth.signOut()
+  } catch (e) {
+    console.warn("[updatePassword] local signOut failed:", e)
   }
 
   await logActivity({

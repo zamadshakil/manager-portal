@@ -25,7 +25,11 @@ export function PasswordForm({ mustReset }: { mustReset: boolean }) {
       }
       setSaved(true)
       form.reset()
-      router.refresh()
+      // Session was invalidated server-side. Force a full navigation to the
+      // login page so the user must re-authenticate with the new password.
+      setTimeout(() => {
+        window.location.href = "/auth/login?password_changed=1"
+      }, 800)
     })
   }
 
