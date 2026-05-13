@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
-import { createSubmission } from "@/app/actions/submissions"
+import { requestUploadUrl, createSubmissionFromKey } from "@/app/actions/submissions"
 import { usePipeline } from "@/hooks/use-pipeline"
 import { useTaskDeadlineNow } from "@/hooks/use-task-deadline-now"
 import { getTaskDeadlineWindow } from "@/lib/task-deadlines"
@@ -108,19 +108,50 @@ export function TaskSubmissionForm({
       setError("Late submission requires a reason (at least 8 characters).")
       return
     }
-    const fd = new FormData()
-    fd.set("file", file)
-    fd.set("title", title.trim())
-    fd.set("taskId", taskId)
-    if (deadline.isLateWindowOpen) fd.set("lateReason", reason.trim())
-
     startTransition(async () => {
-      const res = await createSubmission(fd)
+      // Step 1: Obtain a pre-signed R2 PUT URL so the file goes directly to
+      // object storage, bypassing the Next.js server (and any Cloudflare WAF
+      // rules that block binary payloads in Server Action POST bodies).
+      const urlFd = new FormData()
+      urlFd.set("fileName", file.name)
+      urlFd.set("mimeType", file.type)
+      urlFd.set("fileSize", String(file.size))
+      const urlRes = await requestUploadUrl(urlFd)
+      if (!urlRes.ok || !urlRes.uploadUrl || !urlRes.key) {
+        setError(urlRes.error ?? "Failed to prepare upload.")
+        return
+      }
+
+      // Step 2: PUT the file directly to R2 (goes to r2.cloudflarestorage.com,
+      // not zamdevai.com, so the WAF never sees the binary payload).
+      try {
+        const putRes = await fetch(urlRes.uploadUrl, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": file.type },
+        })
+        if (!putRes.ok) {
+          setError(`Upload failed (HTTP ${putRes.status}). Please try again.`)
+          return
+        }
+      } catch {
+        setError("Network error during upload. Please check your connection and try again.")
+        return
+      }
+
+      // Step 3: Register the submission in the database.
+      const fd = new FormData()
+      fd.set("key", urlRes.key)
+      fd.set("mimeType", file.type)
+      fd.set("fileSize", String(file.size))
+      fd.set("title", title.trim())
+      fd.set("taskId", taskId)
+      if (deadline.isLateWindowOpen) fd.set("lateReason", reason.trim())
+      const res = await createSubmissionFromKey(fd)
       if (!res.ok) {
         setError(res.error ?? "Submission failed.")
         return
       }
-      // Upload succeeded — trigger the AI pipeline and start polling.
       setUploaded(true)
       if (res.submissionId) {
         pipeline.trigger(res.submissionId)

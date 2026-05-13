@@ -3,7 +3,7 @@
 import { after } from "next/server"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
-import { putRaw, del } from "@/lib/r2"
+import { putRaw, del, presignPut, head } from "@/lib/r2"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireProfile } from "@/lib/auth"
 import { AccessDeniedError, assertCapability, CAPABILITIES, hasScopedCapability } from "@/lib/permissions"
@@ -330,6 +330,265 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
 
   // Return the submissionId so the client can poll GET /api/pipeline/[id]
   // for status updates.
+  return { ok: true, submissionId: data.id }
+}
+
+// ── Pre-signed upload flow ─────────────────────────────────────────────────
+// Two-step alternative to createSubmission that avoids routing the binary file
+// payload through the Next.js server (and through any Cloudflare WAF / proxy
+// rules that may block binary data in Server Action POSTs):
+//
+//   1. Client calls requestUploadUrl → gets a signed R2 PUT URL (5 min TTL).
+//   2. Client PUTs the file directly to R2's storage endpoint.
+//   3. Client calls createSubmissionFromKey → server verifies the object
+//      landed in R2, then creates the DB row and triggers the pipeline.
+
+/**
+ * Generate a pre-signed R2 PUT URL so the browser can upload a submission
+ * file directly to object storage, bypassing the Next.js server.
+ */
+export async function requestUploadUrl(formData: FormData): Promise<{
+  ok: boolean
+  error?: string
+  uploadUrl?: string
+  key?: string
+}> {
+  const profile = await requireProfile()
+  if (!profile.team_id) return { ok: false, error: "You are not assigned to a team." }
+
+  const fileName = ((formData.get("fileName") as string | null) ?? "upload").slice(0, 200)
+  const mimeType = formData.get("mimeType") as string | null
+  const fileSize = Number(formData.get("fileSize") ?? 0)
+
+  if (!mimeType || !ACCEPTED_MIME_TYPES.includes(mimeType as (typeof ACCEPTED_MIME_TYPES)[number])) {
+    return { ok: false, error: `Unsupported file type: ${mimeType || "unknown"}` }
+  }
+  if (!fileSize || fileSize <= 0) return { ok: false, error: "Choose a file to upload." }
+  if (fileSize > MAX_FILE_SIZE_BYTES) return { ok: false, error: "File exceeds 25 MB limit." }
+
+  const limit = await uploadLimiter().limit(`user:${profile.id}`)
+  if (!limit.success) return { ok: false, error: "Too many uploads. Please wait a moment and try again." }
+
+  const safeName = fileName.replace(/[^\w.\-]+/g, "_")
+  const dotIdx = safeName.lastIndexOf(".")
+  const base = dotIdx > 0 ? safeName.slice(0, dotIdx) : safeName
+  const ext = dotIdx > 0 ? safeName.slice(dotIdx + 1) : ""
+  const suffix = Math.random().toString(36).slice(2, 8)
+  const finalName = ext ? `${base}-${suffix}.${ext}` : `${base}-${suffix}`
+  const key = `submissions/${profile.team_id}/${profile.id}/${finalName}`
+
+  try {
+    const { uploadUrl } = await presignPut(key, mimeType, 300)
+    return { ok: true, uploadUrl, key }
+  } catch (err: any) {
+    console.error("[requestUploadUrl] presignPut failed", err)
+    return { ok: false, error: "Could not prepare upload. Please try again." }
+  }
+}
+
+const KeySubmissionSchema = z.object({
+  key: z.string().min(1).max(600),
+  title: z.string().trim().min(2, "Title must be at least 2 characters").max(200),
+  mimeType: z.string().min(1),
+  fileSize: z.coerce.number().int().positive(),
+  taskId: z.string().uuid().optional(),
+  lateReason: z.string().trim().max(1000).optional(),
+})
+
+/**
+ * Finalise a submission whose file was already uploaded directly to R2.
+ * Validates the key path, confirms the object exists, then creates the DB
+ * row and triggers the AI pipeline — identical to the tail of createSubmission.
+ */
+export async function createSubmissionFromKey(formData: FormData): Promise<ActionResult> {
+  const profile = await requireProfile()
+  if (!profile.team_id) return { ok: false, error: "You are not assigned to a team." }
+
+  const parsed = KeySubmissionSchema.safeParse({
+    key: formData.get("key") ?? "",
+    title: formData.get("title") ?? "",
+    mimeType: formData.get("mimeType") ?? "",
+    fileSize: formData.get("fileSize") ?? 0,
+    taskId: formData.get("taskId") || undefined,
+    lateReason: formData.get("lateReason") || undefined,
+  })
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
+
+  if (!ACCEPTED_MIME_TYPES.includes(parsed.data.mimeType as (typeof ACCEPTED_MIME_TYPES)[number])) {
+    return { ok: false, error: `Unsupported file type: ${parsed.data.mimeType}` }
+  }
+  if (parsed.data.fileSize > MAX_FILE_SIZE_BYTES) return { ok: false, error: "File exceeds 25 MB limit." }
+
+  // Prevent path-traversal / key hijacking: the key must live under this
+  // user's own upload prefix, which requestUploadUrl always generates.
+  const expectedPrefix = `submissions/${profile.team_id}/${profile.id}/`
+  if (!parsed.data.key.startsWith(expectedPrefix)) {
+    return { ok: false, error: "Invalid upload reference." }
+  }
+
+  const limit = await uploadLimiter().limit(`user:${profile.id}`)
+  if (!limit.success) return { ok: false, error: "Too many uploads. Please wait a moment and try again." }
+
+  const PUBLIC_URL = process.env.R2_PUBLIC_URL ?? ""
+  const blobUrl = `${PUBLIC_URL}/${parsed.data.key}`
+
+  // Confirm the file actually landed in R2 before creating the DB row.
+  try {
+    await head(blobUrl)
+  } catch {
+    return { ok: false, error: "Upload not found in storage. Please upload the file again." }
+  }
+
+  // ---------- Task linkage + deadline enforcement ----------
+  const supabase = createAdminClient()
+  let taskId: string | null = null
+  let taskAssignmentId: string | null = null
+  let isLate = false
+  let lateReason: string | null = null
+
+  if (parsed.data.taskId) {
+    const { data: task } = await supabase
+      .from("tasks")
+      .select("id, team_id, due_at, allow_late, late_submission_deadline, require_late_reason, title")
+      .eq("id", parsed.data.taskId)
+      .maybeSingle()
+    if (!task) return { ok: false, error: "Task not found." }
+    if (task.team_id !== profile.team_id) return { ok: false, error: "This task belongs to a different team." }
+
+    const { data: assignment } = await supabase
+      .from("task_assignments")
+      .select("id, status")
+      .eq("task_id", task.id)
+      .eq("assignee_id", profile.id)
+      .maybeSingle()
+    if (!assignment) return { ok: false, error: "You are not assigned to this task." }
+    if (assignment.status === "submitted" || assignment.status === "late_submitted") {
+      return { ok: false, error: "You have already submitted this task." }
+    }
+    if (assignment.status === "missed") {
+      return { ok: false, error: "Submission window has closed for this task." }
+    }
+
+    const deadline = getTaskDeadlineWindow({
+      dueAt: task.due_at,
+      allowLate: task.allow_late,
+      lateSubmissionDeadline: task.late_submission_deadline,
+    })
+    if (deadline.isClosed) {
+      await supabase
+        .from("task_assignments")
+        .update({ status: "missed" })
+        .eq("id", assignment.id)
+        .eq("assignee_id", profile.id)
+        .eq("status", "assigned")
+        .is("submission_id", null)
+      return {
+        ok: false,
+        error:
+          deadline.closureReason === "late_submission_deadline"
+            ? "Submission failed: the late submission deadline has passed."
+            : "Submission failed: the deadline has passed and late submissions are not allowed.",
+      }
+    }
+    if (deadline.isLateWindowOpen) {
+      isLate = true
+      const reason = parsed.data.lateReason?.trim() ?? ""
+      if (task.require_late_reason && reason.length < 8) {
+        return { ok: false, error: "Late submission requires a reason (at least 8 characters)." }
+      }
+      lateReason = reason || null
+    }
+
+    taskId = task.id
+    taskAssignmentId = assignment.id
+  }
+
+  // ---------- Insert submission row ----------
+  const { data, error } = await supabase
+    .from("submissions")
+    .insert({
+      uploader_id: profile.id,
+      team_id: profile.team_id,
+      title: parsed.data.title,
+      blob_url: blobUrl,
+      blob_pathname: parsed.data.key,
+      mime_type: parsed.data.mimeType,
+      size_bytes: parsed.data.fileSize,
+      status: "queued",
+      task_id: taskId,
+      task_assignment_id: taskAssignmentId,
+      is_late: isLate,
+      late_reason: lateReason,
+      submitted_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single()
+
+  if (error || !data) {
+    try { await del(blobUrl) } catch {}
+    return { ok: false, error: error?.message ?? "Could not save submission." }
+  }
+
+  if (taskAssignmentId) {
+    await supabase
+      .from("task_assignments")
+      .update({
+        status: isLate ? "late_submitted" : "submitted",
+        submission_id: data.id,
+        late_reason: lateReason,
+        submitted_at: new Date().toISOString(),
+      })
+      .eq("id", taskAssignmentId)
+      .eq("assignee_id", profile.id)
+  }
+
+  await logActivity({
+    actorId: profile.id,
+    teamId: profile.team_id,
+    action: "submission.created",
+    entityType: "submission",
+    entityId: data.id,
+    metadata: {
+      title: parsed.data.title,
+      size: parsed.data.fileSize,
+      mime: parsed.data.mimeType,
+      task_id: taskId,
+      late: isLate,
+    },
+  })
+
+  revalidatePath("/dashboard")
+  revalidatePath("/dashboard/submissions")
+  if (taskId) {
+    revalidatePath("/dashboard/tasks")
+    revalidatePath(`/dashboard/tasks/${taskId}`)
+  }
+
+  void indexDocument({
+    source_type: "submission",
+    source_id: data.id,
+    team_id: profile.team_id,
+    owner_id: profile.id,
+    title: parsed.data.title,
+    content: joinContent([
+      parsed.data.title,
+      `Uploaded by ${profile.id} on team ${profile.team_id}.`,
+      taskId ? `Linked to task ${taskId}.` : null,
+      isLate ? `Late submission. Reason: ${lateReason ?? "(none)"}` : null,
+    ]),
+    metadata: {
+      task_id: taskId,
+      is_late: isLate,
+      mime: parsed.data.mimeType,
+    },
+  })
+
+  after(() => {
+    processSubmission(data.id).catch((err) => {
+      console.error("[createSubmissionFromKey] background pipeline crash for", data.id, err)
+    })
+  })
+
   return { ok: true, submissionId: data.id }
 }
 
