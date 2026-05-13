@@ -215,13 +215,19 @@ export async function listSubmissions(
 ): Promise<{ rows: Submission[]; nextCursor?: string }> {
   const supabase = createAdminClient()
   const limit = Math.min(opts.limit ?? 50, 100)
+  // "Show all submissions" in the access-control UI is bound to
+  // `submissions.update` (see CAPABILITY_DISPLAY_OVERRIDES in
+  // permissions-matrix.tsx). It is the *single* capability that widens a
+  // member's visibility to the whole team. `submissions.delete` only
+  // authorises the delete action; it must NOT broaden the listing scope,
+  // otherwise denying "Show all submissions" silently has no effect for
+  // anyone who happens to hold delete.
   const canScopeToTeam =
     profile.role === "main_admin" ||
     (profile.role === "manager" && profile.team_id !== null) ||
-    (profile.role === "member" && profile.team_id !== null && (
-      await hasCapability(profile, CAPABILITIES.SUBMISSIONS_UPDATE) ||
-      await hasCapability(profile, CAPABILITIES.SUBMISSIONS_DELETE)
-    ))
+    (profile.role === "member" &&
+      profile.team_id !== null &&
+      (await hasCapability(profile, CAPABILITIES.SUBMISSIONS_UPDATE)))
 
   let q = supabase
     .from("submissions")
