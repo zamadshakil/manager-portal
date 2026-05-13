@@ -112,7 +112,7 @@ const nextConfig = {
           "media-src 'self' https://*.r2.dev",
           "font-src 'self' https://fonts.gstatic.com https://frontend-cdn.perplexity.ai",
           `connect-src 'self' ${supabaseOrigins.join(" ")} https://*.r2.dev ${r2StorageOrigin} https://cloudflareinsights.com`,
-          "frame-src 'none'",
+          "frame-src 'self' blob:",
           "frame-ancestors 'none'",
           "object-src 'none'",
           "base-uri 'self'",

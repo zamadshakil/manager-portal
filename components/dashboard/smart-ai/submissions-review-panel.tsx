@@ -194,6 +194,37 @@ function PreviewPane({
 
   const [textContent, setTextContent] = useState<string | null>(null)
   const [isTextLoading, setIsTextLoading] = useState(false)
+  const [blobPreviewUrl, setBlobPreviewUrl] = useState<string | null>(null)
+  const [isBlobLoading, setIsBlobLoading] = useState(false)
+
+  useEffect(() => {
+    if (!isPdf && !isImage) {
+      setBlobPreviewUrl(null)
+      return
+    }
+    let objectUrl: string | null = null
+    setIsBlobLoading(true)
+    setBlobPreviewUrl(null)
+    fetch(`/api/download/${submission.id}?type=submission`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch")
+        return res.blob()
+      })
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob)
+        setBlobPreviewUrl(objectUrl)
+        setIsBlobLoading(false)
+      })
+      .catch((err) => {
+        console.error("[preview] blob fetch failed", err)
+        setIsBlobLoading(false)
+      })
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      setBlobPreviewUrl(null)
+      setIsBlobLoading(false)
+    }
+  }, [submission.id, isPdf, isImage])
 
   useEffect(() => {
     if (isText) {
@@ -258,18 +289,32 @@ function PreviewPane({
       {/* Preview body */}
       <div className="flex-1 bg-warm-white border-b border-border overflow-hidden">
         {isImage ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={submission.blob_url}
-            alt={submission.title}
-            className="max-h-[60vh] w-full object-contain bg-warm-white"
-          />
+          isBlobLoading || !blobPreviewUrl ? (
+            <div className="flex h-[60vh] items-center justify-center text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              <span className="text-[13px]">Loading preview…</span>
+            </div>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={blobPreviewUrl}
+              alt={submission.title}
+              className="max-h-[60vh] w-full object-contain bg-warm-white"
+            />
+          )
         ) : isPdf ? (
-          <iframe
-            src={submission.blob_url}
-            title={submission.title}
-            className="w-full h-[60vh] bg-warm-white"
-          />
+          isBlobLoading || !blobPreviewUrl ? (
+            <div className="flex h-[60vh] items-center justify-center text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              <span className="text-[13px]">Loading PDF…</span>
+            </div>
+          ) : (
+            <iframe
+              src={blobPreviewUrl}
+              title={submission.title}
+              className="w-full h-[60vh] bg-warm-white"
+            />
+          )
         ) : isText ? (
           <div className="h-[60vh] w-full overflow-auto p-4 bg-background">
             {isTextLoading ? (
