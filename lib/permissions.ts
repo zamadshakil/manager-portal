@@ -63,7 +63,6 @@ export const CAPABILITIES = {
   ANNOUNCEMENTS_CREATE: "announcements.create",
   ANNOUNCEMENTS_UPDATE: "announcements.update",
   ANNOUNCEMENTS_DELETE: "announcements.delete",
-  ANNOUNCEMENTS_AI_ANALYZE: "announcements.ai_analyze",
 
   // ai credits
   AI_CREDITS_READ_SELF: "ai_credits.read_self",
@@ -130,7 +129,7 @@ export const RAG_SOURCE_READ_CAPABILITY: Record<string, CapabilityKey | null> = 
 // the main admin can independently revoke "AI may read X" without revoking
 // "user may read X".
 export const RAG_SOURCE_AI_CAPABILITY: Record<string, CapabilityKey | null> = {
-  announcement: CAPABILITIES.ANNOUNCEMENTS_AI_ANALYZE,
+  announcement: null,
   material: CAPABILITIES.MATERIALS_AI_ANALYZE,
   task: CAPABILITIES.TASKS_AI_ANALYZE,
   submission: CAPABILITIES.SUBMISSIONS_AI_ANALYZE,

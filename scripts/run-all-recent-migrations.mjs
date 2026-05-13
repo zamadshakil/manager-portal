@@ -60,6 +60,7 @@ const FILES = [
   "20260520_auto_unhide_on_message.sql",
   "20260520_capability_rls_write_policies.sql",
   "20260521_validation_rule_type.sql",
+  "20260520_remove_announcements_ai_analyze.sql",
 ];
 
 // PostgreSQL error codes that indicate "already applied" — warn, don't abort.

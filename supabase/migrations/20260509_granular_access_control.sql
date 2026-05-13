@@ -351,7 +351,6 @@ INSERT INTO public.permission_definitions (key, module, action, description, is_
     ('announcements.create',        'announcements',     'create',        'Create announcements', false),
     ('announcements.update',        'announcements',     'update',        'Update announcements', false),
     ('announcements.delete',        'announcements',     'delete',        'Delete announcements', false),
-    ('announcements.ai_analyze',    'announcements',     'ai_analyze',    'Allow Smart AI to analyze announcements', false),
 
     -- ai credits
     ('ai_credits.read_self',        'ai_credits',        'read_self',     'View your own AI credit balance / history', false),
@@ -410,7 +409,6 @@ INSERT INTO public.role_permission_defaults (role, capability_key) VALUES
     ('manager', 'announcements.create'),
     ('manager', 'announcements.update'),
     ('manager', 'announcements.delete'),
-    ('manager', 'announcements.ai_analyze'),
 
     ('manager', 'ai_credits.read_self'),
 
