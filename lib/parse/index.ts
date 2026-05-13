@@ -43,9 +43,14 @@ async function parsePdf(buf: Buffer): Promise<ParseResult> {
   let warning: string | undefined = undefined
   let ocrConfidence: number | undefined = undefined
 
-  // If text extraction yielded fewer than 16 characters, this is likely an image-based PDF.
-  // We fall back to OCR on the first few pages (max 3 for performance).
-  if (fullText.trim().length < 16) {
+  // Count only letters/numbers to decide if native extraction produced real content.
+  // This prevents short-text PDFs (even 1–2 words) from being wrongly treated as
+  // image-only and triggering a potentially-failing OCR pass.
+  const nativeReadableCount = Array.from(fullText.matchAll(/[\p{L}\p{N}]/gu)).length
+  const nativeText = fullText
+
+  // Only attempt OCR when native extraction produced zero readable characters.
+  if (nativeReadableCount === 0) {
     fromOcr = true
     try {
       const maxPagesToOcr = Math.min(pageCount ?? 1, 3)
@@ -64,7 +69,8 @@ async function parsePdf(buf: Buffer): Promise<ParseResult> {
       fullText = ocrText
       ocrConfidence = undefined
 
-      if (fullText.trim().length < 16) {
+      const ocrReadableCount = Array.from(fullText.matchAll(/[\p{L}\p{N}]/gu)).length
+      if (ocrReadableCount === 0) {
         warning =
           "Document contains no extractable text even after OCR. It may be a scanned image with low quality or an unsupported encoding."
         // Return gracefully — the pipeline's empty-text guard will route
@@ -83,18 +89,21 @@ async function parsePdf(buf: Buffer): Promise<ParseResult> {
       }
     } catch (err: any) {
       console.warn(`[parsePdf] OCR fallback failed: ${err.message}`)
-      warning =
-        "PDF text extraction failed and the OCR fallback encountered an error. The document was uploaded but its contents could not be read."
-      // Return gracefully with empty text — the pipeline handles this as
-      // needs_review rather than a hard failure so the user can retry.
-      const clamped = clamp("")
-      return {
-        text: clamped.text,
-        pages: pageCount,
-        truncated: false,
-        fromOcr: true,
-        ocrConfidence: undefined,
-        warning,
+      // If native extraction had some text, use it rather than returning empty.
+      if (nativeText.trim().length > 0) {
+        fullText = nativeText
+        fromOcr = false
+      } else {
+        // Truly no content — mark for review silently without a user-facing error.
+        const clamped = clamp("")
+        return {
+          text: clamped.text,
+          pages: pageCount,
+          truncated: false,
+          fromOcr: true,
+          ocrConfidence: undefined,
+          warning: undefined,
+        }
       }
     }
   }
