@@ -1,4 +1,4 @@
-import { CAPABILITIES, requireCapability } from "@/lib/permissions"
+import { requireRole } from "@/lib/auth"
 import { listAllProfiles } from "@/lib/data"
 import { loadPermissionAdminData } from "@/app/actions/permissions"
 import { PageHeader } from "@/components/dashboard/page-header"
@@ -7,7 +7,8 @@ import { PermissionsMatrix } from "@/components/dashboard/permissions-matrix"
 export const dynamic = "force-dynamic"
 
 export default async function PermissionsPage() {
-  const { profile } = await requireCapability(CAPABILITIES.USER_MANAGEMENT_PERMISSIONS)
+  // Access control admin is main_admin only.
+  const profile = await requireRole(["main_admin"])
 
   const [allProfiles, adminData] = await Promise.all([
     listAllProfiles(profile),

@@ -70,11 +70,6 @@ export const CAPABILITIES = {
   // smart ai
   SMART_AI_CHAT: "smart_ai.chat",
   SMART_AI_ANALYTICS_ALL: "smart_ai.analytics_all",
-
-  // team / user management
-  USER_MANAGEMENT_READ: "user_management.read",
-  USER_MANAGEMENT_WRITE: "user_management.write",
-  USER_MANAGEMENT_PERMISSIONS: "user_management.permissions",
 } as const
 
 export type CapabilityKey = (typeof CAPABILITIES)[keyof typeof CAPABILITIES]

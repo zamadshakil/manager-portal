@@ -64,6 +64,7 @@ const FILES = [
   "20260520_remove_materials_update.sql",
   "20260520_remove_tasks_ai_analyze.sql",
   "20260520_remove_team_management_capabilities.sql",
+  "20260520_remove_user_management_capabilities.sql",
 ];
 
 // PostgreSQL error codes that indicate "already applied" — warn, don't abort.

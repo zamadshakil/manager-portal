@@ -7,8 +7,6 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { requireProfile } from "@/lib/auth"
 import {
   AccessDeniedError,
-  CAPABILITIES,
-  assertCapability,
   type PermissionDefinitionRow,
   type RoleDefaultRow,
   type UserOverrideRow,
@@ -19,9 +17,8 @@ import { logActivity } from "@/lib/activity"
 // Permission management server actions
 // =============================================================================
 //
-// Only users with the `user_management.permissions` capability (main_admin by
-// default) can grant or revoke per-user overrides. Every change is recorded
-// in the activity log so the audit trail is preserved.
+// Only the main_admin can grant or revoke per-user overrides. Every change is
+// recorded in the activity log so the audit trail is preserved.
 // =============================================================================
 
 const SetOverrideSchema = z.object({
@@ -34,7 +31,12 @@ const SetOverrideSchema = z.object({
 
 async function requirePermissionAdmin() {
   const profile = await requireProfile()
-  await assertCapability(profile, CAPABILITIES.USER_MANAGEMENT_PERMISSIONS)
+  if (profile.role !== "main_admin") {
+    throw new AccessDeniedError(
+      "user_management.permissions" as never,
+      "Only the main admin can manage user permissions.",
+    )
+  }
   return profile
 }
 
