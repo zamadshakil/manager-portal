@@ -1,5 +1,6 @@
 import { Suspense } from "react"
 import { requireProfile } from "@/lib/auth"
+import { CAPABILITIES, getAccessContext } from "@/lib/permissions"
 import {
   getDashboardSummary,
   listAnnouncements,
@@ -29,6 +30,8 @@ import type { Profile } from "@/lib/types"
 
 export default async function OverviewPage() {
   const profile = await requireProfile()
+  const ctx = await getAccessContext(profile)
+  const canReadTasks = ctx.has(CAPABILITIES.TASKS_READ)
 
   const greeting = profile.full_name?.split(" ")[0] ?? profile.email
   const roleline =
@@ -57,7 +60,7 @@ export default async function OverviewPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 lg:gap-6">
         <div className="xl:col-span-2 space-y-4 lg:space-y-6 min-w-0">
-          {profile.role === "member" ? (
+          {profile.role === "member" && canReadTasks ? (
             <Suspense fallback={null}>
               <OpenTasksSection profile={profile} />
             </Suspense>

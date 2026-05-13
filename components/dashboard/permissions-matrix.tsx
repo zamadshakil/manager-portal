@@ -73,6 +73,11 @@ const HIDDEN_CAPABILITY_KEYS = new Set<string>([
   // upload flow which is gated separately). Hide them to avoid confusing admins.
   "submissions.create",
   "submissions.delete",
+  // `tasks.assign` is not surfaced in the product UI: there is no standalone
+  // "assign existing task" flow — assignment is performed automatically as
+  // part of task creation (gated by `tasks.create`). Toggling this override
+  // therefore has no observable effect, so hide it to avoid confusing admins.
+  "tasks.assign",
 ])
 
 const CAPABILITY_DISPLAY_OVERRIDES: Record<string, { action?: string; description?: string }> = {

@@ -681,6 +681,11 @@ export interface MyTask extends TaskAssignment {
  * surface at the top.
  */
 export async function listMyTasks(profile: Profile): Promise<MyTask[]> {
+  // Defense-in-depth: respect a `tasks.read` deny override even if a caller
+  // forgets to gate the UI. The `/dashboard/tasks` page already redirects in
+  // that case, but the home dashboard widget and any future caller could
+  // otherwise leak assigned tasks to a denied user.
+  if (!(await hasCapability(profile, CAPABILITIES.TASKS_READ))) return []
   if (profile.team_id) {
     await syncClosedTaskAssignments({ teamId: profile.team_id })
   }
