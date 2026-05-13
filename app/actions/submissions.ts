@@ -62,7 +62,12 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   // Magic-byte sniff so a renamed `.exe` (or any other spoofed payload) never
   // reaches R2 or the parser. We read the buffer once here and reuse it for
   // the upload below so we don't pay the I/O cost twice for legitimate files.
-  const fileBuffer = Buffer.from(await file.arrayBuffer())
+  let fileBuffer: Buffer
+  try {
+    fileBuffer = Buffer.from(await file.arrayBuffer())
+  } catch {
+    return { ok: false, error: "Failed to read the uploaded file. Please try again." }
+  }
   const mimeCheck = verifyMimeAgainstBuffer(fileBuffer, file.type)
   if (!mimeCheck.ok) {
     return { ok: false, error: mimeCheck.reason }
@@ -193,7 +198,17 @@ export async function createSubmission(formData: FormData): Promise<ActionResult
   const suffix = Math.random().toString(36).slice(2, 8)
   const finalName = ext ? `${base}-${suffix}.${ext}` : `${base}-${suffix}`
   const pathname = `submissions/${profile.team_id}/${profile.id}/${finalName}`
-  const blob = await putRaw(pathname, fileBuffer, file.type)
+  let blob: { url: string; pathname: string }
+  try {
+    blob = await putRaw(pathname, fileBuffer, file.type)
+  } catch (uploadErr: any) {
+    await releaseUploadLock(dedupKey)
+    console.error("[createSubmission] R2 upload failed", uploadErr)
+    return {
+      ok: false,
+      error: `File upload failed: ${uploadErr?.message ?? "storage error"}. Please try again or contact your administrator.`,
+    }
+  }
 
   // ---------- Insert submission row ----------
   const adminClient = supabase

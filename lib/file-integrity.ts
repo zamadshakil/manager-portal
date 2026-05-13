@@ -248,8 +248,11 @@ function checkPng(buf: Buffer): IntegrityResult {
       reason: `PNG reports invalid dimensions (${width}x${height}).`,
     }
   }
-  // Final IEND chunk must appear in the last 16 bytes.
-  const tail = buf.subarray(Math.max(0, buf.length - 16))
+  // Final IEND chunk must appear in the last 512 bytes. The standard IEND
+  // chunk is the last 12 bytes of a PNG, but some tools (Photoshop, exiftool,
+  // social media processors) append metadata chunks after IEND, pushing it
+  // further from the end.
+  const tail = buf.subarray(Math.max(0, buf.length - 512))
   const iendIdx = tail.indexOf(Buffer.from("IEND", "latin1"))
   if (iendIdx === -1) {
     return {
@@ -266,8 +269,11 @@ function checkJpeg(buf: Buffer): IntegrityResult {
   if (buf.length < MIN_IMAGE_SIZE) {
     return { ok: false, reason: "JPEG is too small to be valid." }
   }
-  // SOI already validated (FF D8 FF). Require EOI (FF D9) in the last 16 B.
-  const tail = buf.subarray(Math.max(0, buf.length - 16))
+  // SOI already validated (FF D8 FF). Require EOI (FF D9) somewhere in the
+  // last 512 bytes. The standard EOI is the final two bytes, but some
+  // encoders (certain cameras, iOS photo export, Exif writers) append a
+  // thumbnail or metadata chunk after the main EOI, pushing it back.
+  const tail = buf.subarray(Math.max(0, buf.length - 512))
   let foundEoi = false
   for (let i = 0; i < tail.length - 1; i++) {
     if (tail[i] === 0xff && tail[i + 1] === 0xd9) {
