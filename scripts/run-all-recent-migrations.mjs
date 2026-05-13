@@ -62,6 +62,7 @@ const FILES = [
   "20260521_validation_rule_type.sql",
   "20260520_remove_announcements_ai_analyze.sql",
   "20260520_remove_materials_update.sql",
+  "20260520_remove_tasks_ai_analyze.sql",
 ];
 
 // PostgreSQL error codes that indicate "already applied" — warn, don't abort.

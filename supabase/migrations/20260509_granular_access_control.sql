@@ -323,7 +323,6 @@ INSERT INTO public.permission_definitions (key, module, action, description, is_
     ('tasks.update',                'tasks',             'update',        'Update tasks', false),
     ('tasks.delete',                'tasks',             'delete',        'Delete tasks', false),
     ('tasks.assign',                'tasks',             'assign',        'Assign tasks to team members', false),
-    ('tasks.ai_analyze',            'tasks',             'ai_analyze',    'Allow Smart AI to analyze tasks', false),
 
     -- materials
     ('materials.read',              'materials',         'read',          'Read materials within scope', false),
@@ -385,7 +384,6 @@ INSERT INTO public.role_permission_defaults (role, capability_key) VALUES
     ('manager', 'tasks.update'),
     ('manager', 'tasks.delete'),
     ('manager', 'tasks.assign'),
-    ('manager', 'tasks.ai_analyze'),
 
     ('manager', 'materials.read'),
     ('manager', 'materials.create'),

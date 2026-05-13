@@ -35,7 +35,6 @@ export const CAPABILITIES = {
   TASKS_UPDATE: "tasks.update",
   TASKS_DELETE: "tasks.delete",
   TASKS_ASSIGN: "tasks.assign",
-  TASKS_AI_ANALYZE: "tasks.ai_analyze",
 
   // materials
   MATERIALS_READ: "materials.read",
@@ -130,7 +129,7 @@ export const RAG_SOURCE_READ_CAPABILITY: Record<string, CapabilityKey | null> = 
 export const RAG_SOURCE_AI_CAPABILITY: Record<string, CapabilityKey | null> = {
   announcement: null,
   material: CAPABILITIES.MATERIALS_AI_ANALYZE,
-  task: CAPABILITIES.TASKS_AI_ANALYZE,
+  task: null,
   submission: CAPABILITIES.SUBMISSIONS_AI_ANALYZE,
   validation_run: CAPABILITIES.VALIDATION_RULES_AI_ANALYZE,
   rule: CAPABILITIES.VALIDATION_RULES_AI_ANALYZE,
