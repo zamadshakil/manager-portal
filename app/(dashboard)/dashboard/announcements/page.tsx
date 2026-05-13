@@ -12,6 +12,7 @@ export default async function AnnouncementsPage() {
   const ctx = await getAccessContext(profile)
   const canReadAnnouncements = ctx.has(CAPABILITIES.ANNOUNCEMENTS_READ)
   const canCreateAnnouncements = ctx.has(CAPABILITIES.ANNOUNCEMENTS_CREATE)
+  const canUpdateAnnouncements = ctx.has(CAPABILITIES.ANNOUNCEMENTS_UPDATE)
   const canDeleteAnnouncements = ctx.has(CAPABILITIES.ANNOUNCEMENTS_DELETE)
 
   if (!canReadAnnouncements && !canCreateAnnouncements && !canDeleteAnnouncements) {
@@ -36,7 +37,7 @@ export default async function AnnouncementsPage() {
           rows={announcements}
           canDelete={canDeleteAnnouncements}
           canDeleteGlobal={profile.role === "main_admin"}
-          canEdit={canCreateAnnouncements}
+          canEdit={canUpdateAnnouncements}
           canEditGlobal={profile.role === "main_admin"}
           currentTeamId={profile.team_id}
           showAll

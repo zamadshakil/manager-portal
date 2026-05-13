@@ -120,7 +120,7 @@ export async function updateAnnouncement(formData: FormData): Promise<ActionResu
   }
 
   try {
-    await assertCapability(profile, CAPABILITIES.ANNOUNCEMENTS_CREATE, {
+    await assertCapability(profile, CAPABILITIES.ANNOUNCEMENTS_UPDATE, {
       team_id: row.team_id,
       is_global: row.team_id === null,
     })
