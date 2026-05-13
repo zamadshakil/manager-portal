@@ -47,7 +47,6 @@ export const CAPABILITIES = {
   VALIDATION_RULES_CREATE: "validation_rules.create",
   VALIDATION_RULES_UPDATE: "validation_rules.update",
   VALIDATION_RULES_DELETE: "validation_rules.delete",
-  VALIDATION_RULES_AI_ANALYZE: "validation_rules.ai_analyze",
 
   // submissions
   SUBMISSIONS_READ: "submissions.read",
@@ -124,8 +123,8 @@ export const RAG_SOURCE_AI_CAPABILITY: Record<string, CapabilityKey | null> = {
   material: CAPABILITIES.MATERIALS_AI_ANALYZE,
   task: null,
   submission: CAPABILITIES.SUBMISSIONS_AI_ANALYZE,
-  validation_run: CAPABILITIES.VALIDATION_RULES_AI_ANALYZE,
-  rule: CAPABILITIES.VALIDATION_RULES_AI_ANALYZE,
+  validation_run: null,
+  rule: null,
   chat_attachment: null,
 }
 
