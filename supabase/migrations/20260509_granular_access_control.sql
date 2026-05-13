@@ -361,8 +361,6 @@ INSERT INTO public.permission_definitions (key, module, action, description, is_
     ('smart_ai.analytics_all',      'smart_ai',          'analytics_all', 'View global Smart AI analytics', true),
 
     -- team / user management
-    ('team_management.read',        'team_management',   'read',          'View teams', false),
-    ('team_management.write',       'team_management',   'write',         'Create / edit / delete teams', true),
     ('user_management.read',        'user_management',   'read',          'View users', false),
     ('user_management.write',       'user_management',   'write',         'Provision / edit / disable users', true),
     ('user_management.permissions', 'user_management',   'permissions',   'Grant / revoke per-user capability overrides', true)
@@ -411,7 +409,6 @@ INSERT INTO public.role_permission_defaults (role, capability_key) VALUES
     ('manager', 'smart_ai.chat'),
     ('manager', 'smart_ai.analytics_self'),
 
-    ('manager', 'team_management.read'),
     ('manager', 'user_management.read')
 ON CONFLICT DO NOTHING;
 

@@ -46,8 +46,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ...(profile.role === "main_admin" || profile.role === "manager" ? ["/dashboard/reports", "/dashboard/activity"] : []),
     ...(profile.role === "main_admin"
       || profile.role === "manager"
-      || ctx.has(CAPABILITIES.TEAM_MANAGEMENT_READ)
-      || ctx.has(CAPABILITIES.TEAM_MANAGEMENT_WRITE)
       || ctx.has(CAPABILITIES.USER_MANAGEMENT_READ)
       || ctx.has(CAPABILITIES.USER_MANAGEMENT_WRITE)
       ? ["/dashboard/team"]

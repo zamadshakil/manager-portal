@@ -72,8 +72,6 @@ export const CAPABILITIES = {
   SMART_AI_ANALYTICS_ALL: "smart_ai.analytics_all",
 
   // team / user management
-  TEAM_MANAGEMENT_READ: "team_management.read",
-  TEAM_MANAGEMENT_WRITE: "team_management.write",
   USER_MANAGEMENT_READ: "user_management.read",
   USER_MANAGEMENT_WRITE: "user_management.write",
   USER_MANAGEMENT_PERMISSIONS: "user_management.permissions",

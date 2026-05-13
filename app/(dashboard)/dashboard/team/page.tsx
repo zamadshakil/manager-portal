@@ -16,14 +16,11 @@ export default async function TeamPage() {
   const canRead =
     profile.role === "main_admin" ||
     profile.role === "manager" ||
-    ctx.has(CAPABILITIES.TEAM_MANAGEMENT_READ) ||
-    ctx.has(CAPABILITIES.TEAM_MANAGEMENT_WRITE) ||
     ctx.has(CAPABILITIES.USER_MANAGEMENT_READ) ||
     ctx.has(CAPABILITIES.USER_MANAGEMENT_WRITE)
   if (!canRead) redirect("/dashboard")
 
   const canWrite =
-    ctx.has(CAPABILITIES.TEAM_MANAGEMENT_WRITE) ||
     ctx.has(CAPABILITIES.USER_MANAGEMENT_WRITE)
 
   if (profile.role !== "main_admin") {
