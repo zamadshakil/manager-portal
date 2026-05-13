@@ -78,6 +78,15 @@ const HIDDEN_CAPABILITY_KEYS = new Set<string>([
   // part of task creation (gated by `tasks.create`). Toggling this override
   // therefore has no observable effect, so hide it to avoid confusing admins.
   "tasks.assign",
+  // AI credits capabilities are intentionally not configurable through the
+  // admin matrix — access to `/dashboard/my-credits` and the admin AI credit
+  // tools is governed by role at runtime. Exposing per-user toggles here led
+  // to confusing states (e.g. granting `manage` to a non-admin had no effect
+  // because the admin pages also require admin role). Hide the rows; the
+  // capability rows remain in the DB so existing role defaults still apply.
+  "ai_credits.read_self",
+  "ai_credits.read_all",
+  "ai_credits.manage",
 ])
 
 const CAPABILITY_DISPLAY_OVERRIDES: Record<string, { action?: string; description?: string }> = {
