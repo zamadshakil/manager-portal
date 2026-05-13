@@ -40,7 +40,6 @@ export const CAPABILITIES = {
   // materials
   MATERIALS_READ: "materials.read",
   MATERIALS_CREATE: "materials.create",
-  MATERIALS_UPDATE: "materials.update",
   MATERIALS_DELETE: "materials.delete",
   MATERIALS_AI_ANALYZE: "materials.ai_analyze",
 

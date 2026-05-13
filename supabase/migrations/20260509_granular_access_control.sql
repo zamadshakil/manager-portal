@@ -328,7 +328,6 @@ INSERT INTO public.permission_definitions (key, module, action, description, is_
     -- materials
     ('materials.read',              'materials',         'read',          'Read materials within scope', false),
     ('materials.create',            'materials',         'create',        'Create materials', false),
-    ('materials.update',            'materials',         'update',        'Update materials', false),
     ('materials.delete',            'materials',         'delete',        'Delete materials', false),
     ('materials.ai_analyze',        'materials',         'ai_analyze',    'Allow Smart AI to analyze materials', false),
 
@@ -390,7 +389,6 @@ INSERT INTO public.role_permission_defaults (role, capability_key) VALUES
 
     ('manager', 'materials.read'),
     ('manager', 'materials.create'),
-    ('manager', 'materials.update'),
     ('manager', 'materials.delete'),
     ('manager', 'materials.ai_analyze'),
 
