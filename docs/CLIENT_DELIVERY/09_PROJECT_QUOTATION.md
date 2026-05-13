@@ -5,7 +5,7 @@
 > **Project:** AI-Powered Manager Portal / Hierarchia System  
 > **Currency:** PKR  
 > **Quotation Value:** PKR 1,100,000  
-> **Project Status:** Completed and Delivered  
+> **Project Status:** Completed  
 > **Date:** May 2026
 
 ---
@@ -13,6 +13,7 @@
 ## 1. Quotation Purpose and Completion Status
 
 This quotation provides the **final commercial valuation** for the complete **Hierarchia Manager Portal**, which has already been fully designed, developed, tested, and delivered based on the implemented system scope documented in the delivery pack.
+
 
 The quoted amount represents the completed development value of the overall platform, divided across major system functionalities, including:
 
@@ -25,7 +26,7 @@ The quoted amount represents the completed development value of the overall plat
 - Real-time messaging and collaboration
 - Dashboards, reporting, security, deployment, and go-live support
 
-This is the **final fixed quotation of PKR 1,100,000** for the full system scope that has been completed and delivered.
+This is the **final fixed quotation of PKR 1,100,000** for the full system scope that has been completed.
 
 ---
 
@@ -90,16 +91,16 @@ The delivered solution includes the following business modules:
 | Sr. No. | System Functionality | Scope Covered | Amount (PKR) |
 |---|---|---|---:|
 | 1 | Discovery, planning, and solution architecture | Functional analysis, module planning, database/flow design, technical architecture alignment | 30,000 |
-| 2 | Authentication, user access control, RBAC, and onboarding | Secure login, password flows, role-based access control, user provisioning structure, access restrictions | 210,000 |
+| 2 | Authentication, user access control, RBAC, and onboarding | Secure login, password flows, role-based access control, user provisioning structure, access restrictions | 280,000 |
 | 3 | Team, department, and user management | Department CRUD, manager/member mapping, team structure, user assignment and administrative controls | 35,000 |
-| 4 | Task and assignment management | Task creation, assignment flows, due dates, late policies, member tracking, task lifecycle handling | 55,000 |
-| 5 | Document submission and secure file handling | Upload workflows, submission tracking, storage integration, late submission capture, controlled downloads | 40,000 |
-| 6 | AI document validation pipeline and rule engine | Parsing, OCR fallback, rule execution, weighted scoring, summaries, status generation, configurable validation logic | 90,000 |
-| 7 | Smart AI assistant with MCP, RAG, and AI usage logic | Conversational assistant, live data support, document-aware retrieval, MCP-style orchestration, thread history, AI credits/usage controls | 290,000 |
-| 8 | Self-hosted real-time messaging and collaboration module | Direct chat, group chat, attachments, presence, typing, reactions, replies, edit/delete flow | 170,000 |
+| 4 | Task and assignment management | Task creation, assignment flows, due dates, late policies, member tracking, task lifecycle handling | 40,000 |
+| 5 | Document submission and secure file handling | Upload workflows, submission tracking, storage integration, late submission capture, controlled downloads | 25,000 |
+| 6 | AI document validation pipeline and rule engine | Parsing, OCR fallback, rule execution, weighted scoring, summaries, status generation, configurable validation logic | 60,000 |
+| 7 | Smart AI assistant with MCP, RAG, and AI usage logic | Conversational assistant, live data support, document-aware retrieval, MCP-style orchestration, thread history, AI credits/usage controls | 180,000 |
+| 8 | Self-hosted real-time messaging and collaboration module | Direct chat, group chat, attachments, presence, typing, reactions, replies, edit/delete flow | 300,000 |
 | 9 | Announcements and materials library | Internal notice publishing, priority/expiry handling, shared materials repository, access-based visibility | 20,000 |
 | 10 | Dashboards, analytics, and reports | KPI cards, charts, trends, usage statistics, reporting views, operational monitoring screens | 25,000 |
-| 11 | Security, audit trail, rate limiting, and scheduled jobs | Audit logs, secure access layers, AI governance controls, abuse protection, cron jobs, recovery routines, policy-based controls | 100,000 |
+| 11 | Security, audit trail, rate limiting, and scheduled jobs | Audit logs, secure access layers, AI governance controls, abuse protection, cron jobs, recovery routines, policy-based controls | 70,000 |
 | 12 | QA, deployment, UAT support, and production launch | Testing, stabilization, deployment configuration, launch support, issue resolution during handover | 35,000 |
 |  | **Total Quotation** |  | **1,100,000** |
 
@@ -121,7 +122,7 @@ Included work:
 - Database and integration planning
 - Delivery structure for a scalable portal
 
-### 5.2 Authentication, User Access Control, RBAC, and User Onboarding — PKR 210,000
+### 5.2 Authentication, User Access Control, RBAC, and User Onboarding — PKR 280,000
 
 This covers the core identity, permission, and user-access foundation of the application.
 
@@ -147,7 +148,7 @@ Included work:
 - Team statistics and administrative oversight
 - Controlled visibility based on organization structure
 
-### 5.4 Task and Assignment Management — PKR 55,000
+### 5.4 Task and Assignment Management — PKR 40,000
 
 This is one of the central operational modules of the platform.
 
@@ -160,7 +161,7 @@ Included work:
 - Missed-deadline handling
 - Manager review flow for assigned work
 
-### 5.5 Document Submission and Secure File Handling — PKR 40,000
+### 5.5 Document Submission and Secure File Handling — PKR 25,000
 
 This covers the complete document intake lifecycle.
 
@@ -173,7 +174,7 @@ Included work:
 - Protected file access/download routing
 - Late reason capture and submission state management
 
-### 5.6 AI Document Validation Pipeline and Rule Engine — PKR 90,000
+### 5.6 AI Document Validation Pipeline and Rule Engine — PKR 60,000
 
 This module contains the core AI processing logic for automated document evaluation.
 
@@ -188,7 +189,7 @@ Included work:
 - AI workflow orchestration across validation stages
 - Final submission classification such as pass, fail, or review required
 
-### 5.7 Smart AI Assistant with MCP, RAG, and AI Usage Logic — PKR 290,000
+### 5.7 Smart AI Assistant with MCP, RAG, and AI Usage Logic — PKR 180,000
 
 This is one of the most technically demanding modules because it combines advanced AI interaction, MCP-style orchestration, retrieval logic, and governed AI usage.
 
@@ -203,7 +204,7 @@ Included work:
 - AI usage and credit limitation logic
 - Role-aware assistant experience
 
-### 5.8 Self-Hosted Real-Time Messaging and Collaboration Module — PKR 170,000
+### 5.8 Self-Hosted Real-Time Messaging and Collaboration Module — PKR 300,000
 
 This self-hosted messaging module enables internal communication without relying on external tools.
 
@@ -240,7 +241,7 @@ Included work:
 - Team/member performance views
 - Usage and operational summaries
 
-### 5.11 Security, Audit Trail, Rate Limiting, and Scheduled Jobs — PKR 100,000
+### 5.11 Security, Audit Trail, Rate Limiting, and Scheduled Jobs — PKR 70,000
 
 This portion covers platform hardening and operational reliability.
 
@@ -272,9 +273,9 @@ Included work:
 
 This final quotation is prepared on the following commercial basis:
 
-- The quotation covers the **complete portal scope** listed in this document as completed and delivered.
+- The quotation covers the **complete portal scope** listed in this document as completed.
 - The total commercial value is fixed at **PKR 1,100,000**.
-- Approximately **70% of the quotation value (PKR 770,000)** is intentionally weighted toward the platform's **self-hosted messaging system, AI MCP/RAG architecture, and user access control/security layers**, reflecting the highest-complexity implementation effort.
+- Approximately **53% of the quotation value (PKR 580,000)** is intentionally weighted toward the platform's **self-hosted real-time messaging system and user access control/RBAC layers**, reflecting the highest-complexity and highest-value implementation effort.
 - The quotation reflects completed software design, development, integration, testing, deployment, and handover support.
 - Post-delivery revisions and ongoing maintenance are evaluated separately based on scope and complexity.
 - Third-party recurring charges are **not included** unless separately agreed.
@@ -364,7 +365,7 @@ For billing and commercial reference, the following milestone structure may be u
 
 ## 10. Final Quotation
 
-Based on the complete functionality of the **Hierarchia Manager Portal**, including its admin/manager/member workflows, AI-powered document validation, Smart AI assistant, real-time communication modules, analytics, security controls, and deployment support, and considering that the system has been fully completed and delivered, the **final quoted project value** is:
+Based on the complete functionality of the **Hierarchia Manager Portal**, including its admin/manager/member workflows, AI-powered document validation, Smart AI assistant, real-time communication modules, analytics, security controls, and deployment support, and considering that the system has been fully completed, the **final quoted project value** is:
 
 # **Final Quotation: PKR 1,100,000**
 
@@ -377,6 +378,7 @@ Based on the complete functionality of the **Hierarchia Manager Portal**, includ
 ## 11. Closing Note
 
 This quotation serves as the final commercial record for the completed **Hierarchia Manager Portal** and is suitable for client submission, internal billing reference, or formal project closure documentation.
+
 
 If needed, this quotation can also be expanded into:
 

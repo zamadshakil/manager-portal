@@ -96,6 +96,7 @@
     "@types/react-window": "1.8.8",
     "eslint": "^9.39.4",
     "eslint-config-next": "16.2.4",
+    "marked": "^18.0.3",
     "postcss": "^8.5",
     "tailwindcss": "^4.2.0",
     "tw-animate-css": "1.3.3",

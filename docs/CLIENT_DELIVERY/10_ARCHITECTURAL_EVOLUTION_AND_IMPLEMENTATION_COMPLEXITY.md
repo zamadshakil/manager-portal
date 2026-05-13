@@ -1,7 +1,7 @@
 # Hierarchia Manager Portal — Architectural Evolution and Implementation Complexity
 
 > **Client Delivery Document** | Version 1.0 | May 12, 2026  
-> **Prepared by:** JobFlowAI Engineering
+> **Prepared by:** Shahroz Imran
 
 ---
 
