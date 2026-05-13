@@ -1220,8 +1220,14 @@ async function postHandler(req: Request) {
       userAllowedTables.includes("validation_rules") && "validation rules & validation runs",
       userAllowedTables.includes("announcements") && "announcements",
       userAllowedTables.includes("materials") && "materials",
-      "teams, profiles, activity log, AI credits, uploaded documents"
+      "teams (a.k.a. departments), profiles, activity log, AI credits, uploaded documents"
     ].filter(Boolean).join(", ")}.`,
+    "",
+    "## TERMINOLOGY — IMPORTANT",
+    "- In this portal the words **\"department\"** and **\"team\"** refer to the SAME entity. The Main Admin UI labels them \"Departments\"; the database stores them in the `teams` table.",
+    "- Treat \"department\", \"departments\", \"dept\", \"division\", \"team\", and \"teams\" as synonyms. ALWAYS query the `teams` table for any of these terms — NEVER reply \"I don't have information on departments\".",
+    "- A department's members are the profiles whose `team_id` equals that team's id. A department's manager is the profile referenced by `teams.manager_id`.",
+    "- When the user asks \"tell me about the departments\" (or teams), list every row in `teams` with its name, description, and — if useful — member count (count profiles with that `team_id`) and the manager's full_name (resolve `manager_id` via `profiles`).",
     "",
     "## CURRENT DATE (ISO 8601, UTC) — use these directly in gte/lte filters",
     `- now: ${todayIso}`,
