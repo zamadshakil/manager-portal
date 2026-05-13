@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { get as getBlob, presignGet } from "@/lib/r2"
+import { get as getBlob, getByKey, presignGet } from "@/lib/r2"
 import { createClient } from "@/lib/supabase/server"
 import { requireProfile } from "@/lib/auth"
 
@@ -66,6 +66,30 @@ export async function GET(
   }
 
   if (!blobUrl) return NextResponse.json({ error: "No file" }, { status: 404 })
+
+  // ?stream=1 — proxy the bytes server-side so the browser never has to follow
+  // a cross-origin redirect to R2 (which would require R2 CORS headers).
+  // Used by the inline PDF / image preview in the UI.
+  const stream = request.nextUrl.searchParams.get("stream") === "1"
+  if (stream && type !== "chat_attachment") {
+    const key = blobPathname ?? blobUrl.replace(/^https?:\/\/[^/]+\//, "")
+    try {
+      const result = await getByKey(key)
+      const contentType = result.blob.contentType || mimeType || "application/octet-stream"
+      const safeName = (fileName ?? "preview").replace(/[^\w.\-]+/g, "_")
+      return new NextResponse(result.stream, {
+        headers: {
+          "Content-Type": contentType,
+          "Content-Disposition": `inline; filename="${safeName}"`,
+          "Cache-Control": "private, max-age=60",
+          "X-Content-Type-Options": "nosniff",
+        },
+      })
+    } catch (err) {
+      console.error("[download] stream fetch failed", key, err)
+      return NextResponse.json({ error: "Upstream fetch failed" }, { status: 502 })
+    }
+  }
 
   // For material and submission: redirect to a short-lived presigned GET URL.
   // This uses blob_pathname (the stored R2 key) directly, bypassing the

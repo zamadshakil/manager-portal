@@ -205,7 +205,7 @@ function PreviewPane({
     let objectUrl: string | null = null
     setIsBlobLoading(true)
     setBlobPreviewUrl(null)
-    fetch(`/api/download/${submission.id}?type=submission`)
+    fetch(`/api/download/${submission.id}?type=submission&stream=1`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch")
         return res.blob()

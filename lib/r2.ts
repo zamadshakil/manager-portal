@@ -120,6 +120,16 @@ export async function putRaw(
   }
 }
 
+export async function getByKey(key: string) {
+  const res = await r2.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))
+  const body = res.Body as any
+  const stream =
+    body && typeof body.transformToWebStream === "function"
+      ? body.transformToWebStream()
+      : body
+  return { stream, blob: { contentType: res.ContentType } }
+}
+
 export async function get(url: string, options?: any) {
   if (!url) throw new Error("No URL provided");
   const key = url.replace(`${PUBLIC_URL}/`, "")
