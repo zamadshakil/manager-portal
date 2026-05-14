@@ -17,7 +17,17 @@ export async function proxy(request: NextRequest) {
     ) {
       const hasSession = !!request.cookies.get("ops_session")?.value
       if (!hasSession) {
-        const loginUrl = new URL("/ops/login", request.url)
+        const forwardedHost = request.headers.get("x-forwarded-host")
+        const forwardedProto = request.headers.get("x-forwarded-proto")
+        const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
+        let baseUrl = request.url
+        if (forwardedHost) {
+          const proto = forwardedProto ? forwardedProto.split(",")[0].trim() : "https"
+          baseUrl = `${proto}://${forwardedHost.split(",")[0].trim()}`
+        } else if (siteUrl) {
+          baseUrl = siteUrl
+        }
+        const loginUrl = new URL("/ops/login", baseUrl)
         loginUrl.searchParams.set("from", pathname)
         return NextResponse.redirect(loginUrl)
       }

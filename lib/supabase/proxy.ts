@@ -108,8 +108,13 @@ export async function updateSession(request: NextRequest) {
     }
     const url = request.nextUrl.clone()
     // In Railway/Docker the internal bind address (0.0.0.0) can leak into
-    // request.nextUrl. Prefer the x-forwarded-host header when available so
-    // the redirect always targets the correct public hostname.
+    // request.nextUrl. Resolution order:
+    //  1. x-forwarded-host / x-forwarded-proto from the upstream proxy.
+    //  2. NEXT_PUBLIC_SITE_URL — the canonical public domain set in Railway
+    //     env vars (e.g. https://system.zamdevai.com). This is the reliable
+    //     fallback when Railway does not forward the x-forwarded-host header.
+    //  3. Leave url untouched (local dev where request.nextUrl is already
+    //     correct, e.g. http://localhost:3000).
     const forwardedHost = request.headers.get("x-forwarded-host")
     const forwardedProto = request.headers.get("x-forwarded-proto")
     if (forwardedHost) {
@@ -117,6 +122,15 @@ export async function updateSession(request: NextRequest) {
       url.port = ""
       if (forwardedProto) {
         url.protocol = forwardedProto.split(",")[0].trim() + ":"
+      }
+    } else if (process.env.NEXT_PUBLIC_SITE_URL) {
+      try {
+        const siteUrl = new URL(process.env.NEXT_PUBLIC_SITE_URL)
+        url.hostname = siteUrl.hostname
+        url.port = ""
+        url.protocol = siteUrl.protocol
+      } catch {
+        // Ignore malformed NEXT_PUBLIC_SITE_URL — leave url as-is.
       }
     }
     url.pathname = hadAuthCookie ? "/auth/session-recovery" : "/auth/login"
