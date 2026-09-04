@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
+import { cookies } from "next/headers"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { createClient } from "@/lib/supabase/server"
 import { getCanonicalSiteUrl } from "@/lib/site-url"
+import { verifyToken } from "@/lib/ops/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -15,7 +18,40 @@ function djb2(str: string): string {
 const ERROR_EVENT_TYPES = new Set(["js_error", "unhandled_rejection", "console_error", "console_warn"])
 const SESSION_EVENT_TYPES = new Set(["session_start", "heartbeat", "logout"])
 
+const SAFE_METADATA_KEYS = new Set([
+  "lineno",
+  "colno",
+  "screen",
+  "timezone",
+  "language",
+  "fetch_threw",
+])
+
+function safeMetadata(value: Record<string, unknown> | undefined) {
+  if (!value) return {}
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key, item]) => SAFE_METADATA_KEYS.has(key) && ["string", "number", "boolean"].includes(typeof item))
+      .map(([key, item]) => [key, typeof item === "string" ? item.slice(0, 200) : item]),
+  )
+}
+
+function safeUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  try {
+    const parsed = new URL(value, getCanonicalSiteUrl())
+    return `${parsed.origin}${parsed.pathname}`.slice(0, 500)
+  } catch {
+    return value.split(/[?#]/, 1)[0]?.slice(0, 500)
+  }
+}
+
 export async function POST(request: NextRequest) {
+  const contentLength = Number(request.headers.get("content-length") || "0")
+  if (contentLength > 256_000) {
+    return NextResponse.json({ ok: false }, { status: 413 })
+  }
+
   if (process.env.NODE_ENV !== "development") {
     const origin = request.headers.get("origin")
     if (origin) {
@@ -27,8 +63,40 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    let verifiedUser: { id: string | null; email: string | null; role: string | null } | null = null
+    const jar = await cookies()
+    const opsToken = jar.get("ops_session")?.value
+    const opsPayload = opsToken ? verifyToken(opsToken) : null
+
+    if (opsPayload) {
+      verifiedUser = { id: null, email: opsPayload.sub, role: "ops_admin" }
+    } else {
+      try {
+        const supabase = await createClient()
+        const { data } = await supabase.auth.getUser()
+        if (data.user) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("email, role")
+            .eq("id", data.user.id)
+            .maybeSingle()
+          verifiedUser = {
+            id: data.user.id,
+            email: profile?.email ?? data.user.email ?? null,
+            role: profile?.role ?? null,
+          }
+        }
+      } catch {
+        // Missing or invalid Supabase sessions are handled by the 401 below.
+      }
+    }
+
+    if (!verifiedUser) {
+      return NextResponse.json({ ok: false }, { status: 401 })
+    }
+
     const body = await request.json()
-    const { events, session_id, user_id, user_email, user_role } = body as {
+    const { events, session_id } = body as {
       events: Array<{
         type: string
         message?: string
@@ -39,16 +107,9 @@ export async function POST(request: NextRequest) {
         duration_ms?: number
         method?: string
         url?: string
-        request_headers?: Record<string, string>
-        request_body_preview?: string
-        response_headers?: Record<string, string>
-        response_preview?: string
         metadata?: Record<string, unknown>
       }>
       session_id?: string
-      user_id?: string
-      user_email?: string
-      user_role?: string
     }
 
     if (!Array.isArray(events) || events.length === 0) {
@@ -72,10 +133,10 @@ export async function POST(request: NextRequest) {
       // ── Page views ───────────────────────────────────────────────────────
       if (ev.type === "page_view") {
         pageViewInserts.push({
-          user_id: user_id || null,
-          user_email: user_email || null,
+          user_id: verifiedUser.id,
+          user_email: verifiedUser.email,
           session_id: session_id || null,
-          pathname: (ev.pathname || ev.source_url || "").slice(0, 500),
+          pathname: (ev.pathname || safeUrl(ev.source_url) || "").slice(0, 500),
           user_agent: ua,
         })
         continue
@@ -84,14 +145,14 @@ export async function POST(request: NextRequest) {
       // ── Session events (session_start / heartbeat / logout) ──────────────
       if (SESSION_EVENT_TYPES.has(ev.type)) {
         sessionInserts.push({
-          user_id: user_id || null,
-          user_email: user_email || null,
-          user_role: user_role || null,
+          user_id: verifiedUser.id,
+          user_email: verifiedUser.email,
+          user_role: verifiedUser.role,
           session_id: session_id || crypto.randomUUID(),
           event_type: ev.type,
           ip_address: ip || null,
           user_agent: ua,
-          metadata: ev.metadata || {},
+          metadata: safeMetadata(ev.metadata),
         })
         continue
       }
@@ -106,41 +167,37 @@ export async function POST(request: NextRequest) {
           error_message: msg,
           stack_trace: ev.stack?.slice(0, 3000) || null,
           path: ev.pathname?.slice(0, 500) || null,
-          user_id: user_id || null,
+          user_id: verifiedUser.id,
           fingerprint: djb2(`${ev.type}:${msg.slice(0, 120)}`),
           context: {
-            source_url: ev.source_url,
+            source_url: safeUrl(ev.source_url),
             session_id,
-            user_email,
-            user_role,
+            user_email: verifiedUser.email,
+            user_role: verifiedUser.role,
             event_type: ev.type,
-            ...(ev.metadata || {}),
+            ...safeMetadata(ev.metadata),
           },
         })
         continue
       }
 
-      // ── Network errors (with full diagnostic detail) ─────────────────────
+      // ── Network errors (status and timing only) ──────────────────────────
       if (ev.type === "network_error") {
         requestInserts.push({
           method: (ev.method || "GET").toUpperCase().slice(0, 10),
-          path: (ev.url || ev.pathname || "unknown").slice(0, 500),
+          path: (safeUrl(ev.url) || ev.pathname || "unknown").slice(0, 500),
           status_code: typeof ev.status_code === "number" ? ev.status_code : null,
           duration_ms: typeof ev.duration_ms === "number" ? ev.duration_ms : null,
-          user_id: user_id || null,
+          user_id: verifiedUser.id,
           user_agent: ua,
           error_message: ev.message?.slice(0, 500) || null,
           metadata: {
             source: "client_fetch",
             session_id,
-            user_email,
-            user_role,
+            user_email: verifiedUser.email,
+            user_role: verifiedUser.role,
             pathname: ev.pathname,
-            request_headers: ev.request_headers || {},
-            request_body_preview: ev.request_body_preview || null,
-            response_headers: ev.response_headers || {},
-            response_preview: ev.response_preview || null,
-            ...(ev.metadata || {}),
+            ...safeMetadata(ev.metadata),
           },
         })
         continue

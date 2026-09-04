@@ -3,12 +3,6 @@
 import { useEffect, useRef } from "react"
 import { usePathname } from "next/navigation"
 
-interface OpsCollectorProps {
-  userId?: string
-  userEmail?: string
-  userRole?: string
-}
-
 interface CollectorEvent {
   type:
     | "page_view"
@@ -28,11 +22,6 @@ interface CollectorEvent {
   duration_ms?: number
   method?: string
   url?: string
-  // Rich network diagnostics
-  request_headers?: Record<string, string>
-  request_body_preview?: string
-  response_headers?: Record<string, string>
-  response_preview?: string
   metadata?: Record<string, unknown>
 }
 
@@ -51,30 +40,7 @@ function getSessionId(): string {
   }
 }
 
-function headersToObject(headers: HeadersInit | undefined): Record<string, string> {
-  const out: Record<string, string> = {}
-  try {
-    new Headers(headers ?? {}).forEach((v, k) => {
-      // Skip auth tokens from being captured
-      if (!["authorization", "cookie", "set-cookie"].includes(k.toLowerCase())) {
-        out[k] = v
-      }
-    })
-  } catch { /* noop */ }
-  return out
-}
-
-function responseHeadersToObject(headers: Headers): Record<string, string> {
-  const out: Record<string, string> = {}
-  try {
-    headers.forEach((v, k) => {
-      if (!["set-cookie"].includes(k.toLowerCase())) out[k] = v
-    })
-  } catch { /* noop */ }
-  return out
-}
-
-export function OpsCollector({ userId, userEmail, userRole }: OpsCollectorProps) {
+export function OpsCollector() {
   const pathname = usePathname()
   const sessionId = useRef<string>(getSessionId())
   const queue = useRef<CollectorEvent[]>([])
@@ -90,9 +56,6 @@ export function OpsCollector({ userId, userEmail, userRole }: OpsCollectorProps)
     const payload = JSON.stringify({
       events: batch,
       session_id: sessionId.current,
-      user_id: userId,
-      user_email: userEmail,
-      user_role: userRole,
     })
     const blob = new Blob([payload], { type: "application/json" })
     const sent = typeof navigator !== "undefined" && navigator.sendBeacon?.(INGEST_URL, blob)
@@ -182,7 +145,8 @@ export function OpsCollector({ userId, userEmail, userRole }: OpsCollectorProps)
       }
     }
 
-    // Fetch patching — captures rich diagnostics on every failed request
+    // Fetch patching — captures status/timing without recording request or
+    // response content, which may contain passwords, tokens, or private data.
     const origFetch = window.fetch.bind(window)
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url =
@@ -192,22 +156,11 @@ export function OpsCollector({ userId, userEmail, userRole }: OpsCollectorProps)
       if (url.includes(INGEST_URL)) return origFetch(input, init)
 
       const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase()
-      const reqHeaders = headersToObject(init?.headers ?? (input instanceof Request ? input.headers : undefined))
-      let reqBodyPreview: string | undefined
-      try {
-        if (init?.body && typeof init.body === "string") {
-          reqBodyPreview = init.body.slice(0, 400)
-        }
-      } catch { /* noop */ }
-
       const t = Date.now()
       try {
         const res = await origFetch(input, init)
         const duration_ms = Date.now() - t
         if (!res.ok && res.status >= 400) {
-          const resHeaders = responseHeadersToObject(res.headers)
-          let resPreview: string | undefined
-          try { resPreview = await res.clone().text().then((t) => t.slice(0, 800)) } catch { /* noop */ }
           enqueue({
             type: "network_error",
             url: url.slice(0, 400),
@@ -215,10 +168,6 @@ export function OpsCollector({ userId, userEmail, userRole }: OpsCollectorProps)
             status_code: res.status,
             duration_ms,
             pathname: location.pathname,
-            request_headers: reqHeaders,
-            request_body_preview: reqBodyPreview,
-            response_headers: resHeaders,
-            response_preview: resPreview,
           })
         }
         return res
@@ -231,8 +180,6 @@ export function OpsCollector({ userId, userEmail, userRole }: OpsCollectorProps)
           duration_ms: Date.now() - t,
           message: (err as Error)?.message,
           pathname: location.pathname,
-          request_headers: reqHeaders,
-          request_body_preview: reqBodyPreview,
           metadata: { fetch_threw: true },
         })
         throw err
@@ -259,7 +206,7 @@ export function OpsCollector({ userId, userEmail, userRole }: OpsCollectorProps)
       if (heartbeatTimer.current) clearInterval(heartbeatTimer.current)
       flush()
     }
-  }, [userId, userEmail, userRole])
+  }, [])
 
   return null
 }

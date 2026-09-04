@@ -44,7 +44,7 @@ export default async function TaskDetailPage({
   // identical to the SSR pass and avoids React hydration error #418 when
   // `router.refresh()` re-reconciles the tree (e.g. after the submission
   // pipeline reaches a terminal status).
-  const initialNow = Date.now()
+  const initialNow = Number(new Date())
 
   const myAssignment = await getMyAssignmentForTask(profile, id)
   const scope = { team_id: task.team_id, is_global: false }

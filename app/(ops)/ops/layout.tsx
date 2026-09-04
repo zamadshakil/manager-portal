@@ -16,14 +16,12 @@ export default async function OpsLayout({ children }: { children: React.ReactNod
   const xPathname = h.get("x-pathname") ?? ""
   const isLoginPage = xPathname === "/ops/login" || xPathname.startsWith("/ops/login?")
 
-  let opsUsername: string | undefined
   if (!isLoginPage) {
     const jar = await cookies()
     const token = jar.get("ops_session")?.value
     if (!token || !verifyToken(token)) {
       redirect("/ops/login")
     }
-    opsUsername = verifyToken(token!)?.sub
   }
 
   if (isLoginPage) {
@@ -60,7 +58,7 @@ export default async function OpsLayout({ children }: { children: React.ReactNod
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {children}
       </main>
-      <OpsCollector userEmail={opsUsername} userRole="ops_admin" />
+      <OpsCollector />
     </div>
   )
 }

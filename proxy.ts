@@ -43,36 +43,6 @@ export async function proxy(request: NextRequest) {
   response.headers.set("x-trace-id", traceId)
   response.headers.set("x-pathname", pathname)
 
-  // Fire-and-forget: log dashboard page navigations so the ops monitor
-  // shows REQUESTS (24H) even when users are just browsing pages.
-  if (pathname.startsWith("/dashboard")) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    if (supabaseUrl && serviceKey) {
-      fetch(`${supabaseUrl}/rest/v1/system_request_logs`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: serviceKey,
-          Authorization: `Bearer ${serviceKey}`,
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify({
-          method: request.method,
-          path: pathname,
-          status_code: 200,
-          duration_ms: 0,
-          ip_address:
-            request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-            request.headers.get("x-real-ip") ??
-            null,
-          user_agent: request.headers.get("user-agent") ?? null,
-          metadata: { source: "page_navigation", trace_id: traceId },
-        }),
-      }).catch(() => {})
-    }
-  }
-
   return response
 }
 

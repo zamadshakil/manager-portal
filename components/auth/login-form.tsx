@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { createClient } from "@/lib/supabase/client"
 
-export default function LoginForm() {
+export default function LoginForm({ showGuestAccess = false }: { showGuestAccess?: boolean }) {
   const params = useSearchParams()
   const rawNext = params.get("next") || ""
   // C-4: Only allow relative paths — reject absolute URLs, protocol-relative
@@ -19,12 +19,18 @@ export default function LoginForm() {
     rawNext && /^\/[a-zA-Z0-9_\-/.?=&#%]*$/.test(rawNext) && !rawNext.startsWith("//")
       ? rawNext
       : "/dashboard"
+  const guestStatus = params.get("guest")
+  const guestError = guestStatus === "unavailable"
+    ? "Guest access is temporarily unavailable."
+    : guestStatus === "error"
+      ? "Guest sign-in failed. Please try again."
+      : null
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [remember, setRemember] = useState(true)
   const [showPassword, setShowPassword] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(guestError)
   const [loading, setLoading] = useState(false)
 
   async function onSubmit(e: React.FormEvent) {
@@ -170,6 +176,43 @@ export default function LoginForm() {
           )}
         </Button>
       </form>
+
+      {showGuestAccess ? (
+        <div className="space-y-3 border-t border-white/10 pt-5">
+          <div className="text-center">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-300">
+              Showcase access
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Use a shared, isolated guest workspace. No password required.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <form action="/auth/guest" method="post">
+              <input type="hidden" name="persona" value="manager" />
+              <input type="hidden" name="next" value={next} />
+              <Button
+                type="submit"
+                variant="outline"
+                className="w-full border-blue-400/25 bg-blue-400/5 text-blue-100 hover:bg-blue-400/10 hover:text-white"
+              >
+                Guest manager
+              </Button>
+            </form>
+            <form action="/auth/guest" method="post">
+              <input type="hidden" name="persona" value="member" />
+              <input type="hidden" name="next" value={next} />
+              <Button
+                type="submit"
+                variant="outline"
+                className="w-full border-white/15 bg-white/5 text-slate-200 hover:bg-white/10 hover:text-white"
+              >
+                Guest member
+              </Button>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       <p className="text-center text-sm text-slate-500">
         Need an account?{" "}

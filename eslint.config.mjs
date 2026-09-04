@@ -20,6 +20,7 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "dist/**",
+      "load-tests/**",
       "scripts/**",
       "public/**",
       "next-env.d.ts",
@@ -39,6 +40,14 @@ const eslintConfig = [
       ],
       "react/no-unescaped-entities": "off",
       "@next/next/no-html-link-for-pages": "off",
+      // Next 16.3 enables the React Compiler lint suite. Keep these findings
+      // visible as migration warnings so legacy components do not make the
+      // baseline lint command fail while they are incrementally refactored.
+      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/purity": "warn",
+      "react-hooks/refs": "warn",
+      "react-hooks/immutability": "warn",
+      "react-hooks/preserve-manual-memoization": "warn",
     },
   },
 ]

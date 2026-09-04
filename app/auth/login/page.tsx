@@ -39,7 +39,9 @@ export default function LoginPage() {
           {/* Form Area */}
           <div className="px-8 pb-8">
             <Suspense fallback={null}>
-              <LoginForm />
+              <LoginForm
+                showGuestAccess={process.env.SHOWCASE_GUEST_LOGIN_ENABLED === "true"}
+              />
             </Suspense>
           </div>
           

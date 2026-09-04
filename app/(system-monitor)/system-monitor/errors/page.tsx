@@ -26,6 +26,7 @@ async function handleResolve(id: string) {
 export default async function ErrorLogsPage({ searchParams }: PageProps) {
   await requireRole(["main_admin"])
   const sp = await searchParams
+  const filterNow = Number(new Date())
 
   const page = Math.max(1, parseInt(sp.page ?? "1", 10))
   const offset = (page - 1) * LIMIT
@@ -80,10 +81,10 @@ export default async function ErrorLogsPage({ searchParams }: PageProps) {
           className="rounded-lg border border-border bg-background px-3 py-1.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-primary"
         >
           <option value="">All time</option>
-          <option value={new Date(Date.now() - 1 * 3600000).toISOString()}>Last 1h</option>
-          <option value={new Date(Date.now() - 6 * 3600000).toISOString()}>Last 6h</option>
-          <option value={new Date(Date.now() - 24 * 3600000).toISOString()}>Last 24h</option>
-          <option value={new Date(Date.now() - 7 * 86400000).toISOString()}>Last 7d</option>
+          <option value={new Date(filterNow - 1 * 3600000).toISOString()}>Last 1h</option>
+          <option value={new Date(filterNow - 6 * 3600000).toISOString()}>Last 6h</option>
+          <option value={new Date(filterNow - 24 * 3600000).toISOString()}>Last 24h</option>
+          <option value={new Date(filterNow - 7 * 86400000).toISOString()}>Last 7d</option>
         </select>
 
         <label className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-[13px] cursor-pointer hover:bg-muted/50 transition-colors">

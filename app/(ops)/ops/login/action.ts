@@ -2,9 +2,13 @@
 
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
-import { signToken, verifyCredentials } from "@/lib/ops/auth"
+import { isOpsAuthConfigured, signToken, verifyCredentials } from "@/lib/ops/auth"
 
 export async function loginAction(formData: FormData) {
+  if (!isOpsAuthConfigured()) {
+    redirect("/ops/login?error=unconfigured")
+  }
+
   const username = (formData.get("username") as string ?? "").trim()
   const password = (formData.get("password") as string ?? "")
 

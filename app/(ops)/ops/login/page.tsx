@@ -7,6 +7,7 @@ interface Props {
 export default async function OpsLoginPage({ searchParams }: Props) {
   const params = await searchParams
   const hasError = params.error === "invalid"
+  const isUnconfigured = params.error === "unconfigured"
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-zinc-950">
@@ -35,6 +36,12 @@ export default async function OpsLoginPage({ searchParams }: Props) {
           {hasError && (
             <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">
               Invalid credentials. Try again.
+            </div>
+          )}
+
+          {isUnconfigured && (
+            <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-4 py-3 text-sm text-amber-300">
+              Ops access is disabled until secure credentials are configured.
             </div>
           )}
 
