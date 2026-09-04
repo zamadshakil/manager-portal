@@ -1,0 +1,22 @@
+HIERARCHIA / ZAMDEV AI — WORKFLOW AUDIT WORKSHEET
+
+Workflow name:
+Owner and reviewer:
+Recurring deliverable:
+Weekly submission volume:
+Minutes per first review:
+Percentage returned for one repeat review:
+Top three return reasons:
+Three objective checklist rules:
+Judgment calls that require a human:
+Required inputs and accepted file types:
+Deadline / late work policy:
+Access and data sensitivity:
+One-team pilot scope:
+Baseline period:
+Pilot success criteria and stop conditions:
+Next action, owner and date:
+
+Use anonymized examples. Do not include passwords, confidential client
+documents or sensitive personal information.
+Contact: mail@zamdevai.com

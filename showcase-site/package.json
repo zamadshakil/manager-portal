@@ -1,0 +1,1 @@
+{"name":"hierarchia-showcase","private":true,"scripts":{"build":"next build","deploy":"wrangler deploy","dev":"next dev -p 3001"},"dependencies":{"next":"16.3.4","react":"^19.2.8","react-dom":"^19.2.8"}}

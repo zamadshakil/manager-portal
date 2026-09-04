@@ -18,6 +18,9 @@ env_manager_portal.txt
 # Common ignores
 node_modules
 .next/
+out/
+.wrangler/
+.dev.vars*
 .DS_Store
 tsconfig.tsbuildinfo
 __pycache__/

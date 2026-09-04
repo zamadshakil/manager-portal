@@ -1,0 +1,29 @@
+name: Code quality
+on:
+  pull_request:
+  push:
+    branches: [main, preview/showcase-guest-access-20260904]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod
+      - run: pnpm test:funnel
+      - run: pnpm lint
+      - run: pnpm build
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm showcase:build
+      - run: pnpm exec tsc -p showcase-site/worker-tsconfig.json
+      - run: pnpm exec wrangler deploy --config showcase-site/wrangler.jsonc --dry-run

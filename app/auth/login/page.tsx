@@ -1,5 +1,6 @@
 import { Suspense } from "react"
 import Image from "next/image"
+import Link from "next/link"
 import LoginForm from "@/components/auth/login-form"
 
 export const dynamic = "force-dynamic"
@@ -38,6 +39,16 @@ export default function LoginPage() {
 
           {/* Form Area */}
           <div className="px-8 pb-8">
+            {process.env.SHOWCASE_SITE_ENABLED === "true" && (
+              <div className="mb-6 space-y-3 rounded-lg border border-emerald-500/30 p-4 text-sm text-white">
+                <p>Explore a sample walkthrough without an account.</p>
+                <div className="flex gap-3 underline underline-offset-4">
+                  <Link href="/showcase/demo?role=manager">Guest manager sample</Link>
+                  <Link href="/showcase/demo?role=member">Guest member sample</Link>
+                </div>
+                <p className="text-xs text-slate-400">Simulation only. Live portal sign-in is separate below.</p>
+              </div>
+            )}
             <Suspense fallback={null}>
               <LoginForm
                 showGuestAccess={process.env.SHOWCASE_GUEST_LOGIN_ENABLED === "true"}

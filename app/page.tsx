@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation"
 import { getCurrentProfile, redirectToAuthEntry } from "@/lib/auth"
 import { getSupabaseEnv } from "@/lib/env"
+import { ShowcaseHome } from "@/components/showcase/home"
 
 export const dynamic = "force-dynamic"
 
 export default async function RootPage() {
+  if (process.env.SHOWCASE_SITE_ENABLED === "true") return <ShowcaseHome />
   // Defense-in-depth: if the Supabase env vars are missing (key rotation,
   // first deploy on Railway, broken `.env.local`, …) we don't want the
   // whole site to 500 with the unhelpful "URL and Key are required" stack.

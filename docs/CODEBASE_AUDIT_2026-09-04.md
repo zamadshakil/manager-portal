@@ -7,6 +7,12 @@ Audit branch: `preview/showcase-guest-access-20260904`
 
 ## Executive summary
 
+### Implementation update on 5 September 2026
+
+The sales funnel is now live at https://showcase.zamdevai.com on Cloudflare, with a separate static showcase and a scoped Brevo intake API. This supersedes the Vercel hostname/hosting plan below. The public manager/member experience is explicitly a browser-local simulation, not the complete authenticated portal. The separate Supabase showcase backend remains unprovisioned; the original production-readiness cautions still apply.
+
+Ten funnel unit tests now cover validation, scoring, estimates, trusted origins, fail-closed configuration and scoped provider persistence. CI and Dependabot configuration have been added on the preview branch. These do not replace the still-missing full-portal authorization, RLS, migration and E2E tests; main-branch protection and repository security settings are unchanged. Current checks pass: application and static builds, TypeScript and production dependency audit (zero known advisories). ESLint retains 408 legacy warnings. Live intake persisted an owned-address test contact to the correct list without marketing enrollment, then the test contact was deleted. No outreach was sent. See `docs/sales-assets/OPERATIONS.md` for the current handoff; remaining sections preserve the original audit baseline and disposition.
+
 The codebase is a substantial Next.js 16 application (520 tracked files, 328 TypeScript files, approximately 52,275 TypeScript lines, and 59 SQL migrations). Its role-aware dashboard, Supabase access model, security headers, and server-side authorization checks provide a credible foundation for a controlled showcase. It was not ready for a public preview at the audit baseline because production fallbacks exposed a predictable operations-console login, telemetry accepted untrusted identity data and captured sensitive request content, the production dependency graph contained 55 known advisories, and the former hosting/backend footprint was unavailable.
 
 The audit branch fixes the directly exploitable findings, adds an isolated two-persona guest login, and updates the dependency graph to zero known production advisories. The application now builds and type-checks successfully. It is suitable for an isolated, disposable showcase after the preview database, guest accounts, and public hostname are provisioned. It should not be connected to real production data.

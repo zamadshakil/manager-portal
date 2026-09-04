@@ -4,6 +4,14 @@ import { updateSession } from "@/lib/supabase/proxy"
 export async function proxy(request: NextRequest) {
   const traceId = crypto.randomUUID().replace(/-/g, "")
   const { pathname } = request.nextUrl
+  // The sales surface never reads portal sessions or private workspace data.
+  if (pathname === "/showcase" || pathname.startsWith("/showcase/") ||
+      pathname === "/api/funnel/leads" ||
+      (pathname === "/" && process.env.SHOWCASE_SITE_ENABLED === "true")) {
+    const res = NextResponse.next()
+    res.headers.set("x-trace-id", traceId)
+    return res
+  }
 
   // /ops/* and /api/ops/* are fully independent of Supabase auth.
   // Full JWT verification is done server-side in the layout + API routes
