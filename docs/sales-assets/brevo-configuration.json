@@ -38,5 +38,7 @@
     "Nurture 05 - Close the loop": 17
   },
   "automaticSending": false,
-  "notes": "Draft templates only. No contacts imported. Confirmed opt-in, mailing address and unsubscribe QA required before activating nurture."
+  "mailingAddress": "Street 8, PCSIR, Johar Town, Lahore 54000, Pakistan",
+  "mailingAddressStatus": "Owner-supplied address applied and read back from inactive templates 13 through 17; postal delivery not independently verified.",
+  "notes": "Draft templates only. No contacts imported or emails sent. Sender verification, confirmed opt-in and unsubscribe QA remain required before activating nurture."
 }

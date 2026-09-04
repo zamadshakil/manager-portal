@@ -50,9 +50,11 @@ Before every follow-up, check the provider blocklist, list 21 and HIER_STOP_FOLL
 
 Templates 13 through 17 are saved as inactive nurture drafts. The authenticated sender is mail@zamdevai.com with display name Zamad at ZamDev AI and replies directed to that address. The personal Gmail is an account administrator identity, not the planned campaign From address.
 
-The owner has requested hirarchia@zamdevai.com as the funnel email address. It is not currently listed as an active Brevo sender, and its receiving mailbox has not been verified. Confirm the spelling, provision or verify receiving access, then verify the sender before replacing the working address. This email address does not replace the physical business mailing address needed for the footer.
+The owner has requested hirarchia@zamdevai.com as the funnel email address. It is not currently listed as an active Brevo sender, and its receiving mailbox has not been verified. Confirm the spelling, provision or verify receiving access, then verify the sender before replacing the working address.
 
-Before activation, obtain the owner-approved business mailing address, add it to every footer, verify sender and domain status, and review the final copy. Test the opt-in confirmation and unsubscribe flow with owned test addresses. Record the confirmation time and source, verify suppression and stop-on-reply behavior, and exclude existing customers and active pilots where the content is no longer relevant. Keep templates inactive until these checks pass.
+The owner-supplied footer address is Street 8, PCSIR, Johar Town, Lahore 54000, Pakistan. It has been added to all five inactive drafts and read back from Brevo. This is the address supplied for publication, not an independent postal-delivery verification.
+
+Before activation, verify sender and domain status and review the final copy. Test the opt-in confirmation and unsubscribe flow with owned test addresses. Record the confirmation time and source, verify suppression and stop-on-reply behavior, and exclude existing customers and active pilots where the content is no longer relevant. Keep templates inactive until these checks pass.
 
 The native automation workflow has not been created. Configure one only after confirming the existing plan supports the required triggers and exclusions without an upgrade. If it does not, use a reviewed manual send process to confirmed opt-ins or ask the owner to choose an alternative. Do not accept a trial or upgrade on their behalf.
 

@@ -33,7 +33,9 @@ The compatibility date is 2026-09-04 (UTC deployment date). Do not advance it wi
 
 BREVO_API_KEY is installed through `wrangler secret put`; never put its value in wrangler.jsonc, a command argument, browser source, a document or Git. `.env.local` is gitignored and restricted to the current Windows user. It stores the owner's local management key. The generated Worker types contain only the secret's name and type.
 
-`node scripts/configure-funnel.mjs` idempotently configures the dedicated lists, attributes and inactive templates using the local key. It does not enroll existing contacts or send messages. Do not run it after manually customizing templates without reviewing the generated copy: it updates those dedicated templates from `email-sequences.json`.
+`node scripts/configure-funnel.mjs` idempotently configures the dedicated lists, attributes and inactive templates using the local key. It does not enroll existing contacts or send messages. It reuses existing templates without replacing their copy; `email-sequences.json` supplies new templates only.
+
+`node scripts/update-funnel-address.mjs` updates only the address line in the five known inactive templates, preserving their copy, sender, reply-to and unsubscribe placeholder. The address is read from the gitignored `.env.funnel.local` file and was applied to IDs 13 through 17. It does not activate templates or change the Brevo billing/company address.
 
 For rotation, create a replacement in Brevo, update the protected local file, run `node scripts/upload-funnel-secret.mjs`, and verify intake. Revoke the old key only after the new key works. The key was created with the provider's one-year default expiry; confirm its exact date in Brevo and arrange renewal. This runbook does not create a renewal reminder.
 
@@ -59,4 +61,4 @@ For a clean reproducible redeploy, check out a known-good commit in a separate w
 
 The original application's separate database, guest identities, full migrations and real manager/member E2E journey remain unprovisioned/unverified. Funnel unit tests do not prove portal authorization or RLS safety. Main-branch protection and repository security settings are unchanged. Dependabot configuration requires the normal default-branch integration before treating it as active.
 
-Confirm data-retention practices and mailbox response ownership. Finalize the business address and opt-in/unsubscribe tests before email activation. Native nurture automation, calendar automation, visitor analytics, prospect research and LinkedIn scheduling are not configured.
+Confirm data-retention practices and mailbox response ownership. The owner-supplied mailing address is now in the draft footers; sender verification and opt-in/unsubscribe tests remain required before email activation. Native nurture automation, calendar automation, visitor analytics, prospect research and LinkedIn scheduling are not configured.
