@@ -20,6 +20,8 @@ node_modules
 .next/
 .DS_Store
 tsconfig.tsbuildinfo
+__pycache__/
+*.pyc
 
 # Large binary assets
 eng.traineddata
@@ -35,6 +37,7 @@ old_schema.sql
 
 # Scratch / one-off debug scripts (not part of the build)
 scratch/
+docs/qa/
 
 # Duplicate lockfile (we use pnpm) — guard against accidental npm/bun installs
 package-lock.json
