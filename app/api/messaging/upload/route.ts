@@ -57,9 +57,10 @@ export async function POST(req: NextRequest) {
   if (file.size > MAX_SIZE) {
     return NextResponse.json({ error: "File too large (max 50 MB)" }, { status: 413 })
   }
-  if (!R2_PUBLIC_URL) {
-    return NextResponse.json({ error: "Storage is not configured correctly (missing R2_PUBLIC_URL)" }, { status: 500 })
-  }
+  const isPublicCdn =
+    Boolean(R2_PUBLIC_URL) &&
+    R2_PUBLIC_URL.startsWith("https://") &&
+    !R2_PUBLIC_URL.includes("r2.cloudflarestorage.com")
 
   const admin = createAdminClient()
   const { data: membership } = await admin
@@ -76,13 +77,17 @@ export async function POST(req: NextRequest) {
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer())
-    const { url } = await putRaw(key, buffer, file.type, {
+    const res = await putRaw(key, buffer, file.type, {
       cacheControl: "public, max-age=31536000, immutable",
     })
 
+    const finalUrl = isPublicCdn && res.url.startsWith("http")
+      ? res.url
+      : `/api/messaging/media/${key}`
+
     return NextResponse.json({
       ok: true,
-      url,
+      url: finalUrl,
       type: inferMessageType(file.type),
       media_metadata: {
         name: file.name,

@@ -106,26 +106,25 @@ export async function GET(
 
   if (!blobUrl) return NextResponse.json({ error: "No file" }, { status: 404 })
 
-  // ?stream=1 — proxy the bytes server-side so the browser never has to follow
-  // a cross-origin redirect to R2 (which would require R2 CORS headers).
-  // Used by the inline PDF / image preview in the UI.
-  const stream = request.nextUrl.searchParams.get("stream") === "1"
-  if (stream && type !== "chat_attachment") {
+  // Always stream the bytes server-side so the browser never has to follow
+  // cross-origin redirects to R2 (which fail on raw S3 endpoints or require R2 CORS headers).
+  // This works identically for inline PDF preview and direct downloads.
+  if (type !== "chat_attachment") {
     const key = blobPathname ?? blobUrl.replace(/^https?:\/\/[^/]+\//, "")
     try {
       const result = await getByKey(key)
-      const contentType = result.blob.contentType || mimeType || "application/octet-stream"
-      const safeName = (fileName ?? "preview").replace(/[^\w.\-]+/g, "_")
+      const contentType = result.blob.contentType || mimeType || "application/pdf"
+      const safeName = (fileName ?? "document").replace(/[^\w.\-]+/g, "_")
       return new NextResponse(result.stream, {
         headers: {
           "Content-Type": contentType,
           "Content-Disposition": `inline; filename="${safeName}"`,
-          "Cache-Control": "private, max-age=60",
+          "Cache-Control": "private, max-age=300",
           "X-Content-Type-Options": "nosniff",
         },
       })
     } catch (err) {
-      console.warn("[download] stream fetch failed, serving fallback PDF:", key, err)
+      console.warn("[download] R2 stream fetch failed, serving fallback PDF:", key, err)
       const fallbackPdf = generateFallbackPdf(fileName ?? "document")
       return new NextResponse(fallbackPdf, {
         headers: {
@@ -137,46 +136,20 @@ export async function GET(
     }
   }
 
-  // For material and submission: redirect to a short-lived presigned GET URL.
-  // This uses blob_pathname (the stored R2 key) directly, bypassing the
-  // PUBLIC_URL prefix-stripping that breaks for rows uploaded under a different
-  // domain/prefix configuration.
-  if (type !== "chat_attachment") {
-    // Prefer the stored pathname; fall back to stripping any leading origin
-    // from the URL so at least something is attempted for very old rows.
-    const key = blobPathname ?? blobUrl.replace(/^https?:\/\/[^/]+\//, "")
-    try {
-      const signedUrl = await presignGet(key)
-      return NextResponse.redirect(signedUrl)
-    } catch (err) {
-      console.warn("[download] presign failed, serving fallback PDF:", key, err)
-      const fallbackPdf = generateFallbackPdf(fileName ?? "document")
-      return new NextResponse(fallbackPdf, {
-        headers: {
-          "Content-Type": "application/pdf",
-          "Content-Disposition": `inline; filename="${(fileName ?? "document").replace(/[^\w.\-]+/g, "_")}.pdf"`,
-          "Cache-Control": "private, max-age=60",
-        },
-      })
-    }
-  }
-
-  // chat_attachment: stream as before — no blob_pathname column available.
+  // chat_attachment: stream from storage, with fallback PDF if missing
   try {
     const blobResult = await getBlob(blobUrl)
     if (!blobResult) {
-      return NextResponse.json({ error: "Blob not found" }, { status: 404 })
+      const fallbackPdf = generateFallbackPdf(fileName ?? "attachment")
+      return new NextResponse(fallbackPdf, {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="${(fileName ?? "attachment").replace(/[^\w.\-]+/g, "_")}.pdf"`,
+          "Cache-Control": "private, max-age=60",
+        },
+      })
     }
 
-    // H-2: Stored-XSS hardening. The MIME type was originally supplied by the
-    // uploader's browser, so we cannot trust it for inline rendering. We:
-    //   1. Reject/normalise dangerous content types (HTML, SVG, XHTML, XML)
-    //      that browsers will execute scripts from.
-    //   2. Force `attachment` disposition for anything that isn't on the
-    //      narrow inline-safe allow-list (PDFs, plain images). PDFs are kept
-    //      inline so the in-app viewer continues to work.
-    //   3. Always emit `X-Content-Type-Options: nosniff` so browsers can't
-    //      override the declared content type via sniffing.
     const rawType = (blobResult.blob.contentType || mimeType || "application/octet-stream").toLowerCase()
     const DANGEROUS = new Set([
       "text/html",
@@ -207,9 +180,14 @@ export async function GET(
       },
     })
   } catch (err) {
-    // H-9: Log raw error server-side; return a generic message so the client
-    // doesn't see R2 / S3 internals or signed-URL details.
-    console.error("[download] blob fetch failed", blobUrl, err)
-    return NextResponse.json({ error: "Upstream fetch failed" }, { status: 502 })
+    console.warn("[download] chat attachment fetch failed, serving fallback PDF:", blobUrl, err)
+    const fallbackPdf = generateFallbackPdf(fileName ?? "attachment")
+    return new NextResponse(fallbackPdf, {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="${(fileName ?? "attachment").replace(/[^\w.\-]+/g, "_")}.pdf"`,
+        "Cache-Control": "private, max-age=60",
+      },
+    })
   }
 }

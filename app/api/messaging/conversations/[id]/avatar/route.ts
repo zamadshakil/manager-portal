@@ -7,7 +7,8 @@ import { createHash } from "node:crypto"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const MAX_BYTES = 500 * 1024 // 500 KB
+const MAX_BYTES = 4 * 1024 * 1024 // 4 MB limit
+
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -52,14 +53,32 @@ export async function POST(req: NextRequest, { params }: Params) {
   const hash = createHash("sha1").update(buf).digest("hex").slice(0, 16)
   const key = `messaging-groups/${id}/${hash}.${ext}`
 
-  try {
-    const { url } = await putRaw(key, buf, file.type, {
-      cacheControl: "public, max-age=31536000, immutable",
-    })
+  const isPublicCdn =
+    process.env.R2_PUBLIC_URL &&
+    process.env.R2_PUBLIC_URL.startsWith("https://") &&
+    !process.env.R2_PUBLIC_URL.includes("r2.cloudflarestorage.com")
 
+  let avatarUrl = `data:${file.type};base64,${buf.toString("base64")}`
+
+  if (isPublicCdn) {
+    try {
+      const { url } = await putRaw(key, buf, file.type, {
+        cacheControl: "public, max-age=31536000, immutable",
+      })
+      if (url && url.startsWith("http")) {
+        avatarUrl = url
+      }
+    } catch (err) {
+      console.warn("[group-avatar] R2 upload failed, using data URL fallback:", err)
+    }
+  } else if (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY) {
+    putRaw(key, buf, file.type).catch(() => {})
+  }
+
+  try {
     const { data, error } = await admin
       .from("conversations")
-      .update({ avatar_url: url })
+      .update({ avatar_url: avatarUrl })
       .eq("id", id)
       .select("id, avatar_url")
       .single()

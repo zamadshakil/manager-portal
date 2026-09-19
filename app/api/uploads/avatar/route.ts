@@ -58,19 +58,27 @@ export async function POST(req: Request) {
   const hash = createHash("sha1").update(buf).digest("hex").slice(0, 16)
   const key = `avatars/${profile.id}/${hash}.webp`
 
-  let url: string
-  if (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY) {
+  const isPublicCdn =
+    process.env.R2_PUBLIC_URL &&
+    process.env.R2_PUBLIC_URL.startsWith("https://") &&
+    !process.env.R2_PUBLIC_URL.includes("r2.cloudflarestorage.com")
+
+  let url = `data:image/webp;base64,${buf.toString("base64")}`
+
+  if (isPublicCdn) {
     try {
       const res = await putRaw(key, buf, "image/webp", {
         cacheControl: "public, max-age=31536000, immutable",
       })
-      url = res.url
+      if (res?.url && res.url.startsWith("http")) {
+        url = res.url
+      }
     } catch (r2Err) {
-      console.warn("[avatar] R2 upload failed, falling back to data URL:", r2Err)
-      url = `data:image/webp;base64,${buf.toString("base64")}`
+      console.warn("[avatar] R2 public CDN upload failed, using data URL:", r2Err)
     }
-  } else {
-    url = `data:image/webp;base64,${buf.toString("base64")}`
+  } else if (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY) {
+    // Best-effort backup to R2 in background
+    putRaw(key, buf, "image/webp").catch(() => {})
   }
 
   try {

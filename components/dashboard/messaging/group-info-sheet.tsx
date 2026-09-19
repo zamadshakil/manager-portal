@@ -225,6 +225,26 @@ export function GroupInfoSheet({ open, conversation, currentUserId, profiles, on
     }
   }
 
+  async function downscaleToWebp(file: File, size = 256, quality = 0.9): Promise<Blob> {
+    const bitmap = await createImageBitmap(file)
+    try {
+      const dim = Math.min(bitmap.width, bitmap.height)
+      const sx = Math.max(0, Math.floor((bitmap.width - dim) / 2))
+      const sy = Math.max(0, Math.floor((bitmap.height - dim) / 2))
+      const canvas = document.createElement("canvas")
+      canvas.width = size
+      canvas.height = size
+      const ctx = canvas.getContext("2d")
+      if (!ctx) throw new Error("Image processing is not supported in this browser")
+      ctx.drawImage(bitmap, sx, sy, dim, dim, 0, 0, size, size)
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", quality))
+      if (!blob) throw new Error("Failed to encode image")
+      return blob
+    } finally {
+      bitmap.close()
+    }
+  }
+
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -234,8 +254,14 @@ export function GroupInfoSheet({ open, conversation, currentUserId, profiles, on
     }
     setUploadingAvatar(true)
     try {
+      let uploadFile: File | Blob = file
+      try {
+        uploadFile = await downscaleToWebp(file, 256, 0.9)
+      } catch (err) {
+        console.warn("[group-info-sheet] Downscale fallback to raw file:", err)
+      }
       const fd = new FormData()
-      fd.append("file", file)
+      fd.append("file", uploadFile instanceof File ? uploadFile : new File([uploadFile], "avatar.webp", { type: "image/webp" }))
       const res = await fetch(`/api/messaging/conversations/${conversation.id}/avatar`, {
         method: "POST",
         body: fd,
