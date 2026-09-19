@@ -58,11 +58,22 @@ export async function POST(req: Request) {
   const hash = createHash("sha1").update(buf).digest("hex").slice(0, 16)
   const key = `avatars/${profile.id}/${hash}.webp`
 
-  try {
-    const { url } = await putRaw(key, buf, "image/webp", {
-      cacheControl: "public, max-age=31536000, immutable",
-    })
+  let url: string
+  if (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY) {
+    try {
+      const res = await putRaw(key, buf, "image/webp", {
+        cacheControl: "public, max-age=31536000, immutable",
+      })
+      url = res.url
+    } catch (r2Err) {
+      console.warn("[avatar] R2 upload failed, falling back to data URL:", r2Err)
+      url = `data:image/webp;base64,${buf.toString("base64")}`
+    }
+  } else {
+    url = `data:image/webp;base64,${buf.toString("base64")}`
+  }
 
+  try {
     const supabase = await createClient()
 
     // Fetch old to delete after successful update
@@ -78,15 +89,15 @@ export async function POST(req: Request) {
       .eq("id", profile.id)
 
     if (error) {
-      try {
-        await del(url)
-      } catch {}
+      if (!url.startsWith("data:")) {
+        try { await del(url) } catch {}
+      }
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
     }
 
     // Best-effort: remove prior object if different
     const prev = (oldRow as { avatar_url: string | null } | null)?.avatar_url
-    if (prev && prev !== url) {
+    if (prev && prev !== url && !prev.startsWith("data:")) {
       try { await del(prev) } catch {}
     }
 

@@ -34,13 +34,21 @@ function loadEnvLocal() {
 }
 loadEnvLocal();
 
-const connectionString = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL;
+const connectionString =
+  process.argv[2] ||
+  process.env.SUPABASE_DB_URL ||
+  process.env.DATABASE_URL ||
+  process.env.POSTGRES_URL;
+
 if (!connectionString) {
-  console.error("❌  Set SUPABASE_DB_URL or DATABASE_URL in .env.local (see .env.local.example).");
+  console.error("❌  Set SUPABASE_DB_URL or DATABASE_URL in .env.local, or pass as argument.");
   process.exit(1);
 }
 
-const pool = new Pool({ connectionString, ssl: false });
+const pool = new Pool({
+  connectionString,
+  ssl: connectionString.includes("railway.internal") ? false : { rejectUnauthorized: false },
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const now = new Date();
@@ -97,11 +105,11 @@ try {
      ORDER BY created_at`,
     [team.id]
   );
-  if (!memberRows.length) {
-    throw new Error(`No members found in team "${team.name}". Add at least one member first.`);
-  }
-  console.log(`  ✅ members (${memberRows.length})  : ${memberRows.map(m => m.email).join(", ")}`);
-  const firstMember = memberRows[0];
+  const firstMember = memberRows.length ? memberRows[0] : admin;
+  const memberLabel = memberRows.length
+    ? `${memberRows.length} (${memberRows.map(m => m.email).join(", ")})`
+    : `None found — using ${admin.email} (main_admin)`;
+  console.log(`  ✅ members      : ${memberLabel}`);
 
   // ── 2. Guard: skip if test data already exists ──────────────────────────────
   const { rows: existCheck } = await client.query(
@@ -409,9 +417,10 @@ A borderline document with mixed relevance should score 40-69.`,
   // ── 5. Create task assignments ──────────────────────────────────────────────
   printSection("4/5  Creating task assignments");
 
-  const allMemberIds = memberRows.map(m => m.id);
+  const allMemberIds = memberRows.length ? memberRows.map(m => m.id) : [firstMember.id];
 
   async function assignAll(taskId, taskTitle, memberIds) {
+    if (!memberIds.length) return;
     const rows = memberIds.map(id => `('${taskId}', '${id}', 'assigned')`).join(", ");
     await client.query(
       `INSERT INTO public.task_assignments (task_id, assignee_id, status)
