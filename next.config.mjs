@@ -25,7 +25,7 @@ const allowedServerActionOrigins = (() => {
 })()
 
 const nextConfig = {
-  output: "standalone",
+  ...(process.env.VERCEL ? {} : { output: "standalone" }),
   // Server Actions in Next.js cap request bodies at 1 MB by default. Our UI
   // advertises 25 MB document uploads, so we raise the limit. Long-term we
   // intend to move to a client-token flow that streams browser→
