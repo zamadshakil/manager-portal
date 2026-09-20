@@ -13,10 +13,17 @@ export function ShowcaseShell({ children }: { children: React.ReactNode }) {
         <nav aria-label="Main navigation">
           <Link href="/showcase#workflows">Who it’s for</Link>
           <Link href="/showcase/calculator">Review calculator</Link>
-          <Link href="/showcase/demo">Try the demo</Link>
+          <Link href="/showcase/demo">Interactive inspector</Link>
+          <a
+            href="https://hirarchia.zamdevai.com/auth/login"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontWeight: 600, color: "var(--sc-accent)" }}
+          >
+            Live Demo ↗
+          </a>
           <Link className="sc-button small" href="/showcase/audit">
-            Request a workflow audit{" "}
-            <ArrowUpRight size={16} aria-hidden="true" />
+            Request an audit <ArrowUpRight size={16} aria-hidden="true" />
           </Link>
         </nav>
       </header>

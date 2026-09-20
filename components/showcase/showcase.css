@@ -778,3 +778,327 @@
     transition: none;
   }
 }
+
+/* ── Visual Workflow Pipeline & Interactive Showcase ── */
+.sc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.sc-badge.success {
+  background: #e6f4ea;
+  color: #137333;
+  border: 1px solid #ceead6;
+}
+.sc-badge.warning {
+  background: #fef7e0;
+  color: #b06000;
+  border: 1px solid #feefc3;
+}
+.sc-badge.info {
+  background: #e8f0fe;
+  color: #1a73e8;
+  border: 1px solid #d2e3fc;
+}
+
+.sc-pipeline-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin: 35px 0 50px;
+}
+.sc-pipeline-card {
+  background: #ffffff;
+  border: 1px solid #d6e3df;
+  border-radius: 12px;
+  padding: 24px;
+  position: relative;
+  box-shadow: 0 4px 16px rgba(18, 39, 36, 0.04);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.sc-pipeline-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(18, 39, 36, 0.08);
+}
+.sc-pipeline-step {
+  font-size: 11px;
+  font-weight: 800;
+  color: #16634d;
+  background: #edf5f1;
+  padding: 3px 8px;
+  border-radius: 4px;
+  display: inline-block;
+  margin-bottom: 12px;
+  letter-spacing: 0.5px;
+}
+.sc-pipeline-card h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+  color: #122724;
+}
+.sc-pipeline-card p {
+  font-size: 13px;
+  color: #50635f;
+  line-height: 1.5;
+  margin: 0 0 16px 0;
+}
+.sc-pipeline-preview {
+  background: #f8fbf9;
+  border: 1px solid #e1ece7;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #122724;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ── Interactive Document Mockup Card ── */
+.sc-doc-mockup {
+  background: #ffffff;
+  border: 1px solid #c8dcd3;
+  border-radius: 14px;
+  box-shadow: 0 20px 40px rgba(22, 99, 77, 0.08);
+  overflow: hidden;
+  margin: 25px 0 45px;
+}
+.sc-doc-header {
+  background: #edf5f1;
+  border-bottom: 1px solid #d6e3df;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.sc-doc-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sc-doc-info h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #122724;
+}
+.sc-doc-info p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #50635f;
+}
+.sc-doc-body {
+  padding: 24px;
+}
+.sc-doc-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.sc-doc-rule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #fbfdfc;
+  border: 1px solid #e5ede9;
+  border-radius: 8px;
+  font-size: 13px;
+  gap: 12px;
+}
+.sc-doc-rule-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+  color: #122724;
+}
+.sc-doc-rule-detail {
+  font-size: 12px;
+  color: #50635f;
+  margin-left: auto;
+  text-align: right;
+}
+.sc-doc-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 18px;
+  border-top: 1px solid #e5ede9;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.sc-doc-action-status {
+  font-size: 13px;
+  color: #50635f;
+}
+
+/* ── Comparison Cards (Before vs After) ── */
+.sc-comp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin: 30px 0;
+}
+.sc-comp-col {
+  padding: 24px;
+  border-radius: 12px;
+  border: 1px solid;
+}
+.sc-comp-col.bad {
+  background: #fffafa;
+  border-color: #f1dede;
+}
+.sc-comp-col.good {
+  background: #f6fbf8;
+  border-color: #cde4d9;
+}
+.sc-comp-col h4 {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sc-comp-col.bad h4 {
+  color: #9c2727;
+}
+.sc-comp-col.good h4 {
+  color: #16634d;
+}
+.sc-comp-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sc-comp-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #334a44;
+}
+
+/* ── Live Portal Launchpad (Super Admin, Manager, Specialist) ── */
+.sc-roles-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin: 30px 0;
+}
+.sc-role-card {
+  background: #ffffff;
+  border: 1px solid #d6e3df;
+  border-radius: 14px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.03);
+  transition: all 0.2s;
+}
+.sc-role-card:hover {
+  border-color: #16634d;
+  box-shadow: 0 8px 24px rgba(22, 99, 77, 0.12);
+  transform: translateY(-2px);
+}
+.sc-role-card h3 {
+  margin: 8px 0 4px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #122724;
+}
+.sc-role-card p {
+  font-size: 13px;
+  color: #50635f;
+  margin: 0 0 16px;
+}
+.sc-role-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: #37534b;
+}
+.sc-role-features li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Call to action banner ── */
+.sc-live-banner {
+  background: linear-gradient(135deg, #0d2822 0%, #16634d 100%);
+  color: #ffffff;
+  border-radius: 16px;
+  padding: 36px 40px;
+  margin: 45px 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  flex-wrap: wrap;
+  box-shadow: 0 20px 40px rgba(13, 40, 34, 0.2);
+}
+.sc-live-banner h3 {
+  font-size: 24px;
+  font-weight: 800;
+  margin: 0 0 8px;
+  color: #ffffff;
+}
+.sc-live-banner p {
+  font-size: 14px;
+  color: #bde0d4;
+  margin: 0;
+  max-width: 550px;
+  line-height: 1.5;
+}
+.sc-live-banner a.sc-btn-live {
+  background: #ffffff;
+  color: #122724;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 14px 28px;
+  border-radius: 8px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.sc-live-banner a.sc-btn-live:hover {
+  background: #e6f4ea;
+  transform: scale(1.02);
+}
+
+/* Responsive adjustments */
+@media (max-width: 900px) {
+  .sc-pipeline-grid,
+  .sc-roles-grid,
+  .sc-comp-grid {
+    grid-template-columns: 1fr;
+  }
+  .sc-live-banner {
+    padding: 28px 24px;
+  }
+}
