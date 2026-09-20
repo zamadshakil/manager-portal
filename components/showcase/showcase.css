@@ -490,6 +490,21 @@
   font-weight: 400;
   min-width: 0;
 }
+.sc-form select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2350635f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px;
+  padding-right: 40px;
+  cursor: pointer;
+}
+.sc-form select option {
+  background: #ffffff;
+  color: #122724;
+}
 .sc-form textarea {
   min-height: 95px;
   resize: vertical;
@@ -497,14 +512,46 @@
 .sc-form .sc-check {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
   font-weight: 400;
+  margin-top: 2px;
 }
+.sc-form .sc-check input[type="checkbox"],
 .sc-check input {
-  margin-top: 5px;
-  width: 17px;
-  height: 17px;
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
+  cursor: pointer;
+  accent-color: #16634d;
+  border: 1.5px solid #7a9a8f;
+  border-radius: 4px;
+}
+.sc-form .sc-check label {
+  display: inline;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: #122724;
+  cursor: pointer;
+  gap: 0;
+}
+.sc-form .sc-check label .sc-text-link {
+  display: inline;
+  text-decoration: underline;
+  color: #16634d;
+  font-weight: 550;
+  margin-left: 2px;
+}
+.sc-form .sc-check label .sc-text-link:hover {
+  color: #122724;
+}
+[data-slot="select-content"] {
+  background-color: #ffffff !important;
+  color: #122724 !important;
+  border: 1px solid #adc5ba !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+  z-index: 99999 !important;
 }
 .sc-form-row {
   display: grid;

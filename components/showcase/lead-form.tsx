@@ -2,14 +2,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 export function LeadForm({
   initialSegment = "agencies",
@@ -104,18 +96,20 @@ export function LeadForm({
           maxLength={150}
         />
       </label>
-      <label htmlFor="segment">Your team’s work</label>
-      <Select value={segment} onValueChange={setSegment}>
-        <SelectTrigger id="segment" className="w-full bg-white">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="agencies">Agency / BPO</SelectItem>
-          <SelectItem value="ecommerce">Ecommerce operations</SelectItem>
-          <SelectItem value="training">Training operations</SelectItem>
-          <SelectItem value="other">Another workflow</SelectItem>
-        </SelectContent>
-      </Select>
+      <label htmlFor="segment">
+        Your team’s work
+        <select
+          id="segment"
+          name="segment"
+          value={segment}
+          onChange={(e) => setSegment(e.target.value)}
+        >
+          <option value="agencies">Agency / BPO</option>
+          <option value="ecommerce">Ecommerce operations</option>
+          <option value="training">Training operations</option>
+          <option value="other">Another workflow</option>
+        </select>
+      </label>
       <div className="sc-form-row">
         <label>
           Team size
@@ -169,10 +163,11 @@ export function LeadForm({
         <input name="website" tabIndex={-1} autoComplete="off" />
       </label>
       <div className="sc-check">
-        <Checkbox
+        <input
+          type="checkbox"
           id="privacy"
           checked={privacy}
-          onCheckedChange={(v) => setPrivacy(v === true)}
+          onChange={(e) => setPrivacy(e.target.checked)}
         />
         <label htmlFor="privacy">
           I understand ZamDev AI will use these details to respond to my
@@ -183,10 +178,11 @@ export function LeadForm({
         </label>
       </div>
       <div className="sc-check">
-        <Checkbox
+        <input
+          type="checkbox"
           id="marketing"
           checked={consent}
-          onCheckedChange={(v) => setConsent(v === true)}
+          onChange={(e) => setConsent(e.target.checked)}
         />
         <label htmlFor="marketing">
           Optional: I’d also like practical workflow tips and Hierarchia
