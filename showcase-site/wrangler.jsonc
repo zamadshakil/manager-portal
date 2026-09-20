@@ -8,7 +8,7 @@
   "workers_dev":true,
   "preview_urls":false,
   "routes":[{"pattern":"showcase.zamdevai.com","custom_domain":true}],
-  "assets":{"directory":"./out","binding":"ASSETS","not_found_handling":"404-page","run_worker_first":["/api/*"]},
+  "assets":{"directory":"./out","binding":"ASSETS","not_found_handling":"404-page","run_worker_first":["/api/*","/showcase/demo*","/auth/login*"]},
   "vars":{"NEXT_PUBLIC_SITE_URL":"https://showcase.zamdevai.com","FUNNEL_ALTERNATE_ORIGIN":"https://hierarchia-showcase.zamadshakil.workers.dev","BREVO_FUNNEL_AUDIT_LIST_ID":"17","FUNNEL_FORMS_ENABLED":"true","NODE_ENV":"production"},
   "ratelimits":[{"name":"LEAD_RATE_LIMIT","namespace_id":"2026090501","simple":{"limit":6,"period":60}}],
   "observability":{"enabled":true,"head_sampling_rate":0.1}

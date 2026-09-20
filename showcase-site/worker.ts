@@ -2,6 +2,17 @@ import { handleLeadRequest } from "../lib/funnel-intake";
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // Direct edge redirect for legacy showcase demo & login routes to real live portal
+    const normalizedPath = url.pathname.replace(/\/+$/, "");
+    if (
+      normalizedPath === "/showcase/demo" ||
+      normalizedPath === "/showcase/demo/member" ||
+      normalizedPath === "/auth/login"
+    ) {
+      return Response.redirect("https://hirarchia.zamdevai.com/auth/login", 307);
+    }
+
     if (url.pathname === "/api/funnel/leads") {
       if (request.method !== "POST")
         return Response.json(
